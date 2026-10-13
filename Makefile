@@ -4,7 +4,7 @@ BINARY  := pgtijori
 VERSION ?= dev
 LDFLAGS := -s -w -X github.com/logisticinfotech/pgtijori/app/version.Version=$(VERSION)
 
-.PHONY: build build-linux test lint vuln testenv testenv-down
+.PHONY: build build-linux test lint vuln testenv integration testenv-down
 
 build:            ## Build for this machine
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -25,6 +25,9 @@ vuln:             ## Check dependencies for known vulnerabilities
 
 testenv:          ## Start the Docker test environment and run the smoke test
 	./test/smoke.sh
+
+integration:      ## Setup, backups, dumps, emails and restores in the Docker test environment
+	./test/integration.sh
 
 testenv-down:     ## Stop the test environment and delete its data
 	docker compose -f test/compose.yaml down -v

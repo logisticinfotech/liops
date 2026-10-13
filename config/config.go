@@ -109,8 +109,11 @@ type S3 struct {
 
 // Email is the SMTP account used for the daily summary and failure alerts.
 type Email struct {
-	SMTPHost string   `yaml:"smtp_host"`
-	SMTPPort int      `yaml:"smtp_port"`
+	SMTPHost string `yaml:"smtp_host"`
+	SMTPPort int    `yaml:"smtp_port"`
+	// TLS is "starttls" (usually port 587) or "tls" (usually port 465). There is no
+	// plaintext option: the SMTP password must never cross the network unencrypted.
+	TLS      string   `yaml:"tls"`
 	Username string   `yaml:"username"`
 	Password string   `yaml:"password"`
 	From     string   `yaml:"from"`
@@ -155,6 +158,7 @@ func Default() *Config {
 		Email: Email{
 			SMTPHost: "smtp.gmail.com",
 			SMTPPort: 587,
+			TLS:      "starttls",
 		},
 		Report: Report{Schedule: "30 7 * * *"}, // 07:30
 	}
@@ -266,7 +270,7 @@ func (c *Config) Validate() error {
 
 	if c.PgBackRest.Stanza == "" {
 		add("pgbackrest.stanza: required (e.g. the server's main database name)")
-	} else if strings.ContainsAny(c.PgBackRest.Stanza, " /\\[]=") {
+	} else if strings.ContainsAny(c.PgBackRest.Stanza, " /\\[]='\"") {
 		add("pgbackrest.stanza: %q contains characters that can't be used in a stanza name", c.PgBackRest.Stanza)
 	}
 	if t := time.Duration(c.PgBackRest.ArchiveTimeout); t < time.Minute || t > 24*time.Hour {
@@ -319,6 +323,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Email.SMTPPort < 1 || c.Email.SMTPPort > 65535 {
 		add("email.smtp_port: %d is not a valid port", c.Email.SMTPPort)
+	}
+	if c.Email.TLS != "starttls" && c.Email.TLS != "tls" {
+		add("email.tls: %q must be starttls (port 587) or tls (port 465)", c.Email.TLS)
 	}
 	if c.Email.Username == "" || c.Email.Password == "" {
 		add("email: username and password are required (for Gmail: the address and an app password)")

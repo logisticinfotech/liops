@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Installed to /etc/logrotate.d/pgtijori. pgtijori keeps the log open, so copytruncate.
+/var/log/pgtijori/pgtijori.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

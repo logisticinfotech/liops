@@ -38,17 +38,26 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   testenv:
-    name: Test environment (PostgreSQL 18 + pgBackRest + MinIO)
+    name: Test environment (PostgreSQL 18 + pgBackRest + MinIO + Mailpit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Smoke test
         run: ./test/smoke.sh
 
+      - name: Integration test
+        run: ./test/integration.sh
+
       - name: Logs on failure
         if: failure()
-        run: docker compose -f test/compose.yaml logs
+        run: |
+          docker compose -f test/compose.yaml logs
+          docker compose -f test/compose.yaml exec -T pg sh -c 'cat /var/log/pgtijori/pgtijori.log /var/log/pgbackrest/*.log' || true
 
       - name: Tear down
         if: always()

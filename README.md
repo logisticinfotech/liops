@@ -4,8 +4,9 @@
 PostgreSQL server. You install one binary on the database server. It then runs two layers of
 backups, shows their status in a small web UI, and emails you a daily summary and any failures.
 
-> **Status: early development.** The configuration file and CLI skeleton are in place. Backups,
-> the UI and the installer are being built. Don't use it in production yet.
+> **Status: early development.** The backup engine works from the command line with a
+> hand-written config: point-in-time backups, per-database dumps, the scheduler and emails.
+> The UI and the installer are being built. Don't use it in production yet.
 
 ## What it does
 
@@ -42,9 +43,16 @@ pgtijori reads `/etc/pgtijori/config.yaml`. The file holds secrets, so pgtijori 
 load it unless it is readable by its owner only (`chmod 600`).
 
 ```bash
-pgtijori config init                  # write a config file with defaults
-pgtijori config validate              # list everything that's missing or wrong
+sudo pgtijori config init             # write a config file with defaults
+sudo pgtijori config validate         # list everything that's missing or wrong
+sudo pgtijori setup                   # configure pgBackRest and WAL archiving (safe to re-run)
+sudo pgtijori run full                # run a job now: full, diff, dumps or report
+sudo pgtijori status                  # recent job runs
 ```
+
+`setup` never restarts PostgreSQL itself. Turning on WAL archiving needs one restart: setup
+tells you the command, and you run `setup` again afterwards. The scheduler runs as the
+systemd service in [deploy/](deploy/) (`pgtijori serve`).
 
 ## Development
 
@@ -54,7 +62,8 @@ Requires Go (see `go.mod`) and, for the test environment, Docker.
 make test         # unit tests
 make lint         # gofmt + go vet
 make build-linux  # static linux/amd64 binary in dist/
-make testenv      # start PostgreSQL 18 + pgBackRest + MinIO and run the smoke test
+make testenv      # start PostgreSQL 18 + pgBackRest + MinIO + Mailpit and run the smoke test
+make integration  # setup, backups, dumps, emails and restores in that environment
 make testenv-down # stop it and delete its data
 ```
 

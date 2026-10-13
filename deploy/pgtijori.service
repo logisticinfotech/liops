@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# pgtijori scheduler. Installed to /etc/systemd/system/pgtijori.service.
+# It runs as root (it writes pgBackRest and PostgreSQL settings during setup) and runs
+# database commands as the postgres user.
+[Unit]
+Description=pgtijori PostgreSQL backups
+Documentation=https://github.com/logisticinfotech/pgtijori
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pgtijori serve
+Restart=on-failure
+RestartSec=10s
+# On stop, running commands get SIGTERM; pgBackRest resumes an interrupted backup next time.
+KillMode=mixed
+TimeoutStopSec=60s
+# No PrivateTmp: pgBackRest keeps its lock files in /tmp/pgbackrest, shared with the
+# archive-push commands that PostgreSQL runs.
+
+[Install]
+WantedBy=multi-user.target

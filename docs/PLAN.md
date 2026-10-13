@@ -396,4 +396,17 @@ Rough estimates for one developer. Each phase ends with a usable result.
 
 - **Phase 0:** implemented. Waiting for its first CI run on GitHub (the Docker test environment
   has only run in CI, not locally).
-- **Next:** Phase 1.
+- **Phase 1:** implemented on branch `phase-1-engine`: `setup`, `run`, `status`, `serve`, all four
+  jobs, streamed dumps with retention and deleted-database handling, and the emails. The
+  integration test (`test/integration.sh`: setup, backups, dumps, a dump restore and a
+  point-in-time restore, emails) still has to pass in CI, then run for a week on a test VM.
+  Notes from building it:
+  - Dump keys are `dumps/<db>/<UTC time>.dump`, with the time to the second so a manual
+    "Run now" doesn't overwrite the night's dump. Roles go to `globals/<time>.sql`.
+  - Retention always keeps a live database's newest dump, even past the retention period, so
+    failed nights can't leave a database with no dump.
+  - A database added to `dumps.exclude` is treated like a deleted one.
+  - The job lock is a file lock (`/var/lib/pgtijori/job.lock`), so `pgtijori run` over SSH
+    queues behind a scheduled job instead of overlapping it.
+  - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
+- **Next:** Phase 2 (UI).

@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/logisticinfotech/pgtijori/app/state"
 	"github.com/logisticinfotech/pgtijori/app/version"
 	"github.com/logisticinfotech/pgtijori/config"
 )
@@ -22,8 +23,15 @@ Usage:
   pgtijori version
   pgtijori config init     [--config PATH] [--force]   write a config file with defaults
   pgtijori config validate [--config PATH]             check a config file
+  pgtijori setup           [flags]                     configure pgBackRest and WAL archiving (safe to re-run)
+  pgtijori run JOB         [flags]                     run a job now: full, diff, dumps or report
+  pgtijori status          [flags]                     show recent job runs
+  pgtijori serve           [flags]                     run the scheduler (the systemd service runs this)
 
-The default config path is ` + config.DefaultPath + `.
+Flags for setup, run, status and serve:
+  --config PATH   default ` + config.DefaultPath + `
+  --state PATH    default ` + state.DefaultPath + `
+  --log PATH      default ` + defaultLogPath + `
 `
 
 func main() {
@@ -50,6 +58,17 @@ func run(args []string, out io.Writer) error {
 			return errors.New("config: expected a subcommand (init or validate)")
 		}
 		return runConfig(args[1], args[2:], out)
+	case "setup":
+		return runSetup(args[1:], out)
+	case "run":
+		if len(args) < 2 {
+			return errors.New("run: expected a job (full, diff, dumps or report)")
+		}
+		return runJob(args[1], args[2:], out)
+	case "status":
+		return runStatus(args[1:], out)
+	case "serve":
+		return runServe(args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q (run 'pgtijori help')", args[0])
 	}

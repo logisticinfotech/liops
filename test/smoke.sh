@@ -9,7 +9,12 @@ cd "$(dirname "$0")"
 
 compose() { docker compose -f compose.yaml "$@"; }
 
-compose up -d --build --wait
+# Not --wait: some Compose versions treat the one-shot services (certs, bucket) as failed.
+compose up -d --build
+for _ in $(seq 1 60); do
+    compose exec -T pg pg_isready -q -h /var/run/postgresql 2>/dev/null && break
+    sleep 1
+done
 
 echo "== PostgreSQL"
 compose exec -T pg runuser -u postgres -- psql -Atc "SELECT version();"

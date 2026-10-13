@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Test environment: PostgreSQL 18 + pgBackRest, and MinIO as an S3 stand-in for R2.
-# Everything here is test-only: credentials are fixed, and the TLS certificate is
-# self-signed and generated when the environment starts (pgBackRest only talks HTTPS).
+# Test environment: PostgreSQL 18 + pgBackRest, MinIO as an S3 stand-in for R2, and
+# Mailpit as an SMTP server that catches every email. Everything here is test-only:
+# credentials are fixed, and the TLS certificate is self-signed and generated when the
+# environment starts. The pg container trusts it, so TLS verification stays on.
 #
 #   ./test/smoke.sh                                    start and check
+#   ./test/integration.sh                              setup, backups, dumps, emails, restores
 #   docker compose -f test/compose.yaml down -v        stop and delete everything
 name: pgtijori-test
 
@@ -21,7 +23,7 @@ services:
         apk add --no-cache openssl >/dev/null &&
         openssl req -x509 -newkey rsa:2048 -nodes -days 30
         -subj /CN=minio
-        -addext "subjectAltName=DNS:minio,DNS:localhost,IP:127.0.0.1"
+        -addext "subjectAltName=DNS:minio,DNS:mailpit,DNS:localhost,IP:127.0.0.1"
         -keyout /certs/private.key -out /certs/public.crt 2>/dev/null &&
         chmod 644 /certs/private.key /certs/public.crt
 
@@ -42,15 +44,51 @@ services:
       certs:
         condition: service_completed_successfully
 
+  # Creates the test bucket (pgBackRest doesn't create buckets), then exits.
+  bucket:
+    image: minio/mc:latest
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        until mc alias set t https://minio:9000 pgtijori-test pgtijori-test-secret --insecure >/dev/null 2>&1;
+        do sleep 1; done;
+        mc mb --ignore-existing --insecure t/pgtijori-test
+    depends_on:
+      - minio
+
+  mailpit:
+    image: axllent/mailpit:v1.21.0
+    environment:
+      MP_SMTP_TLS_CERT: /certs/public.crt
+      MP_SMTP_TLS_KEY: /certs/private.key
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+    volumes:
+      - certs:/certs:ro
+    ports:
+      - "127.0.0.1:8025:8025"
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+
   pg:
     build: docker/pg
+    volumes:
+      - certs:/certs:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "/var/run/postgresql"]
       interval: 2s
       timeout: 3s
       retries: 30
     depends_on:
-      - minio
+      certs:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+      bucket:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
 
 volumes:
   certs:

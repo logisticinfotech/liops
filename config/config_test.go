@@ -130,6 +130,8 @@ func TestValidateChecksSchedulesAndValues(t *testing.T) {
 	c.Storage.S3.Endpoint = "https://example.r2.cloudflarestorage.com"
 	c.Email.To = []string{"not-an-address"}
 	c.Dumps.Labels.Database = "central" // sql missing
+	c.Email.TLS = "none"
+	c.PgBackRest.Stanza = "it's"
 
 	err := c.Validate()
 	if err == nil {
@@ -142,6 +144,8 @@ func TestValidateChecksSchedulesAndValues(t *testing.T) {
 		"storage.s3.endpoint: give the host only",
 		"email.to",
 		"dumps.labels",
+		"email.tls",
+		"pgbackrest.stanza",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected error to mention %q, got:\n%v", want, err)

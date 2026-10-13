@@ -1,6 +1,8 @@
 # Build output
 /pgtijori
 /dist/
+/test/.pgtijori-linux
+/test/.tenant_abc.dump
 
 # Go
 *.test
