@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Not gofmt'ed:"; echo "$unformatted"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test -race -count=1 ./...
+
+      - name: Build static linux/amd64 binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o pgtijori-linux-amd64 .
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  testenv:
+    name: Test environment (PostgreSQL 18 + pgBackRest + MinIO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke test
+        run: ./test/smoke.sh
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f test/compose.yaml logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f test/compose.yaml down -v

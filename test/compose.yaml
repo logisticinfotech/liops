@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test environment: PostgreSQL 18 + pgBackRest, and MinIO as an S3 stand-in for R2.
+# Everything here is test-only: credentials are fixed, and the TLS certificate is
+# self-signed and generated when the environment starts (pgBackRest only talks HTTPS).
+#
+#   ./test/smoke.sh                                    start and check
+#   docker compose -f test/compose.yaml down -v        stop and delete everything
+name: pgtijori-test
+
+services:
+  certs:
+    image: alpine:3.22
+    volumes:
+      - certs:/certs
+    command:
+      - sh
+      - -c
+      - >-
+        [ -f /certs/public.crt ] && exit 0;
+        apk add --no-cache openssl >/dev/null &&
+        openssl req -x509 -newkey rsa:2048 -nodes -days 30
+        -subj /CN=minio
+        -addext "subjectAltName=DNS:minio,DNS:localhost,IP:127.0.0.1"
+        -keyout /certs/private.key -out /certs/public.crt 2>/dev/null &&
+        chmod 644 /certs/private.key /certs/public.crt
+
+  minio:
+    # MinIO no longer publishes new community images; this tag still works for tests.
+    # If it ever disappears, swap in another S3-compatible server.
+    image: minio/minio:latest
+    command: server /data --certs-dir /certs --console-address :9001
+    environment:
+      MINIO_ROOT_USER: pgtijori-test
+      MINIO_ROOT_PASSWORD: pgtijori-test-secret
+    volumes:
+      - certs:/certs:ro
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+
+  pg:
+    build: docker/pg
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/var/run/postgresql"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      - minio
+
+volumes:
+  certs:
