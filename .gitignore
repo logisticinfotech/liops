@@ -1,0 +1,16 @@
+# Build output
+/pgtijori
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Local config files must never be committed: they hold secrets.
+config.yaml
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
