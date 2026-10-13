@@ -26,6 +26,10 @@ Planned for the first release:
 - Restores stay manual and use pgBackRest and `pg_restore` directly. The UI doesn't restore
   anything.
 
+## Design
+
+The design, decisions and build phases are in [docs/PLAN.md](docs/PLAN.md).
+
 ## Requirements
 
 - Ubuntu with systemd (developed on Ubuntu 26.04)
