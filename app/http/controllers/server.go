@@ -136,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /audit", auth(s.auditPage))
 
 	var h http.Handler = mux
+	h = s.currentUser(h)
 	h = middleware.CSRF(h)
 	h = s.Sessions.WithSession(h)
 	h = middleware.SecurityHeaders(h)

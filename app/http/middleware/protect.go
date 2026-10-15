@@ -58,6 +58,7 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // forms are small
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if u, err := url.Parse(origin); err != nil || u.Host != r.Host {
 				http.Error(w, "cross-site request refused", http.StatusForbidden)

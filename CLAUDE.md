@@ -9,8 +9,8 @@ and manages two backup layers to S3-compatible storage: pgBackRest point-in-time
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
-building a new feature. Phases 0 (skeleton) and 1 (engine, CLI, emails) are implemented;
-update §10 "Status" in PLAN.md when a phase lands.
+building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
+"Status" in PLAN.md says what is still untested. Keep it current.
 
 ## Commands
 
@@ -27,8 +27,8 @@ make testenv-down   # tear down and delete volumes
 go test -run TestUIMustListenOnLoopback ./config   # single test
 ```
 
-CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, the static build, govulncheck and
-the Docker smoke test. Releases are built only by `release.yml` on a `v*` tag; version and
+CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, the static build, shellcheck,
+govulncheck, the Docker smoke test and `test/integration.sh`. Releases are built only by `release.yml` on a `v*` tag; version and
 commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 
 ## Architecture and conventions
@@ -63,6 +63,16 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   local file, and a failed dump leaves no object behind. Retention rules are a pure function
   (`pgdump.PlanRetention`) that the job applies. Database names are hex-encoded in discovery
   and passed as `dbname='…'` (`postgres.Conn`), never bare.
+- **Service and UI** (`app/service`, `app/http/{controllers,middleware}`, `resources/`):
+  `serve` runs `service.Service`, which holds the live config, runner and scheduler. Settings
+  saves and the wizard go through it; the scheduler only runs once the config is valid and
+  `state` meta `setup_complete` is set (by `pgtijori setup` or the wizard). Templates are
+  `resources/views/layout.html` + `partials/*.html` + one page each, embedded with `embed`.
+  The strict CSP means no inline scripts or styles. Controller tests
+  (`controllers_test.go`) drive the real handler through `httptest` with a cookie jar and
+  fake runners. Use that harness for new pages.
+- **Setup** steps (`app/setup`) are shared by the CLI and the wizard. Never restart
+  PostgreSQL without the user asking for it.
 - Plain-language failure reasons come from `notify.LikelyReason` (substring table, first match
   wins). Add patterns there when a new kind of error shows up.
 

@@ -409,4 +409,18 @@ Rough estimates for one developer. Each phase ends with a usable result.
   - The job lock is a file lock (`/var/lib/pgtijori/job.lock`), so `pgtijori run` over SSH
     queues behind a scheduled job instead of overlapping it.
   - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
-- **Next:** Phase 2 (UI).
+- **Phase 2:** implemented on branch `phase-2-ui`: all six screens, login with mandatory TOTP,
+  audited downloads, settings that apply without a restart, user management. Notes:
+  - Sessions are in memory: restarting the service logs everyone out. Each user has an
+    `epoch`, bumped on reset or password change, so `pgtijori user reset` from the CLI also
+    ends open sessions.
+  - Besides loopback-only listening, requests whose `Host` isn't localhost are refused
+    (DNS rebinding).
+  - "Run now" is offered for `diff`, `dumps` and `report`. A full backup by hand is
+    `sudo pgtijori run full`.
+- **Phase 3:** implemented on branch `phase-3-installer`: `scripts/install.sh`,
+  `install-system`, setup token, the wizard, `uninstall`, `logs`, `user`, `dumps list|url`,
+  and [restore.md](restore.md). Not yet done: the "done when" test, a fresh Ubuntu VM taken
+  from nothing to its first backup with only the installer and the wizard.
+- **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
+  install.

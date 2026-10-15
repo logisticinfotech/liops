@@ -19,6 +19,9 @@ type User struct {
 	TOTPLastStep int64     `json:"totp_last_step,omitempty"`
 	Created      time.Time `json:"created"`
 	LastLogin    time.Time `json:"last_login,omitzero"`
+	// Epoch goes up on every password change or reset. Sessions remember it, so a
+	// reset, even from the CLI, ends the user's open sessions.
+	Epoch int64 `json:"epoch,omitempty"`
 }
 
 // Enrolled reports whether the user has set up TOTP.

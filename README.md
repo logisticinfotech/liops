@@ -4,9 +4,9 @@
 PostgreSQL server. You install one binary on the database server. It then runs two layers of
 backups, shows their status in a small web UI, and emails you a daily summary and any failures.
 
-> **Status: early development.** The backup engine works from the command line with a
-> hand-written config: point-in-time backups, per-database dumps, the scheduler and emails.
-> The UI and the installer are being built. Don't use it in production yet.
+> **Status: release candidate, not yet tested on a real server.** Every planned v1 feature
+> is built: the backup engine, the UI, the installer and the setup wizard. Try it on a test
+> server first; don't rely on it in production until it has run there for a while.
 
 ## What it does
 
@@ -18,14 +18,36 @@ backups, shows their status in a small web UI, and emails you a daily summary an
 Both layers go to S3-compatible object storage, e.g. Cloudflare R2, AWS S3, Backblaze B2
 or MinIO.
 
-Planned for the first release:
+Also:
 
 - **One-command install** and a browser-based setup wizard
 - **Status UI** (on `127.0.0.1` only, reached through an SSH tunnel): health, backup history,
-  storage use, and per-database dump downloads
+  storage use, per-database dump downloads, settings, and an audit log. Login needs a
+  password and an authenticator code.
 - **Email**: a daily summary and immediate failure alerts, in plain language
-- Restores stay manual and use pgBackRest and `pg_restore` directly. The UI doesn't restore
-  anything.
+- Restores stay manual and use pgBackRest and `pg_restore` directly, following
+  [docs/restore.md](docs/restore.md). The UI doesn't restore anything.
+
+## Install
+
+On the database server (Ubuntu, PostgreSQL 13+ from PGDG):
+
+```bash
+curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
+```
+
+The installer installs pgBackRest if needed, checks the binary against `SHA256SUMS`,
+starts the `pgtijori` service, and prints a one-time setup token. Then, on your own
+computer:
+
+```bash
+ssh -L 8899:127.0.0.1:8899 <you>@<server>
+# open http://localhost:8899 and follow the setup wizard
+```
+
+The wizard asks before it restarts PostgreSQL. Turning on WAL archiving needs one restart,
+a few seconds of downtime. Running the installer again upgrades pgtijori and keeps the
+config. `sudo pgtijori uninstall` removes it and leaves the backups in storage.
 
 ## Design
 
@@ -37,22 +59,22 @@ The design, decisions and build phases are in [docs/PLAN.md](docs/PLAN.md).
 - PostgreSQL 13 or newer from the [PGDG repository](https://www.postgresql.org/download/linux/ubuntu/)
 - An S3-compatible bucket and an SMTP account
 
-## Configuration
+## Command line
 
-pgtijori reads `/etc/pgtijori/config.yaml`. The file holds secrets, so pgtijori refuses to
-load it unless it is readable by its owner only (`chmod 600`).
+The wizard and the Settings page write `/etc/pgtijori/config.yaml`. The file holds secrets,
+so pgtijori refuses to load it unless only its owner can read it (`chmod 600`). Over SSH:
 
 ```bash
-sudo pgtijori config init             # write a config file with defaults
-sudo pgtijori config validate         # list everything that's missing or wrong
-sudo pgtijori setup                   # configure pgBackRest and WAL archiving (safe to re-run)
-sudo pgtijori run full                # run a job now: full, diff, dumps or report
 sudo pgtijori status                  # recent job runs
+sudo pgtijori run full                # run a job now: full, diff, dumps or report
+sudo pgtijori logs -f                 # follow the log
+sudo pgtijori dumps list [DB]         # stored dumps; `dumps url KEY` prints a download link
+sudo pgtijori user reset NAME         # new password and authenticator for a locked-out user
+sudo pgtijori config validate         # check the config after editing it by hand
+sudo pgtijori setup                   # redo the pgBackRest/PostgreSQL settings without the wizard
 ```
 
-`setup` never restarts PostgreSQL itself. Turning on WAL archiving needs one restart: setup
-tells you the command, and you run `setup` again afterwards. The scheduler runs as the
-systemd service in [deploy/](deploy/) (`pgtijori serve`).
+`pgtijori help` lists everything.
 
 ## Development
 

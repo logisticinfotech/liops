@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Pushing a tag like v1.2.0 builds the binary and publishes a GitHub Release with:
-#   pgtijori-linux-amd64, install.sh (once it exists), SHA256SUMS
+#   pgtijori-linux-amd64, install.sh (pinned to this version), SHA256SUMS
 # Releases are only ever created by this workflow.
 name: Release
 
@@ -33,7 +33,7 @@ jobs:
               -X github.com/logisticinfotech/pgtijori/app/version.Version=${GITHUB_REF_NAME} \
               -X github.com/logisticinfotech/pgtijori/app/version.Commit=${GITHUB_SHA::7}" \
             -o dist/pgtijori-linux-amd64 .
-          if [ -f scripts/install.sh ]; then cp scripts/install.sh dist/install.sh; fi
+          sed "s/@VERSION@/${GITHUB_REF_NAME}/" scripts/install.sh > dist/install.sh
           cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
 
       - name: Publish GitHub Release

@@ -26,9 +26,15 @@ Usage:
   pgtijori setup           [flags]                     configure pgBackRest and WAL archiving (safe to re-run)
   pgtijori run JOB         [flags]                     run a job now: full, diff, dumps or report
   pgtijori status          [flags]                     show recent job runs
-  pgtijori serve           [flags]                     run the scheduler (the systemd service runs this)
+  pgtijori serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
+  pgtijori logs            [-n LINES] [-f]             show the log
+  pgtijori dumps list [DB] | url KEY                   list stored dumps; print a 10-minute download link
+  pgtijori setup-token     [--new]                     show the token that unlocks the setup wizard
+  pgtijori user list|add NAME|reset NAME|delete NAME   manage UI users (reset: new password + authenticator)
+  pgtijori install-system                              install the systemd service (install.sh runs this)
+  pgtijori uninstall       [--purge] [--yes]           remove pgtijori; backups in storage are kept
 
-Flags for setup, run, status and serve:
+Flags for setup, run, status, serve, dumps, setup-token and user:
   --config PATH   default ` + config.DefaultPath + `
   --state PATH    default ` + state.DefaultPath + `
   --log PATH      default ` + defaultLogPath + `
@@ -69,6 +75,24 @@ func run(args []string, out io.Writer) error {
 		return runStatus(args[1:], out)
 	case "serve":
 		return runServe(args[1:], out)
+	case "logs":
+		return runLogs(args[1:], out)
+	case "dumps":
+		if len(args) < 2 {
+			return errors.New("dumps: expected list or url")
+		}
+		return runDumps(args[1], args[2:], out)
+	case "setup-token":
+		return runSetupToken(args[1:], out)
+	case "user":
+		if len(args) < 2 {
+			return errors.New("user: expected list, add, reset or delete")
+		}
+		return runUser(args[1], args[2:], out)
+	case "install-system":
+		return runInstallSystem(args[1:], out)
+	case "uninstall":
+		return runUninstall(args[1:], os.Stdin, out)
 	default:
 		return fmt.Errorf("unknown command %q (run 'pgtijori help')", args[0])
 	}

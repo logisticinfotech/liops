@@ -416,3 +416,16 @@ func TestEveryPageRenders(t *testing.T) {
 		t.Error("deleted databases should be marked")
 	}
 }
+
+func TestResetEndsSessions(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	h.login("admin")
+	if code, _, _ := h.get("/"); code != 200 {
+		t.Fatal("should be logged in")
+	}
+	// What `pgtijori user reset admin` does, behind the service's back.
+	h.st.UpdateUser("admin", func(u *state.User) error { u.Epoch++; return nil })
+	if _, loc, _ := h.get("/"); loc != "/login" {
+		t.Errorf("a reset from the CLI must end open sessions, got %q", loc)
+	}
+}

@@ -59,7 +59,8 @@ func openLog(path string, extra ...io.Writer) (io.Writer, func(), error) {
 	return io.MultiWriter(append([]io.Writer{f}, extra...)...), func() { f.Close() }, nil
 }
 
-func requireRoot(what string) error {
+// requireRoot is a variable so tests can run commands as a normal user.
+var requireRoot = func(what string) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("%s needs root (run it with sudo)", what)
 	}

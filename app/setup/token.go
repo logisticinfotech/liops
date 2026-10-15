@@ -55,3 +55,12 @@ func RemoveToken(path string) error {
 	}
 	return nil
 }
+
+// ReadToken returns the stored token, or "" if there is none.
+func ReadToken(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	return strings.TrimSpace(string(data)), err
+}

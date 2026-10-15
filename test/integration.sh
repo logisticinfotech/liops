@@ -94,16 +94,12 @@ step "Write a row after the backup, then archive it (the report runs pgbackrest 
 psql -d tenant_abc -c "CREATE TABLE marker AS SELECT 'after-backup'::text AS v"
 pg pgtijori run report
 
-step "Restore tenant_abc from its dump into a new database"
-key=$(compose run --rm -T --entrypoint sh bucket -c \
-    'mc alias set t https://minio:9000 pgtijori-test pgtijori-test-secret --insecure >/dev/null && mc ls --insecure t/pgtijori-test/dumps/tenant_abc/' \
-    | awk '{print $NF}' | tail -1)
+step "Restore tenant_abc from its dump into a new database (fetched with pgtijori dumps url)"
+pg pgtijori dumps list tenant_abc
+key=$(pg pgtijori dumps list tenant_abc | awk '$1 ~ /^dumps\/tenant_abc\// {print $1}' | tail -1)
 [ -n "$key" ] || fail "no dump of tenant_abc in storage"
-compose run --rm -T --entrypoint sh bucket -c \
-    "mc alias set t https://minio:9000 pgtijori-test pgtijori-test-secret --insecure >/dev/null && mc cat --insecure t/pgtijori-test/dumps/tenant_abc/$key" \
-    > .tenant_abc.dump
-compose cp .tenant_abc.dump pg:/tmp/tenant_abc.dump
-pg chmod 644 /tmp/tenant_abc.dump
+url=$(pg pgtijori dumps url "$key")
+pg curl -fsS -o /tmp/tenant_abc.dump "$url"
 psql -c "CREATE DATABASE tenant_abc_restored"
 pg runuser -u postgres -- pg_restore --no-owner -d tenant_abc_restored /tmp/tenant_abc.dump
 rows=$(psql -d tenant_abc_restored -c "SELECT count(*) FROM orders")
@@ -134,12 +130,28 @@ out=$(pg pgtijori status)
 echo "$out"
 grep -q "tenant_xyz since" <<<"$out" || fail "tenant_xyz should be listed as no longer found"
 
+step "UI: serve answers on loopback and sends a fresh install to the setup wizard"
+pg sh -c 'nohup pgtijori serve >/tmp/serve.log 2>&1 &'
+for _ in $(seq 1 30); do
+    pg curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break
+    sleep 1
+done
+loc=$(pg curl -sS -o /dev/null -w '%{redirect_url}' http://127.0.0.1:8899/login)
+case "$loc" in */setup) echo "login redirects to the wizard (no users yet)" ;; *) pg cat /tmp/serve.log; fail "expected a redirect to /setup, got '$loc'" ;; esac
+code=$(pg curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example.com' http://127.0.0.1:8899/login)
+[ "$code" = 421 ] || fail "a foreign Host header should get 421, got $code"
+token=$(pg pgtijori setup-token)
+[ ${#token} -eq 27 ] || fail "unexpected setup token '$token'"
+pg pgtijori user add admin >/dev/null
+pg pgtijori user list | grep -q admin || fail "user add/list"
+pg pkill -f "pgtijori serve" || true
+
 step "Emails"
 subjects=$(pg curl -fsS http://mailpit:8025/api/v1/messages | grep -o '"Subject":"[^"]*"' || true)
 echo "$subjects"
 grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
 grep -q "database no longer found: tenant_xyz" <<<"$subjects" || fail "no deleted-database email"
 
-rm -f .pgtijori-linux .tenant_abc.dump
+rm -f .pgtijori-linux
 echo
 echo "Integration test passed."

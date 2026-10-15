@@ -242,7 +242,8 @@ func (s *Service) Health(ctx context.Context) *jobs.Health {
 	if s.health != nil && time.Since(s.healthAt) < healthTTL {
 		return s.health
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Not tied to the request: a closed browser tab mustn't cache errors for everyone.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	h := r.Health(ctx, false)
 	s.health, s.healthAt = &h, time.Now()

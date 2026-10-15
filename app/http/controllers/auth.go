@@ -99,6 +99,7 @@ func (s *Server) totp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var enrolled bool
+	var epoch int64
 	errWrong := errors.New("wrong code")
 	err := s.Svc.State.UpdateUser(sess.User, func(u *state.User) error {
 		secret := u.TOTPSecret
@@ -113,6 +114,7 @@ func (s *Server) totp(w http.ResponseWriter, r *http.Request) {
 			return errWrong
 		}
 		enrolled = u.TOTPSecret == ""
+		epoch = u.Epoch
 		u.TOTPSecret, u.TOTPLastStep, u.LastLogin = secret, step, s.Now()
 		return nil
 	})
@@ -130,7 +132,8 @@ func (s *Server) totp(w http.ResponseWriter, r *http.Request) {
 	s.Limiter.Reset(key)
 	user := sess.User
 	s.Sessions.Destroy(w, r)
-	s.Sessions.Start(w, user, middleware.LoggedIn)
+	newSess := s.Sessions.Start(w, user, middleware.LoggedIn)
+	s.Sessions.Update(newSess, func(se *middleware.Session) { se.Epoch = epoch })
 	detail := ""
 	if enrolled {
 		detail = "authenticator enrolled"
@@ -175,10 +178,17 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Svc.State.UpdateUser(sess.User, func(u *state.User) error { u.PasswordHash = hash; return nil }); err != nil {
+	var epoch int64
+	if err := s.Svc.State.UpdateUser(sess.User, func(u *state.User) error {
+		u.PasswordHash = hash
+		u.Epoch++
+		epoch = u.Epoch
+		return nil
+	}); err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	s.Sessions.Update(sess, func(se *middleware.Session) { se.Epoch = epoch })
 	s.Sessions.DestroyUser(sess.User, sess) // log out the user's other browsers
 	s.audit(r, "password", "changed", true)
 	s.flash(w, r, "/account", "Your password was changed. Other sessions were logged out.")
@@ -221,6 +231,7 @@ func (s *Server) resetUser(w http.ResponseWriter, r *http.Request) {
 	}
 	err = s.Svc.State.UpdateUser(username, func(u *state.User) error {
 		u.PasswordHash, u.TOTPSecret, u.TOTPLastStep = hash, "", 0
+		u.Epoch++
 		return nil
 	})
 	if err != nil {
@@ -252,4 +263,21 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// currentUser ends sessions whose user was deleted, reset or changed their password
+// since logging in (possibly from the CLI, which can't reach the in-memory sessions).
+func (s *Server) currentUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := middleware.From(r)
+		if sess != nil && sess.Stage == middleware.LoggedIn {
+			u, err := s.Svc.State.GetUser(sess.User)
+			if err != nil || u.Epoch != sess.Epoch {
+				s.Sessions.Destroy(w, r)
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

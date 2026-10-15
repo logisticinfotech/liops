@@ -30,6 +30,7 @@ type Session struct {
 	ID    string
 	CSRF  string
 	User  string
+	Epoch int64 // the user's state.User.Epoch at login
 	Stage int
 	// PendingTOTP is a TOTP secret shown during enrollment, until a code confirms it.
 	PendingTOTP string
