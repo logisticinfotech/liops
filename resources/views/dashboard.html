@@ -1,0 +1,28 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<div class="health {{.Health}}">
+  <div>{{if eq .Health "OK"}}✅ Backups are healthy{{else if eq .Health "ATTENTION"}}⚠️ Backups need attention{{else}}❌ A backup job failed{{end}}
+  {{if or .Problems .FailedRuns}}<ul>
+    {{range .FailedRuns}}<li><a href="/jobs/{{.ID}}">{{.Job}} {{when .Start}}</a>: {{.Status}} — {{.Error}}</li>{{end}}
+    {{range .Problems}}<li>{{.}}</li>{{end}}
+  </ul>{{end}}</div>
+</div>
+<div class="grid">
+  <div class="stat"><div class="label">Can restore back to</div><div class="value">{{date .Restore}}</div><div class="sub">any moment since then</div></div>
+  <div class="stat"><div class="label">Newest change saved (WAL)</div><div class="value">{{when .LastWAL}}</div></div>
+  <div class="stat"><div class="label">Last full backup</div>
+    {{with .LastFull}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{bytes .Size}} database</div>{{else}}<div class="value">none yet</div>{{end}}</div>
+  <div class="stat"><div class="label">Last differential backup</div>
+    {{with .LastDiff}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{bytes .RepoSize}} stored</div>{{else}}<div class="value">none yet</div>{{end}}</div>
+  <div class="stat"><div class="label">Database dumps</div>
+    {{with .Dumps}}<div class="value">{{$.Data.DumpsOK}} of {{len .Dumps}} databases</div><div class="sub">{{when .Start}} · {{bytes .Size}}</div>{{else}}<div class="value">none yet</div>{{end}}</div>
+  <div class="stat"><div class="label">Storage used</div><div class="value">{{bytes .Storage}}</div><div class="sub">both layers</div></div>
+  <div class="stat"><div class="label">Server disk</div><div class="value">{{if ge .Disk 0}}{{.Disk}}% used{{else}}unknown{{end}}</div></div>
+</div>
+<h2>Next scheduled jobs</h2>
+<div class="table-wrap"><table>
+  <tr><th>Job</th><th>When</th></tr>
+  {{range .Next}}<tr><td>{{.Job}}</td><td>{{datetime .At}}</td></tr>{{else}}<tr><td colspan="2" class="muted">The scheduler isn't running.</td></tr>{{end}}
+</table></div>
+<p class="muted">This page is refreshed from pgBackRest and storage at most once a minute.</p>
+{{end}}{{end}}

@@ -1,0 +1,58 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Settings</h1>
+<p class="muted">Saved settings are used straight away. pgBackRest's config is rewritten with them.</p>
+{{$errs := .Errors}}{{$res := .Result}}
+<form method="post" action="/settings/server" class="panel" id="server">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Server</h2>
+  {{template "errors" index $errs "server"}}{{template "fields-server" .Cfg}}
+  <div class="actions"><button name="action" value="save">Save</button></div>
+</form>
+<form method="post" action="/settings/storage" class="panel" id="storage">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Storage</h2>
+  {{template "errors" index $errs "storage"}}{{if $res}}{{if eq $res.Section "storage"}}{{template "result" $res}}{{end}}{{end}}
+  {{template "fields-storage" .Cfg}}
+  <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
+</form>
+<form method="post" action="/settings/email" class="panel" id="email">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Email</h2>
+  {{template "errors" index $errs "email"}}{{if $res}}{{if eq $res.Section "email"}}{{template "result" $res}}{{end}}{{end}}
+  {{template "fields-email" .Cfg}}
+  <div class="actions"><button name="action" value="test" class="secondary">Send a test email</button><button name="action" value="save">Save</button></div>
+</form>
+<form method="post" action="/settings/schedules" class="panel" id="schedules">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Schedules and point-in-time retention</h2>
+  {{template "errors" index $errs "schedules"}}{{template "fields-schedules" .Cfg}}
+  <div class="actions"><button name="action" value="save">Save</button></div>
+</form>
+<form method="post" action="/settings/dumps" class="panel" id="dumps">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Database dumps</h2>
+  {{template "errors" index $errs "dumps"}}{{template "fields-dumps" .Cfg}}
+  <div class="actions"><button name="action" value="save">Save</button></div>
+</form>
+<form method="post" action="/settings/labels" class="panel" id="labels">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Labels</h2>
+  {{template "errors" index $errs "labels"}}{{if $res}}{{if eq $res.Section "labels"}}{{template "result" $res}}{{end}}{{end}}
+  {{template "fields-labels" .Cfg}}
+  <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
+</form>
+<div class="panel" id="users">
+  <h2 style="margin-top:0">Users</h2>
+  <div class="table-wrap"><table>
+    <tr><th>User</th><th>Authenticator</th><th>Last login</th><th></th></tr>
+    {{range .Users}}<tr><td>{{.Username}}{{if eq .Username $.Data.Me}} <span class="muted">(you)</span>{{end}}</td>
+      <td>{{if .Enrolled}}<span class="badge ok">set up</span>{{else}}<span class="badge pending">at first login</span>{{end}}</td>
+      <td>{{when .LastLogin}}</td>
+      <td>{{if ne .Username $.Data.Me}}
+        <form method="post" action="/users/{{.Username}}/reset" class="inline" data-confirm="Give {{.Username}} a new password and make them set up a new authenticator?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small secondary">Reset</button></form>
+        <form method="post" action="/users/{{.Username}}/delete" class="inline" data-confirm="Delete {{.Username}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small danger">Delete</button></form>
+      {{end}}</td></tr>{{end}}
+  </table></div>
+  <form method="post" action="/users" class="actions">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="text" name="username" placeholder="new username" style="max-width:240px" required>
+    <button class="secondary">Add user</button>
+    <span class="hint">They get a random password, shown once, and set up their authenticator at first login.</span>
+  </form>
+</div>
+{{end}}{{end}}

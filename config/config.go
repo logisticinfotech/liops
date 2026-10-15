@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/mail"
 	"os"
@@ -166,7 +167,23 @@ func Default() *Config {
 
 // Load reads and validates the config file at path.
 func Load(path string) (*Config, error) {
+	cfg, err := LoadDraft(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// LoadDraft reads the config file without validating it, for the setup wizard, which
+// fills it in step by step. A missing file gives the defaults.
+func LoadDraft(path string) (*Config, error) {
 	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Default(), nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +194,7 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := Parse(data)
+	cfg, err := Decode(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -185,18 +202,40 @@ func Load(path string) (*Config, error) {
 }
 
 // Parse decodes YAML on top of the defaults and validates the result.
-// Unknown keys are an error, so a typo can't silently fall back to a default.
 func Parse(data []byte) (*Config, error) {
-	cfg := Default()
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+	cfg, err := Decode(data)
+	if err != nil {
 		return nil, err
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// Decode decodes YAML on top of the defaults without validating.
+// Unknown keys are an error, so a typo can't silently fall back to a default.
+func Decode(data []byte) (*Config, error) {
+	cfg := Default()
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// Clone returns a deep copy, so a draft can be edited without touching the live config.
+func (c *Config) Clone() *Config {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		panic(err) // a Config always marshals
+	}
+	clone, err := Decode(data)
+	if err != nil {
+		panic(err)
+	}
+	return clone
 }
 
 // Save writes the config atomically with mode 0600: a temporary file in the same
@@ -347,6 +386,9 @@ func (c *Config) Validate() error {
 	return errors.Join(errs...)
 }
 
+// CheckUIListen checks ui.listen on its own, for a draft config that isn't complete yet.
+func CheckUIListen(listen string) error { return validateLoopback(listen) }
+
 // validateLoopback makes sure the UI can only be reached from the machine itself.
 func validateLoopback(listen string) error {
 	host, port, err := net.SplitHostPort(listen)
@@ -373,6 +415,8 @@ func checkSchedule(errs *[]error, field, spec string) {
 
 // Duration is a time.Duration written in YAML as "1h", "15m", etc.
 type Duration time.Duration
+
+func (d Duration) String() string { return time.Duration(d).String() }
 
 func (d Duration) MarshalYAML() (any, error) {
 	return time.Duration(d).String(), nil

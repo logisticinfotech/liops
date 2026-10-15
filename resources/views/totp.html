@@ -1,0 +1,20 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}
+{{if .Data.Enroll}}
+<h1>Set up your authenticator</h1>
+<div class="panel">
+  <p>An authenticator code is required at every login. Scan this with an authenticator app (Google Authenticator, 1Password, Bitwarden, …):</p>
+  <img class="qr" src="{{.Data.QR}}" width="240" height="240" alt="QR code for your authenticator app">
+  <p class="muted">Can't scan? Enter this key by hand: <code>{{.Data.Secret}}</code> <button type="button" class="secondary small" data-copy="{{.Data.Secret}}">Copy</button></p>
+{{else}}
+<h1>Authenticator code</h1>
+<div class="panel">
+{{end}}
+  <form method="post" action="/login/totp">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label for="code">The 6-digit code from your app</label>
+    <input type="text" id="code" name="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" autofocus required>
+    <div class="actions"><button>Log in</button></div>
+  </form>
+</div>
+{{end}}

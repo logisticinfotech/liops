@@ -1,0 +1,18 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<p><a href="/jobs">← Jobs</a></p>
+<h1>{{.Job}} #{{.ID}} <span class="badge {{.Status}}">{{.Status}}</span></h1>
+<p>Started {{datetime .Start}} ({{.Trigger}}){{if not .End.IsZero}}, took {{since .Start .End}}{{end}}{{if .Size}} · {{bytes .Size}} written{{end}}</p>
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{if .Dumps}}
+<h2>Databases</h2>
+<div class="table-wrap"><table>
+  <tr><th>Database</th><th>Result</th><th class="num">Size</th><th class="num">Took</th></tr>
+  {{range .Dumps}}<tr><td>{{name .DB .Label}}</td><td>{{if .Error}}<span class="badge failed">failed</span> {{.Error}}{{else}}<span class="badge ok">ok</span>{{end}}</td>
+    <td class="num">{{bytes .Size}}</td><td class="num">{{duration .Duration}}</td></tr>{{end}}
+</table></div>
+{{end}}
+<h2>Output</h2>
+{{if .Output}}<pre>{{.Output}}</pre>{{else}}<p class="muted">{{if eq .Status "running"}}Output appears when the job finishes. This page refreshes.{{else}}No output.{{end}}</p>{{end}}
+<p class="muted">The full output is in /var/log/pgtijori/pgtijori.log (<code>sudo pgtijori logs</code>).</p>
+{{end}}{{end}}

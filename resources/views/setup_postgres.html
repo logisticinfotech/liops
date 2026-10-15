@@ -1,0 +1,22 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
+<h1>PostgreSQL</h1>
+<p>Which cluster should pgtijori back up? Every database in it is included.</p>
+<form method="post" action="/setup/postgres" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+
+  {{range $i, $c := .Data.Clusters}}
+  <label class="cluster"><input type="radio" name="cluster" value="{{$i}}" {{if and (eq $c.Version $.Data.Cfg.Postgres.Version) (eq $c.Name $.Data.Cfg.Postgres.Cluster)}}checked{{end}}>
+    <span><strong>PostgreSQL {{$c.Version}} / {{$c.Name}}</strong> — port {{$c.Port}}, {{$c.Status}}<br><span class="muted mono">{{$c.DataDir}}</span></span></label>
+  {{else}}<div class="error">No PostgreSQL cluster was found. pgtijori needs PostgreSQL 13 or newer from the PGDG repository.</div>{{end}}
+  <div class="row">
+    <div><label for="stanza">pgBackRest stanza name</label>
+      <input type="text" id="stanza" name="stanza" value="{{or .Data.Cfg.PgBackRest.Stanza "main"}}" class="mono">
+      <div class="hint">A short name for this cluster's backups, e.g. the app's name. Don't change it later.</div></div>
+    <div><label for="name">Server name</label>
+      <input type="text" id="name" name="name" value="{{.Data.Cfg.Server.Name}}" placeholder="the hostname">
+      <div class="hint">Shown in emails.</div></div>
+  </div>
+  <div class="actions">{{with .Data.Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}<button>Continue</button></div>
+</form>
+{{end}}

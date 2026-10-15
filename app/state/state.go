@@ -26,6 +26,9 @@ const DefaultPath = "/var/lib/pgtijori/state.db"
 var (
 	bucketRuns    = []byte("runs")
 	bucketDeleted = []byte("deleted")
+	bucketUsers   = []byte("users")
+	bucketAudit   = []byte("audit")
+	bucketMeta    = []byte("meta")
 )
 
 // Run statuses.
@@ -60,6 +63,9 @@ type DumpRun struct {
 	Error    string        `json:"error,omitempty"`
 }
 
+// ErrNotFound is returned when a record doesn't exist.
+var ErrNotFound = errors.New("not found")
+
 // Store is the state file.
 type Store struct {
 	path string
@@ -72,7 +78,7 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{path: path}
 	err := s.update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketRuns, bucketDeleted} {
+		for _, b := range [][]byte{bucketRuns, bucketDeleted, bucketUsers, bucketAudit, bucketMeta} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -154,6 +160,20 @@ func (s *Store) MarkInterrupted(at time.Time) (int, error) {
 		})
 	})
 	return n, err
+}
+
+// GetRun returns one run.
+func (s *Store) GetRun(id uint64) (*Run, error) {
+	var r *Run
+	err := s.view(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketRuns).Get(itob(id))
+		if v == nil {
+			return ErrNotFound
+		}
+		r = &Run{}
+		return json.Unmarshal(v, r)
+	})
+	return r, err
 }
 
 // Runs returns up to limit runs, newest first. An empty job means all jobs.

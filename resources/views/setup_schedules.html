@@ -1,0 +1,10 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
+<h1>Schedules and retention</h1>
+<p>The defaults suit most servers.</p>
+<form method="post" action="/setup/schedules" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+{{template "fields-server" .Data.Cfg}}<h2>Point-in-time backups</h2>{{template "fields-schedules" .Data.Cfg}}<h2>Database dumps</h2>{{template "fields-dumps" .Data.Cfg}}
+  <div class="actions">{{with .Data.Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}<button name="action" value="next">Continue</button></div>
+</form>
+{{end}}

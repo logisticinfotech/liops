@@ -1,0 +1,23 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Jobs</h1>
+<div class="panel">
+  <strong>Run now:</strong>
+  {{range .Manual}}
+  <form method="post" action="/jobs/run" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="job" value="{{.}}">
+    <button class="small {{if has $.Data.Active .}}secondary{{end}}" {{if has $.Data.Active .}}disabled{{end}}>{{.}}{{if has $.Data.Active .}} ({{index $.Data.Active .}}){{end}}</button></form>
+  {{end}}
+  <div class="hint">A job waits if another one is running. Full backups run on their schedule; for one now, use <code>sudo pgtijori run full</code>.</div>
+</div>
+<p>Show: <a href="/jobs" {{if not .Job}}class="badge running"{{end}}>all</a>
+{{range .Names}} · <a href="/jobs?job={{.}}" {{if eq . $.Data.Job}}class="badge running"{{end}}>{{.}}</a>{{end}}</p>
+<div class="table-wrap"><table>
+  <tr><th>#</th><th>Job</th><th>Status</th><th>Started</th><th class="num">Took</th><th>Details</th></tr>
+  {{range .Runs}}<tr>
+    <td><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td>{{.Job}} <span class="muted">{{.Trigger}}</span></td>
+    <td><span class="badge {{.Status}}">{{.Status}}</span></td><td>{{when .Start}}</td>
+    <td class="num">{{if not .End.IsZero}}{{since .Start .End}}{{end}}</td>
+    <td>{{if .Error}}{{.Error}}{{else if .Dumps}}{{len .Dumps}} databases, {{bytes .Size}}{{else if .Size}}{{bytes .Size}}{{end}}</td>
+  </tr>{{else}}<tr><td colspan="6" class="muted">No runs yet.</td></tr>{{end}}
+</table></div>
+{{end}}{{end}}

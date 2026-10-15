@@ -1,0 +1,36 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
+<title>{{.Title}} · pgtijori · {{.Server}}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">pgtijori</a>
+  <span class="server">{{.Server}}</span>
+  {{if and .User (not .Wizard)}}
+  <nav>
+    <a href="/" {{if eq .Nav "dashboard"}}class="active"{{end}}>Dashboard</a>
+    <a href="/backups" {{if eq .Nav "backups"}}class="active"{{end}}>Point-in-time backups</a>
+    <a href="/databases" {{if eq .Nav "databases"}}class="active"{{end}}>Databases</a>
+    <a href="/jobs" {{if eq .Nav "jobs"}}class="active"{{end}}>Jobs</a>
+    <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>Settings</a>
+    <a href="/audit" {{if eq .Nav "audit"}}class="active"{{end}}>Audit log</a>
+  </nav>
+  <a href="/account" class="muted">{{.User}}</a>
+  <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>
+  {{end}}
+</header>
+<main {{if .Wizard}}class="narrow"{{end}}>
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  {{template "content" .}}
+</main>
+<footer>pgtijori {{.Version}} · reached through your SSH tunnel</footer>
+</body>
+</html>{{end}}

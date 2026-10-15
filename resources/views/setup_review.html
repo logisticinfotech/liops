@@ -1,0 +1,28 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}{{with .Data}}
+<h1>Review and apply</h1>
+{{if .Problems}}<div class="error">These settings are still missing or wrong:<pre>{{lines .Problems}}</pre></div>{{end}}
+<div class="panel">
+  <p><strong>PostgreSQL {{.Cfg.Postgres.Version}} / {{.Cfg.Postgres.Cluster}}</strong> on port {{.Cfg.Postgres.Port}}, stanza <code>{{.Cfg.PgBackRest.Stanza}}</code></p>
+  <p><strong>Storage:</strong> bucket <code>{{.Cfg.Storage.S3.Bucket}}</code> at <code>{{.Cfg.Storage.S3.Endpoint}}</code></p>
+  <p><strong>Email:</strong> {{join .Cfg.Email.To ", "}} via {{.Cfg.Email.SMTPHost}}</p>
+  <p><strong>Backups:</strong> full <code>{{.Cfg.PgBackRest.FullSchedule}}</code>, differential <code>{{.Cfg.PgBackRest.DiffSchedule}}</code> ({{.Cfg.Server.Timezone}}), kept {{.Cfg.PgBackRest.RetentionDays}} days, WAL at least every {{.Cfg.PgBackRest.ArchiveTimeout}}</p>
+  <p><strong>Dumps:</strong> {{if .Cfg.Dumps.Enabled}}every night, kept {{.Cfg.Dumps.RetentionDays}} days{{if .Cfg.Dumps.Exclude}}, except {{join .Cfg.Dumps.Exclude ", "}}{{end}}{{else}}off{{end}}</p>
+</div>
+<div class="panel">
+  <p>Applying will:</p>
+  <ol>
+    <li>write <code>/etc/pgbackrest/pgbackrest.conf</code> and a <code>conf.d</code> file that turns on WAL archiving;</li>
+    <li><strong>ask you before restarting PostgreSQL</strong> (a few seconds of downtime, needed once to turn on archiving);</li>
+    <li>create the pgBackRest stanza and check that WAL archiving works;</li>
+    <li>take the first full backup and dump every database;</li>
+    <li>send the “setup finished” email.</li>
+  </ol>
+  <p class="muted">Every step is safe to run again.</p>
+  <form method="post" action="/setup/apply/start" class="actions">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    {{with .Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}
+    <button {{if .Problems}}disabled{{end}}>Apply</button>
+  </form>
+</div>
+{{end}}{{end}}

@@ -1,0 +1,17 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}
+<h1>Your account</h1>
+<form method="post" action="/account/password" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2 style="margin-top:0">Change your password</h2>
+  <label for="current">Current password</label>
+  <input type="password" id="current" name="current" autocomplete="current-password" required>
+  <div class="row">
+    <div><label for="new">New password</label><input type="password" id="new" name="new" autocomplete="new-password" minlength="12" required></div>
+    <div><label for="confirm">New password again</label><input type="password" id="confirm" name="confirm" autocomplete="new-password" minlength="12" required></div>
+  </div>
+  <div class="hint">At least 12 characters. Your other sessions are logged out.</div>
+  <div class="actions"><button>Change password</button></div>
+</form>
+<p class="muted">To set up a new authenticator, ask another user to reset your account in Settings → Users, or run <code>sudo pgtijori user reset {{.User}}</code> on the server.</p>
+{{end}}

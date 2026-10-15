@@ -1,0 +1,26 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Setting up</h1>
+<ul class="task">
+  {{range .Task.Steps}}<li><span class="badge {{.Status}}">{{.Status}}</span> <strong>{{.Title}}</strong>{{if .Detail}}<pre>{{.Detail}}</pre>{{end}}</li>{{end}}
+</ul>
+{{if .Task.Restart}}
+<div class="panel">
+  <p><strong>PostgreSQL needs one restart</strong> to turn on WAL archiving. Connections drop for a few seconds.</p>
+  <form method="post" action="/setup/apply/restart" class="actions">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <button name="restart" value="now" data-confirm="Restart PostgreSQL now? Connections drop for a few seconds.">Restart PostgreSQL now</button>
+    <button name="restart" value="done" class="secondary">I restarted it myself — continue</button>
+  </form>
+  <p class="muted">To restart later yourself, run <code>{{.Task.Restart}}</code> and come back to this page.</p>
+</div>
+{{else if .Task.Running}}<p class="muted">This page refreshes by itself.</p>
+{{else if .Task.Done}}<div class="actions"><a class="button" href="/">Open the dashboard</a></div>
+{{else}}
+<form method="post" action="/setup/apply/start" class="actions">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <a class="button secondary" href="/setup/review">Back to the settings</a>
+  <button>Retry</button>
+</form>
+{{end}}
+{{end}}{{end}}

@@ -44,8 +44,11 @@ const (
 	Manual    = "manual"
 )
 
-// keepRuns is how long job history is kept.
-const keepRuns = 90 * 24 * time.Hour
+// How long job history and the audit log are kept.
+const (
+	keepRuns  = 90 * 24 * time.Hour
+	keepAudit = 365 * 24 * time.Hour
+)
 
 // outputLines is how much command output is kept per run in the state file.
 // The log file has all of it.

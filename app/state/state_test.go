@@ -3,6 +3,7 @@
 package state
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -90,5 +91,66 @@ func TestDeleted(t *testing.T) {
 	}
 	if m, _ := s.Deleted(); len(m) != 0 {
 		t.Errorf("after clear: %v", m)
+	}
+}
+
+func TestUsers(t *testing.T) {
+	s := open(t)
+	if has, _ := s.HasUsers(); has {
+		t.Fatal("a new state has no users")
+	}
+	u := &User{Username: "admin", PasswordHash: []byte("hash"), Created: time.Now()}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateUser(u); !errors.Is(err, ErrExists) {
+		t.Errorf("duplicate user: %v", err)
+	}
+	err := s.UpdateUser("admin", func(u *User) error { u.TOTPSecret = "SECRET"; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetUser("admin")
+	if err != nil || !got.Enrolled() {
+		t.Fatalf("GetUser = %+v, %v", got, err)
+	}
+	if _, err := s.GetUser("nobody"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing user: %v", err)
+	}
+	if has, _ := s.HasUsers(); !has {
+		t.Error("HasUsers should be true")
+	}
+	if err := s.DeleteUser("admin"); err != nil {
+		t.Fatal(err)
+	}
+	if users, _ := s.Users(); len(users) != 0 {
+		t.Errorf("after delete: %+v", users)
+	}
+}
+
+func TestAuditPaging(t *testing.T) {
+	s := open(t)
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		if err := s.Audit(AuditEntry{Time: base.Add(time.Duration(i) * time.Hour), User: "admin", Action: "login", OK: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, _ := s.AuditLog(0, 2)
+	if len(page) != 2 || page[0].ID != 5 || page[1].ID != 4 {
+		t.Fatalf("first page: %+v", page)
+	}
+	page, _ = s.AuditLog(page[1].ID, 10)
+	if len(page) != 3 || page[0].ID != 3 {
+		t.Fatalf("second page: %+v", page)
+	}
+	if n, _ := s.PruneAudit(base.Add(2 * time.Hour)); n != 2 {
+		t.Errorf("pruned %d", n)
+	}
+	if err := s.SetMeta("setup_complete", "yes"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.GetMeta("setup_complete"); v != "yes" {
+		t.Errorf("meta = %q", v)
 	}
 }

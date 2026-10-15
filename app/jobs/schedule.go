@@ -5,41 +5,74 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
 
-// Serve runs the scheduled jobs until ctx is cancelled. Schedules are interpreted in
-// server.timezone. Cancelling ctx stops running commands (pgBackRest resumes an
-// interrupted backup next time).
-func (r *Runner) Serve(ctx context.Context) error {
-	c := cron.New(cron.WithLocation(r.location()))
-	schedules := []struct{ job, spec string }{
+// Scheduler runs full, diff and report on their schedules, in server.timezone.
+type Scheduler struct {
+	c     *cron.Cron
+	names map[cron.EntryID]string
+}
+
+// Next is the next scheduled run of a job.
+type Next struct {
+	Job string
+	At  time.Time
+}
+
+// StartScheduler starts the schedules. Jobs run with ctx: cancelling it stops running
+// commands (pgBackRest resumes an interrupted backup next time).
+func (r *Runner) StartScheduler(ctx context.Context) (*Scheduler, error) {
+	s := &Scheduler{c: cron.New(cron.WithLocation(r.location())), names: map[cron.EntryID]string{}}
+	for _, e := range []struct{ job, spec string }{
 		{Full, r.Cfg.PgBackRest.FullSchedule},
 		{Diff, r.Cfg.PgBackRest.DiffSchedule},
 		{Report, r.Cfg.Report.Schedule},
-	}
-	names := map[cron.EntryID]string{}
-	for _, s := range schedules {
-		job := s.job
-		id, err := c.AddFunc(s.spec, func() {
+	} {
+		job := e.job
+		id, err := s.c.AddFunc(e.spec, func() {
 			if err := r.Run(ctx, job, Scheduled); err != nil && ctx.Err() == nil {
 				r.logf(job, "run failed: %v", err)
 			}
 		})
 		if err != nil {
-			return fmt.Errorf("schedule %s %q: %w", job, s.spec, err)
+			return nil, fmt.Errorf("schedule %s %q: %w", job, e.spec, err)
 		}
-		names[id] = job
+		s.names[id] = job
 	}
+	s.c.Start()
+	for _, n := range s.Next() {
+		r.logf("serve", "next %s at %s", n.Job, n.At.Format("Mon 2 Jan 15:04 MST"))
+	}
+	return s, nil
+}
 
-	c.Start()
-	for _, e := range c.Entries() {
-		r.logf("serve", "next %s at %s", names[e.ID], e.Next.Format("Mon 2 Jan 15:04 MST"))
+// Next lists the next run of each scheduled job, soonest first.
+func (s *Scheduler) Next() []Next {
+	var next []Next
+	for _, e := range s.c.Entries() {
+		next = append(next, Next{Job: s.names[e.ID], At: e.Next})
+	}
+	sort.Slice(next, func(i, j int) bool { return next[i].At.Before(next[j].At) })
+	return next
+}
+
+// Stop stops scheduling new runs. Jobs already running carry on; the returned
+// context is done when they have finished.
+func (s *Scheduler) Stop() context.Context { return s.c.Stop() }
+
+// Serve runs the schedules until ctx is cancelled, then waits for running jobs.
+func (r *Runner) Serve(ctx context.Context) error {
+	s, err := r.StartScheduler(ctx)
+	if err != nil {
+		return err
 	}
 	r.logf("serve", "pgtijori is running (schedules in %s)", r.location())
 	<-ctx.Done()
 	r.logf("serve", "stopping")
-	<-c.Stop().Done() // wait for running jobs to wind down
+	<-s.Stop().Done()
 	return nil
 }

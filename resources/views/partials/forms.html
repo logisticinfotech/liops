@@ -1,0 +1,116 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{/* Settings fields, shared by Settings and the setup wizard. Dot is the config. */}}
+
+{{define "errors"}}{{if .}}<div class="error">Please fix:<pre>{{lines .}}</pre></div>{{end}}{{end}}
+
+{{define "result"}}{{if .}}
+<div class="{{if .OK}}result-ok{{else}}result-bad{{end}}">{{.Message}}{{if .Details}}<pre>{{.Details}}</pre>{{end}}</div>
+{{end}}{{end}}
+
+{{define "fields-server"}}
+<div class="row">
+  <div><label for="name">Server name</label>
+    <input type="text" id="name" name="name" value="{{.Server.Name}}" placeholder="the hostname">
+    <div class="hint">Shown in emails and here. Empty means the hostname.</div></div>
+  <div><label for="timezone">Timezone</label>
+    <input type="text" id="timezone" name="timezone" value="{{.Server.Timezone}}" placeholder="Asia/Kolkata">
+    <div class="hint">Schedules are in this timezone; the server clock can stay on UTC.</div></div>
+</div>
+{{end}}
+
+{{define "fields-storage"}}
+<label for="endpoint">Endpoint</label>
+<input type="text" id="endpoint" name="endpoint" value="{{.Storage.S3.Endpoint}}" placeholder="<account-id>.r2.cloudflarestorage.com">
+<div class="hint">Host only (a port is allowed), without https://. Cloudflare R2, AWS S3, Backblaze B2, Wasabi, MinIO.</div>
+<div class="row">
+  <div><label for="region">Region</label>
+    <input type="text" id="region" name="region" value="{{.Storage.S3.Region}}">
+    <div class="hint">“auto” for Cloudflare R2.</div></div>
+  <div><label for="bucket">Bucket</label>
+    <input type="text" id="bucket" name="bucket" value="{{.Storage.S3.Bucket}}">
+    <div class="hint">One private bucket per server is best.</div></div>
+</div>
+<div class="row">
+  <div><label for="access_key_id">Access key ID</label>
+    <input type="text" id="access_key_id" name="access_key_id" value="{{.Storage.S3.AccessKeyID}}" autocomplete="off"></div>
+  <div><label for="secret_access_key">Secret access key</label>
+    <input type="password" id="secret_access_key" name="secret_access_key" autocomplete="new-password" {{if .Storage.S3.SecretAccessKey}}placeholder="saved — leave empty to keep it"{{end}}></div>
+</div>
+<div class="hint">Use a token scoped to this bucket only, so this server can't touch other servers' backups.</div>
+<label class="check"><input type="checkbox" name="path_style" {{if .Storage.S3.PathStyle}}checked{{end}}> Path-style URLs (needed by R2 and MinIO)</label>
+<label class="check"><input type="checkbox" name="verify_tls" {{if .Storage.S3.VerifyTLS}}checked{{end}}> Verify the TLS certificate (turn off only for test setups)</label>
+{{end}}
+
+{{define "fields-email"}}
+<div class="row">
+  <div><label for="smtp_host">SMTP server</label>
+    <input type="text" id="smtp_host" name="smtp_host" value="{{.Email.SMTPHost}}"></div>
+  <div><label for="smtp_port">Port</label>
+    <input type="number" id="smtp_port" name="smtp_port" value="{{.Email.SMTPPort}}"></div>
+  <div><label for="tls">Encryption</label>
+    <select id="tls" name="tls">
+      <option value="starttls" {{if eq .Email.TLS "starttls"}}selected{{end}}>STARTTLS (usually port 587)</option>
+      <option value="tls" {{if eq .Email.TLS "tls"}}selected{{end}}>TLS (usually port 465)</option>
+    </select></div>
+</div>
+<div class="row">
+  <div><label for="username">Username</label>
+    <input type="text" id="username" name="username" value="{{.Email.Username}}" autocomplete="off"></div>
+  <div><label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="new-password" {{if .Email.Password}}placeholder="saved — leave empty to keep it"{{end}}>
+    <div class="hint">For Gmail, an app password.</div></div>
+</div>
+<label for="from">From</label>
+<input type="text" id="from" name="from" value="{{.Email.From}}" placeholder="backups@example.com">
+<label for="to">To</label>
+<textarea id="to" name="to" placeholder="dev@example.com">{{lines .Email.To}}</textarea>
+<div class="hint">One address per line.</div>
+{{end}}
+
+{{define "fields-schedules"}}
+<div class="hint">Schedules are 5-field cron: minute hour day-of-month month day-of-week. “30 1 * * 0” is Sunday 01:30.</div>
+<div class="row">
+  <div><label for="full_schedule">Full backup</label>
+    <input type="text" id="full_schedule" name="full_schedule" value="{{.PgBackRest.FullSchedule}}" class="mono"></div>
+  <div><label for="diff_schedule">Differential backup</label>
+    <input type="text" id="diff_schedule" name="diff_schedule" value="{{.PgBackRest.DiffSchedule}}" class="mono">
+    <div class="hint">The database dumps run right after each backup.</div></div>
+  <div><label for="report_schedule">Daily summary email</label>
+    <input type="text" id="report_schedule" name="report_schedule" value="{{.Report.Schedule}}" class="mono"></div>
+</div>
+<div class="row">
+  <div><label for="retention_days">Point-in-time retention (days)</label>
+    <input type="number" id="retention_days" name="retention_days" value="{{.PgBackRest.RetentionDays}}">
+    <div class="hint">You can restore to any moment in this window.</div></div>
+  <div><label for="archive_timeout">WAL upload at least every</label>
+    <input type="text" id="archive_timeout" name="archive_timeout" value="{{.PgBackRest.ArchiveTimeout}}" class="mono">
+    <div class="hint">At most this much recent work can be lost. Between 1m and 24h.</div></div>
+</div>
+{{end}}
+
+{{define "fields-dumps"}}
+<label class="check"><input type="checkbox" name="enabled" {{if .Dumps.Enabled}}checked{{end}}> Dump every database each night (downloadable files for single-database restores)</label>
+<div class="row">
+  <div><label for="dump_retention_days">Keep dumps (days)</label>
+    <input type="number" id="dump_retention_days" name="dump_retention_days" value="{{.Dumps.RetentionDays}}"></div>
+  <div><label for="deleted_retention_days">Keep the last dump of a dropped database (days)</label>
+    <input type="number" id="deleted_retention_days" name="deleted_retention_days" value="{{.Dumps.DeletedRetentionDays}}"></div>
+  <div><label for="concurrency">Dumps at a time</label>
+    <input type="number" id="concurrency" name="concurrency" value="{{.Dumps.Concurrency}}" min="1" max="8"></div>
+</div>
+<label for="exclude">Don't dump these databases</label>
+<textarea id="exclude" name="exclude">{{lines .Dumps.Exclude}}</textarea>
+<div class="hint">One per line. They're still in the point-in-time backups.</div>
+{{end}}
+
+{{define "fields-labels"}}
+<div class="hint">Optional: a query that maps database names to friendly labels, e.g. tenant subdomains. It must return two columns: database name, label.</div>
+<label for="labels_database">Run it in database</label>
+<input type="text" id="labels_database" name="labels_database" value="{{.Dumps.Labels.Database}}">
+<label for="labels_sql">Query</label>
+<textarea id="labels_sql" name="labels_sql" placeholder="SELECT db_name, subdomain FROM tenants">{{.Dumps.Labels.SQL}}</textarea>
+{{end}}
+
+{{define "wizard-steps"}}
+<ol class="steps">{{$cur := .Step}}{{range .Steps}}<li {{if eq .ID $cur}}class="current"{{end}}>{{.Title}}</li>{{end}}</ol>
+{{end}}

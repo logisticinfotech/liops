@@ -161,3 +161,31 @@ func TestDumpSettingsIgnoredWhenDisabled(t *testing.T) {
 		t.Fatalf("dump settings should not be validated when dumps are disabled: %v", err)
 	}
 }
+
+func TestLoadDraft(t *testing.T) {
+	dir := t.TempDir()
+	missing, err := LoadDraft(filepath.Join(dir, "missing.yaml"))
+	if err != nil || missing.UI.Listen != "127.0.0.1:8899" {
+		t.Fatalf("a missing file gives the defaults: %v %+v", err, missing)
+	}
+	path := filepath.Join(dir, "draft.yaml")
+	if err := Default().Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDraft(path); err != nil {
+		t.Errorf("an incomplete draft loads: %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Error("Load must still validate")
+	}
+}
+
+func TestClone(t *testing.T) {
+	a := complete()
+	b := a.Clone()
+	b.Email.To[0] = "other@example.com"
+	b.Dumps.Exclude = append(b.Dumps.Exclude, "x")
+	if a.Email.To[0] != "dev@example.com" || len(a.Dumps.Exclude) != 1 {
+		t.Error("Clone must not share slices")
+	}
+}

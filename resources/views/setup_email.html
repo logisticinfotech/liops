@@ -1,0 +1,10 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
+<h1>Email</h1>
+<p>pgtijori emails a daily summary and, straight away, any failure.</p>
+<form method="post" action="/setup/email" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+{{template "fields-email" .Data.Cfg}}
+  <div class="actions">{{with .Data.Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}<button name="action" value="test" class="secondary">Send a test email</button><button name="action" value="next">Continue</button></div>
+</form>
+{{end}}

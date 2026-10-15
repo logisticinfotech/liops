@@ -1,0 +1,23 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Databases</h1>
+<p class="muted">Each database is dumped every night after the backup. Dumps restore with <code>pg_restore</code>. Download links work for 10 minutes and every download is in the audit log.</p>
+<div class="table-wrap"><table>
+  <tr><th>Database</th><th>Last dump</th><th class="num">Size</th><th class="num">Kept</th><th>Status</th><th></th></tr>
+  {{range .Rows}}<tr>
+    <td><a href="/databases/{{.Name}}">{{name .Name .Label}}</a></td>
+    <td>{{with .Last}}{{when .Taken}}{{else}}—{{end}}</td>
+    <td class="num">{{with .Last}}{{bytes .Size}}{{end}}</td>
+    <td class="num">{{.Count}}</td>
+    <td>{{if not .DeletedSince.IsZero}}<span class="badge deleted">no longer found since {{date .DeletedSince}}</span> <span class="muted">dump kept until {{date .KeptUntil}}</span>
+        {{else if .LastError}}<span class="badge failed">last dump failed</span> <span class="muted">{{.LastError}}</span>
+        {{else if .Last}}<span class="badge ok">ok</span>{{end}}</td>
+    <td>{{with .Last}}<form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form>{{end}}</td>
+  </tr>{{else}}<tr><td colspan="6" class="muted">No dumps yet.</td></tr>{{end}}
+</table></div>
+<h2>Roles and tablespaces</h2>
+<p class="muted">Restore these first on a new server (<code>psql -f</code>), so a dump's owners and grants exist.</p>
+{{with .Globals}}{{with index . 0}}
+<form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small secondary">Download the newest ({{when .Modified}}, {{bytes .Size}})</button></form>
+{{end}}{{else}}<p class="muted">None yet.</p>{{end}}
+{{end}}{{end}}

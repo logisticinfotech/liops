@@ -1,0 +1,21 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<p><a href="/databases">← Databases</a></p>
+<h1>{{name .Row.Name .Row.Label}}</h1>
+{{if not .Row.DeletedSince.IsZero}}<div class="note">This database hasn't been found since {{date .Row.DeletedSince}}. Its newest dump is kept until {{date .Row.KeptUntil}}, then deleted.</div>{{end}}
+<h2>Stored dumps</h2>
+<div class="table-wrap"><table>
+  <tr><th>Taken</th><th class="num">Size</th><th>Key</th><th></th></tr>
+  {{range .Dumps}}<tr><td>{{datetime .Taken}}</td><td class="num">{{bytes .Size}}</td><td class="mono muted">{{.Key}}</td>
+    <td><form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form></td></tr>
+  {{else}}<tr><td colspan="4" class="muted">No dumps stored.</td></tr>{{end}}
+</table></div>
+<h2>Recent nights</h2>
+<div class="table-wrap"><table>
+  <tr><th>Run</th><th>Result</th><th class="num">Size</th><th class="num">Took</th></tr>
+  {{range .Runs}}<tr><td>{{datetime .At}}</td><td>{{if .Error}}<span class="badge failed">failed</span> {{.Error}}{{else}}<span class="badge ok">ok</span>{{end}}</td>
+    <td class="num">{{bytes .Size}}</td><td class="num">{{duration .Duration}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">No runs in the history.</td></tr>{{end}}
+</table></div>
+<p class="muted">Restore one into a new database: <code>createdb NEWNAME &amp;&amp; pg_restore --no-owner -d NEWNAME FILE.dump</code></p>
+{{end}}{{end}}

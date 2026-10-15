@@ -1,0 +1,10 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
+<h1>Labels (optional)</h1>
+<p>For apps with a database per tenant: show <code>abc</code> instead of <code>tenant_abc</code> in emails and here.</p>
+<form method="post" action="/setup/labels" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+{{template "fields-labels" .Data.Cfg}}
+  <div class="actions">{{with .Data.Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}<button name="action" value="skip" class="secondary">Skip</button><button name="action" value="test" class="secondary">Test</button><button name="action" value="next">Continue</button></div>
+</form>
+{{end}}

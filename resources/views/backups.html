@@ -1,0 +1,14 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Point-in-time backups</h1>
+<p>Stanza <code>{{.Info.Stanza}}</code> · status: {{.Info.Status}}{{with .Info.WALMax}} · newest WAL segment <code>{{.}}</code>{{end}}</p>
+<p class="muted">These are pgBackRest's files. They restore the whole cluster to any moment in the window, using <code>pgbackrest restore</code> over SSH (see docs/restore.md). They can't be downloaded one by one; for a single database use a dump.</p>
+<div class="table-wrap"><table>
+  <tr><th>Type</th><th>Label</th><th>Started</th><th class="num">Took</th><th class="num">Database size</th><th class="num">Stored</th></tr>
+  {{range .Backups}}<tr>
+    <td><span class="badge {{if .Error}}failed{{else}}ok{{end}}">{{.Type}}</span></td>
+    <td class="mono">{{.Label}}</td><td>{{datetime .Start}}</td>
+    <td class="num">{{duration .Duration}}</td><td class="num">{{bytes .Size}}</td><td class="num">{{bytes .RepoSize}}</td>
+  </tr>{{else}}<tr><td colspan="6" class="muted">No backups yet.</td></tr>{{end}}
+</table></div>
+{{end}}{{end}}

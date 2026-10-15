@@ -1,0 +1,10 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
+<h1>Storage</h1>
+<p>Both backup layers go to one S3-compatible bucket. pgtijori tests it before moving on: it writes, reads back and deletes a small object.</p>
+<form method="post" action="/setup/storage" class="panel">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+{{template "fields-storage" .Data.Cfg}}
+  <div class="actions">{{with .Data.Prev}}<a class="button secondary" href="/setup/{{.}}">Back</a>{{end}}<button name="action" value="test" class="secondary">Test</button><button name="action" value="next">Test and continue</button></div>
+</form>
+{{end}}

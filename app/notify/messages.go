@@ -192,3 +192,21 @@ func Bytes(n int64) string {
 	}
 	return fmt.Sprintf("%.0f %s", v, suffix)
 }
+
+// SetupFinished is sent when the setup wizard has taken the first backup.
+func SetupFinished(server string, backupOK bool, dumped, total int, nextFull time.Time) (subject, body string) {
+	subject = fmt.Sprintf("🎉 %s — pgtijori is set up", server)
+	var b strings.Builder
+	b.WriteString("pgtijori finished setting up backups on " + server + ".\n\n")
+	if backupOK {
+		b.WriteString("First full backup:  done\n")
+	} else {
+		b.WriteString("First full backup:  FAILED (see the Jobs page; it's retried at the next scheduled backup)\n")
+	}
+	fmt.Fprintf(&b, "First dumps:        %d of %d databases\n", dumped, total)
+	if !nextFull.IsZero() {
+		b.WriteString("Next full backup:   " + nextFull.Format("Mon 2 Jan 15:04") + "\n")
+	}
+	b.WriteString("\nFrom now on you get a daily summary, and an email straight away if anything fails.\n")
+	return subject, b.String()
+}

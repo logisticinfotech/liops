@@ -13,6 +13,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/logisticinfotech/pgtijori/app/command"
+	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
 	"github.com/logisticinfotech/pgtijori/app/notify"
 	"github.com/logisticinfotech/pgtijori/app/state"
 )
@@ -20,10 +21,20 @@ import (
 // backupGrace is how late a scheduled backup may finish before the report calls it missing.
 const backupGrace = 6 * time.Hour
 
-// report checks everything and sends the daily summary email.
-func (r *Runner) report(ctx context.Context, run *state.Run) error {
+// Health is the state of both backup layers, for the daily summary and the dashboard.
+type Health struct {
+	Summary notify.Summary
+	Info    *pgbackrest.Info // nil when pgBackRest couldn't be asked
+	Output  string           // details of the problems found
+}
+
+// Health checks the backups. deep also runs pgBackRest check (which archives a WAL
+// segment end to end) and the storage probe: right for the daily report, too heavy
+// for every page view.
+func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	now := r.now()
-	s := notify.Summary{Server: r.Server, Now: now, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}
+	h := Health{Summary: notify.Summary{Server: r.Server, Now: now, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}}
+	s := &h.Summary
 	var output strings.Builder
 	problem := func(format string, args ...any) {
 		p := fmt.Sprintf(format, args...)
@@ -31,21 +42,22 @@ func (r *Runner) report(ctx context.Context, run *state.Run) error {
 		output.WriteString("problem: " + p + "\n")
 	}
 
-	// pgBackRest check archives a WAL segment end to end, so it also proves that
-	// WAL archiving works right now.
-	if out, err := r.Backrest.Check(ctx); err != nil {
-		r.logOutput(Report, out)
-		problem("pgBackRest check failed: %s", notify.LikelyReason(string(out)))
-		output.WriteString(command.LastLines(string(out), 30) + "\n")
-	}
-	if err := r.Store.Probe(ctx); err != nil {
-		problem("storage test failed: %s", notify.LikelyReason(err.Error()))
-		output.WriteString(err.Error() + "\n")
+	if deep {
+		if out, err := r.Backrest.Check(ctx); err != nil {
+			r.logOutput(Report, out)
+			problem("pgBackRest check failed: %s", notify.LikelyReason(string(out)))
+			output.WriteString(command.LastLines(string(out), 30) + "\n")
+		}
+		if err := r.Store.Probe(ctx); err != nil {
+			problem("storage test failed: %s", notify.LikelyReason(err.Error()))
+			output.WriteString(err.Error() + "\n")
+		}
 	}
 
 	if info, err := r.Backrest.Info(ctx); err != nil {
 		problem("couldn't read the backup list: %s", notify.LikelyReason(errOutput(err)))
 	} else {
+		h.Info = info
 		if last := info.Last(""); last != nil {
 			s.LastBackupType, s.LastBackupAt, s.LastBackupDuration = last.Type, last.Stop, last.Duration()
 			s.RestoreFrom = info.RestoreFrom()
@@ -68,7 +80,7 @@ func (r *Runner) report(ctx context.Context, run *state.Run) error {
 	}
 
 	if r.Cfg.Dumps.Enabled {
-		r.summarizeDumps(&s, now, problem)
+		r.summarizeDumps(s, now, problem)
 	}
 
 	if objs, err := r.Store.List(ctx, ""); err != nil {
@@ -89,18 +101,29 @@ func (r *Runner) report(ctx context.Context, run *state.Run) error {
 	if sched, err := cron.ParseStandard(r.Cfg.PgBackRest.FullSchedule); err == nil {
 		s.NextFull = sched.Next(now)
 	}
+	h.Output = output.String()
+	return h
+}
 
+// report checks everything and sends the daily summary email.
+func (r *Runner) report(ctx context.Context, run *state.Run) error {
+	h := r.Health(ctx, true)
+	output := h.Output
+	now := r.now()
 	if n, err := r.State.PruneRuns(now.Add(-keepRuns)); err == nil && n > 0 {
-		output.WriteString(fmt.Sprintf("removed %d job run(s) older than 90 days from the history\n", n))
+		output += fmt.Sprintf("removed %d job run(s) older than 90 days from the history\n", n)
 	}
+	if n, err := r.State.PruneAudit(now.Add(-keepAudit)); err == nil && n > 0 {
+		output += fmt.Sprintf("removed %d audit log entries older than a year\n", n)
+	}
+	run.Output = output
 
-	run.Output = output.String()
-	subject, body := notify.DailySummary(s)
+	subject, body := notify.DailySummary(h.Summary)
 	if err := r.Mail.Send(ctx, subject, body); err != nil {
 		return fmt.Errorf("send daily summary: %w", err)
 	}
-	if len(s.Problems) > 0 {
-		r.logf(Report, "summary sent with %d problem(s)", len(s.Problems))
+	if len(h.Summary.Problems) > 0 {
+		r.logf(Report, "summary sent with %d problem(s)", len(h.Summary.Problems))
 	}
 	return nil
 }

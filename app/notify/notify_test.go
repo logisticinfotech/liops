@@ -111,3 +111,10 @@ func TestFormatting(t *testing.T) {
 		t.Errorf("Name = %q", got)
 	}
 }
+
+func TestSetupFinished(t *testing.T) {
+	subject, body := SetupFinished("db-1", true, 3, 3, time.Date(2026, 10, 18, 1, 30, 0, 0, ist))
+	if subject != "🎉 db-1 — pgtijori is set up" || !strings.Contains(body, "3 of 3 databases") || !strings.Contains(body, "Sun 18 Oct 01:30") {
+		t.Errorf("%s\n%s", subject, body)
+	}
+}

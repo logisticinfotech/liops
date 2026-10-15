@@ -4,9 +4,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,9 +19,11 @@ import (
 
 	"github.com/logisticinfotech/pgtijori/app/command"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
+	"github.com/logisticinfotech/pgtijori/app/http/controllers"
 	"github.com/logisticinfotech/pgtijori/app/jobs"
 	"github.com/logisticinfotech/pgtijori/app/notify"
+	"github.com/logisticinfotech/pgtijori/app/service"
+	"github.com/logisticinfotech/pgtijori/app/setup"
 	"github.com/logisticinfotech/pgtijori/app/state"
 	"github.com/logisticinfotech/pgtijori/config"
 )
@@ -39,7 +44,8 @@ func parseFlags(name string, args []string) (*flag.FlagSet, *paths, error) {
 	return flags, p, flags.Parse(args)
 }
 
-func (p *paths) lock() string { return filepath.Join(filepath.Dir(p.state), "job.lock") }
+func (p *paths) lock() string  { return filepath.Join(filepath.Dir(p.state), "job.lock") }
+func (p *paths) token() string { return filepath.Join(filepath.Dir(p.state), "setup-token") }
 
 // openLog opens the log file for appending. Extra writers (e.g. the terminal) get a copy.
 func openLog(path string, extra ...io.Writer) (io.Writer, func(), error) {
@@ -104,6 +110,8 @@ func runJob(job string, args []string, out io.Writer) error {
 	return r.Run(ctx, job, jobs.Manual)
 }
 
+// runServe runs the scheduler and the UI. Before setup is complete only the UI
+// runs, for the setup wizard.
 func runServe(args []string, out io.Writer) error {
 	_, p, err := parseFlags("serve", args)
 	if err != nil {
@@ -112,14 +120,62 @@ func runServe(args []string, out io.Writer) error {
 	if err := requireRoot("pgtijori serve"); err != nil {
 		return err
 	}
-	r, closeLog, err := newRunner(p, out)
+	st, err := state.Open(p.state)
+	if err != nil {
+		return err
+	}
+	log, closeLog, err := openLog(p.log, out)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 	ctx, stop := signalContext()
 	defer stop()
-	return r.Serve(ctx)
+
+	svc, err := service.New(ctx, p.config, p.lock(), st, log, nil)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+	ui, err := controllers.New(svc, p.token())
+	if err != nil {
+		return err
+	}
+	listen := svc.Config().UI.Listen
+	if err := config.CheckUIListen(listen); err != nil {
+		return fmt.Errorf("ui.listen: %w", err)
+	}
+	srv := &http.Server{
+		Addr:              listen,
+		Handler:           ui.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	errc := make(chan error, 1)
+	go func() { errc <- srv.ListenAndServe() }()
+	fmt.Fprintf(log, "%s [serve] UI on http://%s (open it through an SSH tunnel: ssh -L %s %s@<server>)\n",
+		time.Now().Format("2006-01-02 15:04:05"), listen, tunnelSpec(listen), "<user>")
+
+	select {
+	case err := <-errc:
+		return fmt.Errorf("UI: %w", err)
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
+	return nil
+}
+
+// tunnelSpec is the -L argument for an SSH tunnel to the UI, e.g. 8899:127.0.0.1:8899.
+func tunnelSpec(listen string) string {
+	_, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	return port + ":" + listen
 }
 
 func runStatus(args []string, out io.Writer) error {
@@ -216,60 +272,32 @@ func runSetup(args []string, out io.Writer) error {
 	ctx, stop := signalContext()
 	defer stop()
 
-	run := command.Exec{}
-	engine := pgbackrest.New(cfg, run)
-	cluster := postgres.Cluster{Cfg: cfg.Postgres, Run: run}
-
-	changed, err := engine.WriteConfigs()
+	engine := pgbackrest.New(cfg, command.Exec{})
+	archiving, err := setup.WriteSettings(ctx, engine)
 	if err != nil {
-		return fmt.Errorf("write settings: %w", err)
+		return err
 	}
-	if changed {
-		fmt.Fprintf(out, "Wrote %s and %s.\n", pgbackrest.ConfPath, cluster.ConfDPath())
-	} else {
-		fmt.Fprintln(out, "pgBackRest and PostgreSQL settings are up to date.")
-	}
-
-	mode, err := cluster.Setting(ctx, "archive_mode")
-	if err != nil {
-		return fmt.Errorf("couldn't ask PostgreSQL for its settings (is it running?): %w", err)
-	}
-	if mode != "on" {
-		service := fmt.Sprintf("postgresql@%d-%s", cfg.Postgres.Version, cfg.Postgres.Cluster)
+	fmt.Fprintf(out, "Settings are in %s and %s.\n", pgbackrest.ConfPath, engine.Cluster.ConfDPath())
+	if archiving == setup.NeedsRestart {
 		fmt.Fprintf(out, "\nPostgreSQL must be restarted once to turn on WAL archiving (a few seconds of downtime).\n"+
-			"When it suits you, run:\n\n  sudo systemctl restart %s\n  sudo pgtijori setup\n", service)
+			"When it suits you, run:\n\n  %s\n  sudo pgtijori setup\n", setup.RestartCommand(cfg))
 		return nil
 	}
-	if cmd, err := cluster.Setting(ctx, "archive_command"); err != nil {
-		return err
-	} else if cmd != pgbackrest.ArchiveCommand(cfg) {
-		// archive_command only needs a reload, not a restart.
-		if _, err := cluster.Query(ctx, "postgres", "SELECT pg_reload_conf()"); err != nil {
-			return err
-		}
-		time.Sleep(time.Second)
-		if cmd, err = cluster.Setting(ctx, "archive_command"); err != nil {
-			return err
-		}
-		if cmd != pgbackrest.ArchiveCommand(cfg) {
-			return fmt.Errorf("archive_command is %q, expected %q: is it also set in postgresql.conf or postgresql.auto.conf? (a later setting wins over %s)",
-				cmd, pgbackrest.ArchiveCommand(cfg), cluster.ConfDPath())
-		}
-	}
 
-	for _, step := range []struct {
-		name string
-		fn   func(context.Context) ([]byte, error)
-	}{
-		{"stanza-create", engine.StanzaCreate},
-		{"check", engine.Check},
-	} {
-		fmt.Fprintf(out, "Running pgbackrest %s...\n", step.name)
-		output, err := step.fn(ctx)
-		if err != nil {
-			fmt.Fprint(out, command.LastLines(string(output), 20)+"\n")
-			return fmt.Errorf("pgbackrest %s failed: %s", step.name, notify.LikelyReason(string(output)))
+	fmt.Fprintln(out, "Creating and checking the pgBackRest stanza...")
+	if err := setup.CreateStanza(ctx, engine); err != nil {
+		var se *setup.StepError
+		if errors.As(err, &se) {
+			fmt.Fprintln(out, command.LastLines(se.Output, 20))
 		}
+		return err
+	}
+	st, err := state.Open(p.state)
+	if err != nil {
+		return err
+	}
+	if err := st.SetMeta(service.MetaSetupComplete, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return err
 	}
 	fmt.Fprintln(out, "\nSetup is complete. WAL archiving works.")
 	fmt.Fprintln(out, "Next: take the first full backup and dumps, then start the service:")

@@ -37,7 +37,12 @@ func New(cfg *config.Config, run command.Runner, store storage.Store) *Engine {
 // Key is the object key of a dump of db taken at t: dumps/<db>/<UTC time>.dump.
 // The name is path-escaped, so a "/" in a database name can't change the layout.
 func Key(db string, t time.Time) string {
-	return storage.DumpsPrefix + url.PathEscape(db) + "/" + t.UTC().Format(keyTime) + ".dump"
+	return Prefix(db) + t.UTC().Format(keyTime) + ".dump"
+}
+
+// Prefix is where the dumps of db are stored: dumps/<db>/.
+func Prefix(db string) string {
+	return storage.DumpsPrefix + url.PathEscape(db) + "/"
 }
 
 // ParseKey returns the database and time encoded in a dump key.
