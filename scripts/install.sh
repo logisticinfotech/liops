@@ -37,7 +37,11 @@ if [ "${ID:-}" != "ubuntu" ]; then
     esac
 fi
 
-[ "$(uname -m)" = "x86_64" ] || die "pgtijori is built for x86_64 (amd64) only; this machine is $(uname -m)"
+case "$(uname -m)" in
+    x86_64) ;;
+    aarch64) [ -n "${PGTIJORI_BINARY:-}" ] || die "releases are built for x86_64 (amd64) only; on arm64, build one (GOARCH=arm64) and pass it as PGTIJORI_BINARY" ;;
+    *) die "pgtijori is built for x86_64 (amd64) only; this machine is $(uname -m)" ;;
+esac
 [ -d /run/systemd/system ] || die "pgtijori needs systemd"
 command -v pg_lsclusters >/dev/null || die "PostgreSQL isn't installed (pg_lsclusters is missing). Install PostgreSQL 13 or newer from the PGDG repository first: https://www.postgresql.org/download/linux/ubuntu/"
 [ -n "$(pg_lsclusters --no-header 2>/dev/null)" ] || die "no PostgreSQL cluster found (pg_lsclusters shows none)"
@@ -63,7 +67,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 if [ -n "${PGTIJORI_BINARY:-}" ]; then
     say "Installing the local build $PGTIJORI_BINARY (testing only)"
-    cp "$PGTIJORI_BINARY" "$tmp/pgtijori-linux-amd64"
+    cp "$PGTIJORI_BINARY" "$tmp/pgtijori-linux-amd64" # the name is only used inside this script
 else
     # "@""VERSION@" is split so the release's version substitution leaves it alone.
     if [ "$VERSION" = "@""VERSION@" ] || [ "$VERSION" = "latest" ]; then
