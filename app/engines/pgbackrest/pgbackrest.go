@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/logisticinfotech/pgtijori/app/command"
@@ -117,7 +118,9 @@ func RenderPostgresConf(cfg *config.Config) string {
 }
 
 // WriteConfigs writes pgbackrest.conf (root:postgres 0640, it holds the storage
-// secret) and the PostgreSQL conf.d file (0644). It reports whether either changed.
+// secret) in /etc/pgbackrest (root:postgres 0750), and the PostgreSQL conf.d file
+// (0644). It reports whether anything changed. The postgres user must be able to read
+// pgbackrest.conf: PostgreSQL runs pgBackRest as postgres for every WAL segment.
 func (e *Engine) WriteConfigs() (changed bool, err error) {
 	conf, err := RenderConfig(e.Cfg)
 	if err != nil {
@@ -127,11 +130,16 @@ func (e *Engine) WriteConfigs() (changed bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	c1, err := writeIfChanged(ConfPath, conf, 0o640, gid)
+	// The directory may already exist from the pgBackRest package with a mode that
+	// keeps postgres out, so set it every time.
+	if err := ensureDir(filepath.Dir(ConfPath), 0o750, 0, gid); err != nil {
+		return false, err
+	}
+	c1, err := writeIfChanged(ConfPath, conf, 0o640, 0, gid)
 	if err != nil {
 		return false, err
 	}
-	c2, err := writeIfChanged(e.Cluster.ConfDPath(), RenderPostgresConf(e.Cfg), 0o644, -1)
+	c2, err := writeIfChanged(e.Cluster.ConfDPath(), RenderPostgresConf(e.Cfg), 0o644, 0, -1)
 	if err != nil {
 		return false, err
 	}
@@ -146,15 +154,45 @@ func groupOf(username string) (int, error) {
 	return strconv.Atoi(u.Gid)
 }
 
-// writeIfChanged atomically replaces path with content, owned by root and gid
-// (-1 keeps the default group).
-func writeIfChanged(path, content string, mode os.FileMode, gid int) (bool, error) {
-	if old, err := os.ReadFile(path); err == nil && string(old) == content {
-		info, err := os.Stat(path)
-		if err == nil && info.Mode().Perm() == mode {
-			return false, nil
-		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+// ensureDir creates dir if needed and sets its owner and mode.
+func ensureDir(dir string, mode os.FileMode, uid, gid int) error {
+	if err := os.MkdirAll(dir, mode); err != nil {
+		return err
+	}
+	if err := os.Chown(dir, uid, gid); err != nil {
+		return fmt.Errorf("set the owner of %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		return fmt.Errorf("set the mode of %s: %w", dir, err)
+	}
+	return nil
+}
+
+// upToDate reports whether path already has this content, mode and owner
+// (gid -1: any group).
+func upToDate(path, content string, mode os.FileMode, uid, gid int) (bool, error) {
+	old, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, nil
+	}
+	return string(old) == content && info.Mode().Perm() == mode &&
+		int(st.Uid) == uid && (gid < 0 || int(st.Gid) == gid), nil
+}
+
+// writeIfChanged atomically replaces path with content, owned by uid and gid
+// (-1 keeps the default group), unless it is already exactly that.
+func writeIfChanged(path, content string, mode os.FileMode, uid, gid int) (bool, error) {
+	if ok, err := upToDate(path, content, mode, uid, gid); err != nil || ok {
 		return false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -169,11 +207,9 @@ func writeIfChanged(path, content string, mode os.FileMode, gid int) (bool, erro
 		tmp.Close()
 		return false, err
 	}
-	if gid >= 0 {
-		if err := tmp.Chown(0, gid); err != nil {
-			tmp.Close()
-			return false, err
-		}
+	if err := tmp.Chown(uid, gid); err != nil {
+		tmp.Close()
+		return false, err
 	}
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
@@ -187,6 +223,18 @@ func writeIfChanged(path, content string, mode os.FileMode, gid int) (bool, erro
 		return false, err
 	}
 	return true, os.Rename(tmp.Name(), path)
+}
+
+// CheckReadable makes sure the postgres user can read pgbackrest.conf, so a
+// permission problem shows up here with a clear message rather than as a failed
+// archive_command later.
+func (e *Engine) CheckReadable(ctx context.Context) error {
+	cmd := command.Cmd{Name: "test", Args: []string{"-r", ConfPath}, User: e.Cfg.Postgres.OSUser}
+	if _, err := e.Cluster.Run.Run(ctx, cmd); err != nil {
+		return fmt.Errorf("the %s user can't read %s: every directory above it must be enterable by %s (check: ls -ld /etc %s %s)",
+			e.Cfg.Postgres.OSUser, ConfPath, e.Cfg.Postgres.OSUser, filepath.Dir(ConfPath), ConfPath)
+	}
+	return nil
 }
 
 func (e *Engine) cmd(args ...string) command.Cmd {

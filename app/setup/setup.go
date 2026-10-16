@@ -96,6 +96,9 @@ func WriteSettings(ctx context.Context, e *pgbackrest.Engine) (Archiving, error)
 	if err != nil {
 		return NeedsRestart, fmt.Errorf("write settings: %w", err)
 	}
+	if err := e.CheckReadable(ctx); err != nil {
+		return NeedsRestart, err
+	}
 	mode, err := e.Cluster.Setting(ctx, "archive_mode")
 	if err != nil {
 		return NeedsRestart, fmt.Errorf("couldn't ask PostgreSQL for its settings (is it running?): %w", err)

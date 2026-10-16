@@ -3,6 +3,8 @@
 package pgbackrest
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +133,39 @@ func TestParseInfo(t *testing.T) {
 
 	if _, err := ParseInfo([]byte(infoJSON), "missing"); err == nil {
 		t.Error("an unknown stanza should be an error")
+	}
+}
+
+func TestEnsureDirFixesATightDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "pgbackrest")
+	if err := os.Mkdir(dir, 0o700); err != nil { // as a package might leave it
+		t.Fatal(err)
+	}
+	if err := ensureDir(dir, 0o750, os.Getuid(), os.Getgid()); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o750 {
+		t.Errorf("mode = %o, want 750", info.Mode().Perm())
+	}
+}
+
+func TestWriteIfChangedChecksModeAndOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pgbackrest.conf")
+	uid, gid := os.Getuid(), os.Getgid()
+	if changed, err := writeIfChanged(path, "a", 0o640, uid, gid); err != nil || !changed {
+		t.Fatalf("first write: %v %v", changed, err)
+	}
+	if changed, _ := writeIfChanged(path, "a", 0o640, uid, gid); changed {
+		t.Error("same content, mode and owner: nothing to do")
+	}
+	os.Chmod(path, 0o600) // right content, wrong mode
+	if changed, _ := writeIfChanged(path, "a", 0o640, uid, gid); !changed {
+		t.Error("a wrong mode must be fixed even when the content is right")
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o640 {
+		t.Errorf("mode = %o", info.Mode().Perm())
+	}
+	if ok, _ := upToDate(path, "a", 0o640, uid+1, gid); ok {
+		t.Error("a wrong owner must count as out of date")
 	}
 }
