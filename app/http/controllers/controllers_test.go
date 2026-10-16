@@ -143,7 +143,10 @@ func (h *harness) post(from, path string, form url.Values) (int, string, string)
 		h.t.Fatalf("no CSRF token on %s:\n%s", from, body)
 	}
 	form.Set("csrf", m[1])
-	resp, err := h.client.PostForm(h.srv.URL+path, form)
+	req, _ := http.NewRequest("POST", h.srv.URL+path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", h.srv.URL) // browsers send it on form posts
+	resp, err := h.client.Do(req)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -262,6 +265,9 @@ func TestProtections(t *testing.T) {
 	}
 	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Errorf("CSP = %q", csp)
+	}
+	if rp := resp.Header.Get("Referrer-Policy"); rp == "no-referrer" {
+		t.Error(`Referrer-Policy no-referrer makes browsers send "Origin: null", which breaks every form`)
 	}
 }
 

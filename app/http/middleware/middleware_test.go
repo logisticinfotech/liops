@@ -57,6 +57,12 @@ func TestCSRF(t *testing.T) {
 	if code := post("wrong", ""); code != 403 {
 		t.Errorf("wrong token: %d", code)
 	}
+	if code := post(sess.CSRF, "null"); code != 200 {
+		t.Errorf(`"Origin: null" with a valid token must pass, got %d`, code)
+	}
+	if code := post("wrong", "null"); code != 403 {
+		t.Errorf(`"Origin: null" doesn't excuse a wrong token, got %d`, code)
+	}
 	if code := post(sess.CSRF, "http://evil.example.com"); code != 403 {
 		t.Errorf("foreign origin: %d", code)
 	}

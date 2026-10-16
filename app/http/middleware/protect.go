@@ -17,7 +17,9 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
+		// same-origin, not no-referrer: with no-referrer browsers send "Origin: null" on
+		// form posts, which the CSRF check below would refuse.
+		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
@@ -57,7 +59,9 @@ func CSRF(next http.Handler) http.Handler {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // forms are small
-		if origin := r.Header.Get("Origin"); origin != "" {
+		// "null" means the browser chose not to say (privacy settings, some redirects);
+		// the form token below still has to match.
+		if origin := r.Header.Get("Origin"); origin != "" && origin != "null" {
 			if u, err := url.Parse(origin); err != nil || u.Host != r.Host {
 				http.Error(w, "cross-site request refused", http.StatusForbidden)
 				return
