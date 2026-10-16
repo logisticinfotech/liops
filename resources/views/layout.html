@@ -13,7 +13,7 @@
 <header class="top">
   <a class="brand" href="/">pgtijori</a>
   <span class="server">{{.Server}}</span>
-  {{if and .User (not .Wizard)}}
+  {{if not .Wizard}}
   <nav>
     <a href="/" {{if eq .Nav "dashboard"}}class="active"{{end}}>Dashboard</a>
     <a href="/backups" {{if eq .Nav "backups"}}class="active"{{end}}>Point-in-time backups</a>
@@ -22,8 +22,6 @@
     <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>Settings</a>
     <a href="/audit" {{if eq .Nav "audit"}}class="active"{{end}}>Audit log</a>
   </nav>
-  <a href="/account" class="muted">{{.User}}</a>
-  <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>
   {{end}}
 </header>
 <main {{if .Wizard}}class="narrow"{{end}}>

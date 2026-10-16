@@ -44,8 +44,7 @@ func parseFlags(name string, args []string) (*flag.FlagSet, *paths, error) {
 	return flags, p, flags.Parse(args)
 }
 
-func (p *paths) lock() string  { return filepath.Join(filepath.Dir(p.state), "job.lock") }
-func (p *paths) token() string { return filepath.Join(filepath.Dir(p.state), "setup-token") }
+func (p *paths) lock() string { return filepath.Join(filepath.Dir(p.state), "job.lock") }
 
 // openLog opens the log file for appending. Extra writers (e.g. the terminal) get a copy.
 func openLog(path string, extra ...io.Writer) (io.Writer, func(), error) {
@@ -138,7 +137,7 @@ func runServe(args []string, out io.Writer) error {
 		return err
 	}
 	defer svc.Close()
-	ui, err := controllers.New(svc, p.token())
+	ui, err := controllers.New(svc)
 	if err != nil {
 		return err
 	}

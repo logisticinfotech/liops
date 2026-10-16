@@ -32,43 +32,10 @@ func TestLocalOnly(t *testing.T) {
 	}
 }
 
-func TestSessionLifecycleAndExpiry(t *testing.T) {
-	s := NewSessions()
-	now := time.Date(2026, 10, 15, 10, 0, 0, 0, time.UTC)
-	s.Now = func() time.Time { return now }
-
-	rec := httptest.NewRecorder()
-	sess := s.Start(rec, "admin", LoggedIn)
-	cookie := rec.Result().Cookies()[0]
-	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
-		t.Errorf("cookie flags: %+v", cookie)
-	}
-	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(cookie)
-	if got := s.Get(req); got != sess {
-		t.Fatal("session not found")
-	}
-	now = now.Add(31 * time.Minute)
-	if s.Get(req) != nil {
-		t.Error("an idle session must expire")
-	}
-}
-
-func TestDestroyUser(t *testing.T) {
-	s := NewSessions()
-	a := s.Start(httptest.NewRecorder(), "admin", LoggedIn)
-	s.Start(httptest.NewRecorder(), "admin", LoggedIn)
-	s.Start(httptest.NewRecorder(), "other", LoggedIn)
-	s.DestroyUser("admin", a)
-	if len(s.m) != 2 || s.m[a.ID] == nil {
-		t.Errorf("only the kept admin session and other's session should remain: %d", len(s.m))
-	}
-}
-
 func TestCSRF(t *testing.T) {
 	s := NewSessions()
 	rec := httptest.NewRecorder()
-	sess := s.Start(rec, "", Anonymous)
+	sess := s.Start(rec)
 	cookie := rec.Result().Cookies()[0]
 	h := s.WithSession(CSRF(ok))
 
@@ -95,34 +62,23 @@ func TestCSRF(t *testing.T) {
 	}
 }
 
-func TestRequireLogin(t *testing.T) {
+func TestSessionExpiry(t *testing.T) {
 	s := NewSessions()
+	now := time.Date(2026, 10, 16, 10, 0, 0, 0, time.UTC)
+	s.Now = func() time.Time { return now }
 	rec := httptest.NewRecorder()
-	s.Start(rec, "admin", Password) // TOTP not done yet
+	sess := s.Start(rec)
+	cookie := rec.Result().Cookies()[0]
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("cookie flags: %+v", cookie)
+	}
 	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(rec.Result().Cookies()[0])
-	out := httptest.NewRecorder()
-	s.WithSession(RequireLogin(ok)).ServeHTTP(out, req)
-	if out.Code != http.StatusSeeOther || out.Header().Get("Location") != "/login" {
-		t.Errorf("a half-logged-in session must not get in: %d %s", out.Code, out.Header().Get("Location"))
+	req.AddCookie(cookie)
+	if s.Get(req) != sess {
+		t.Fatal("session not found")
 	}
-}
-
-func TestLimiter(t *testing.T) {
-	l := NewLimiter()
-	now := time.Now()
-	l.Now = func() time.Time { return now }
-	for range 5 {
-		if !l.Allowed("admin") {
-			t.Fatal("blocked too early")
-		}
-		l.Fail("admin")
-	}
-	if l.Allowed("admin") {
-		t.Error("should be blocked after 5 failures")
-	}
-	now = now.Add(16 * time.Minute)
-	if !l.Allowed("admin") {
-		t.Error("the block should end after the window")
+	now = now.Add(13 * time.Hour)
+	if s.Get(req) != nil {
+		t.Error("an idle session must expire")
 	}
 }

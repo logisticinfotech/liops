@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package controllers serves the UI: dashboard, backups, databases and downloads,
-// jobs, settings, audit log, login, and the setup wizard. Pages are rendered on the
+// jobs, settings, audit log, and the setup wizard. There is no login: the UI is
+// only reachable through an SSH tunnel (see PLAN.md §5.2). Pages are rendered on the
 // server with html/template; the UI works without JavaScript.
 package controllers
 
@@ -27,10 +28,7 @@ import (
 type Server struct {
 	Svc      *service.Service
 	Sessions *middleware.Sessions
-	Limiter  *middleware.Limiter
-	// SetupTokenPath holds the one-time token that unlocks the setup wizard.
-	SetupTokenPath string
-	Now            func() time.Time
+	Now      func() time.Time
 	// Cmd runs the wizard's commands (pg_lsclusters, pgbackrest, ...); tests replace it.
 	Cmd command.Runner
 
@@ -39,16 +37,14 @@ type Server struct {
 }
 
 // New parses the templates.
-func New(svc *service.Service, setupTokenPath string) (*Server, error) {
+func New(svc *service.Service) (*Server, error) {
 	s := &Server{
-		Svc:            svc,
-		Sessions:       middleware.NewSessions(),
-		Limiter:        middleware.NewLimiter(),
-		SetupTokenPath: setupTokenPath,
-		Now:            time.Now,
-		Cmd:            command.Exec{},
-		pages:          map[string]*template.Template{},
-		setup:          newWizard(),
+		Svc:      svc,
+		Sessions: middleware.NewSessions(),
+		Now:      time.Now,
+		Cmd:      command.Exec{},
+		pages:    map[string]*template.Template{},
+		setup:    newWizard(),
 	}
 	names, err := fs.Glob(resources.FS, "views/*.html")
 	if err != nil {
@@ -109,34 +105,22 @@ func (s *Server) Handler() http.Handler {
 	static, _ := fs.Sub(resources.FS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 
-	// Reachable without logging in.
-	mux.HandleFunc("GET /login", s.loginPage)
-	mux.HandleFunc("POST /login", s.login)
-	mux.HandleFunc("GET /login/totp", s.totpPage)
-	mux.HandleFunc("POST /login/totp", s.totp)
-	mux.HandleFunc("POST /logout", s.logout)
 	s.setupRoutes(mux)
 
-	auth := func(h http.HandlerFunc) http.Handler { return middleware.RequireLogin(s.requireSetup(h)) }
-	mux.Handle("GET /{$}", auth(s.dashboard))
-	mux.Handle("GET /backups", auth(s.backups))
-	mux.Handle("GET /databases", auth(s.databases))
-	mux.Handle("GET /databases/{db}", auth(s.database))
-	mux.Handle("POST /download", auth(s.download))
-	mux.Handle("GET /jobs", auth(s.jobs))
-	mux.Handle("GET /jobs/{id}", auth(s.job))
-	mux.Handle("POST /jobs/run", auth(s.runNow))
-	mux.Handle("GET /settings", auth(s.settings))
-	mux.Handle("POST /settings/{section}", auth(s.saveSettings))
-	mux.Handle("POST /users", auth(s.addUser))
-	mux.Handle("POST /users/{name}/reset", auth(s.resetUser))
-	mux.Handle("POST /users/{name}/delete", auth(s.deleteUser))
-	mux.Handle("GET /account", middleware.RequireLogin(http.HandlerFunc(s.account)))
-	mux.Handle("POST /account/password", middleware.RequireLogin(http.HandlerFunc(s.changePassword)))
-	mux.Handle("GET /audit", auth(s.auditPage))
+	page := func(h http.HandlerFunc) http.Handler { return s.requireSetup(h) }
+	mux.Handle("GET /{$}", page(s.dashboard))
+	mux.Handle("GET /backups", page(s.backups))
+	mux.Handle("GET /databases", page(s.databases))
+	mux.Handle("GET /databases/{db}", page(s.database))
+	mux.Handle("POST /download", page(s.download))
+	mux.Handle("GET /jobs", page(s.jobs))
+	mux.Handle("GET /jobs/{id}", page(s.job))
+	mux.Handle("POST /jobs/run", page(s.runNow))
+	mux.Handle("GET /settings", page(s.settings))
+	mux.Handle("POST /settings/{section}", page(s.saveSettings))
+	mux.Handle("GET /audit", page(s.auditPage))
 
 	var h http.Handler = mux
-	h = s.currentUser(h)
 	h = middleware.CSRF(h)
 	h = s.Sessions.WithSession(h)
 	h = middleware.SecurityHeaders(h)
@@ -159,7 +143,6 @@ func (s *Server) requireSetup(h http.HandlerFunc) http.HandlerFunc {
 type page struct {
 	Title   string
 	Nav     string // active nav item
-	User    string
 	CSRF    string
 	Flash   string
 	Error   string
@@ -178,9 +161,6 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p p
 	}
 	if sess := middleware.From(r); sess != nil {
 		p.CSRF = sess.CSRF
-		if sess.Stage == middleware.LoggedIn {
-			p.User = sess.User
-		}
 		if f := s.Sessions.TakeFlash(sess); f != "" && p.Flash == "" {
 			p.Flash = f
 		}
@@ -210,18 +190,14 @@ func (s *Server) serverName() string {
 // flash sets a message for the next page and redirects there.
 func (s *Server) flash(w http.ResponseWriter, r *http.Request, to, msg string) {
 	if sess := middleware.From(r); sess != nil {
-		s.Sessions.Update(sess, func(se *middleware.Session) { se.Flash = msg })
+		s.Sessions.SetFlash(sess, msg)
 	}
 	http.Redirect(w, r, to, http.StatusSeeOther)
 }
 
-// audit records an action by the current user.
+// audit records an action taken in the UI.
 func (s *Server) audit(r *http.Request, action, detail string, ok bool) {
-	user := ""
-	if sess := middleware.From(r); sess != nil {
-		user = sess.User
-	}
-	s.auditAs(user, action, detail, ok)
+	s.auditAs("ui", action, detail, ok)
 }
 
 func (s *Server) auditAs(user, action, detail string, ok bool) {
@@ -239,4 +215,11 @@ func (s *Server) logf(format string, args ...any) {
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	s.logf("%s %s: %v", r.Method, r.URL.Path, err)
 	s.render(w, r, "error", page{Title: "Something went wrong", Error: err.Error()})
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

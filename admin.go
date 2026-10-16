@@ -16,7 +16,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/auth"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
 	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
@@ -106,124 +105,6 @@ func runLogs(args []string, out io.Writer) error {
 	}
 }
 
-// runSetupToken prints the token that unlocks the setup wizard, creating one if needed.
-func runSetupToken(args []string, out io.Writer) error {
-	var renew bool
-	var rest []string
-	for _, a := range args {
-		if a == "--new" || a == "-new" {
-			renew = true
-		} else {
-			rest = append(rest, a)
-		}
-	}
-	_, p, err := parseFlags("setup-token", rest)
-	if err != nil {
-		return err
-	}
-	if err := requireRoot("pgtijori setup-token"); err != nil {
-		return err
-	}
-	st, err := state.Open(p.state)
-	if err != nil {
-		return err
-	}
-	if has, err := st.HasUsers(); err != nil {
-		return err
-	} else if has {
-		fmt.Fprintln(out, "Setup already has an admin account, so there's no setup token.")
-		fmt.Fprintln(out, "Locked out? Give a user a new password and authenticator with: sudo pgtijori user reset NAME")
-		return nil
-	}
-	token, err := setup.ReadToken(p.token())
-	if err != nil || token == "" || renew {
-		if token, err = setup.NewToken(p.token()); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintln(out, token)
-	return nil
-}
-
-func runUser(sub string, args []string, out io.Writer) error {
-	flags, p, err := parseFlagsWithArgs("user "+sub, args)
-	if err != nil {
-		return err
-	}
-	if err := requireRoot("pgtijori user"); err != nil {
-		return err
-	}
-	st, err := state.Open(p.state)
-	if err != nil {
-		return err
-	}
-	name := strings.ToLower(flags.Arg(0))
-	if sub != "list" && name == "" {
-		return fmt.Errorf("user %s: expected a username", sub)
-	}
-
-	switch sub {
-	case "list":
-		users, err := st.Users()
-		if err != nil {
-			return err
-		}
-		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "USER\tAUTHENTICATOR\tLAST LOGIN")
-		for _, u := range users {
-			enrolled, last := "at first login", "never"
-			if u.Enrolled() {
-				enrolled = "set up"
-			}
-			if !u.LastLogin.IsZero() {
-				last = u.LastLogin.Format("2006-01-02 15:04")
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", u.Username, enrolled, last)
-		}
-		return tw.Flush()
-	case "add", "reset":
-		pw := auth.RandomPassword()
-		hash, err := auth.HashPassword(pw)
-		if err != nil {
-			return err
-		}
-		if sub == "add" {
-			err = st.CreateUser(&state.User{Username: name, PasswordHash: hash, Created: time.Now()})
-			if errors.Is(err, state.ErrExists) {
-				return fmt.Errorf("%s already exists (to give them a new password: pgtijori user reset %s)", name, name)
-			}
-		} else {
-			err = st.UpdateUser(name, func(u *state.User) error {
-				u.PasswordHash, u.TOTPSecret, u.TOTPLastStep = hash, "", 0
-				u.Epoch++ // ends their open sessions
-				return nil
-			})
-			if errors.Is(err, state.ErrNotFound) {
-				return fmt.Errorf("there's no user %s (pgtijori user list shows them)", name)
-			}
-		}
-		if err != nil {
-			return err
-		}
-		_ = st.Audit(state.AuditEntry{Time: time.Now(), User: "root (CLI)", Action: "user", Detail: sub + " " + name, OK: true})
-		fmt.Fprintf(out, "%s's password: %s\n", name, pw)
-		fmt.Fprintln(out, "They set up their authenticator at the next login, then can change the password under their account.")
-		return nil
-	case "delete":
-		if _, err := st.GetUser(name); err != nil {
-			return fmt.Errorf("there's no user %s", name)
-		}
-		if err := st.DeleteUser(name); err != nil {
-			return err
-		}
-		_ = st.Audit(state.AuditEntry{Time: time.Now(), User: "root (CLI)", Action: "user", Detail: "delete " + name, OK: true})
-		fmt.Fprintf(out, "Deleted %s.\n", name)
-		return nil
-	default:
-		return fmt.Errorf("user: unknown subcommand %q (expected list, add, reset or delete)", sub)
-	}
-}
-
 // parseFlagsWithArgs is parseFlags for commands that take a positional argument
 // before or after the flags.
 func parseFlagsWithArgs(name string, args []string) (*flag.FlagSet, *paths, error) {
@@ -284,23 +165,8 @@ func runInstallSystem(args []string, out io.Writer) error {
 		return err
 	}
 
-	st, err := state.Open(state.DefaultPath)
-	if err != nil {
-		return err
-	}
-	hasUsers, err := st.HasUsers()
-	if err != nil {
-		return err
-	}
-	var token string
-	if !hasUsers {
-		tokenPath := (&paths{state: state.DefaultPath}).token()
-		if token, _ = setup.ReadToken(tokenPath); token == "" {
-			if token, err = setup.NewToken(tokenPath); err != nil {
-				return err
-			}
-		}
-	}
+	// Left behind by early versions, which had a login and a setup token.
+	_ = os.Remove(stateDir + "/setup-token")
 
 	upgrade := exec.Command("systemctl", "is-active", "--quiet", "pgtijori").Run() == nil
 	if upgrade {
@@ -320,21 +186,16 @@ func runInstallSystem(args []string, out io.Writer) error {
 		verb = "upgraded and restarted; the config and backups are unchanged"
 	}
 	fmt.Fprintf(out, "\n%s is %s.\n", version.String(), verb)
-	if token != "" {
-		fmt.Fprintf(out, `
-Next, open the setup wizard. On your own computer, run:
+	fmt.Fprintf(out, `
+To open it, run this on your own computer and leave it open:
 
   ssh -L %s <you>@<this server>
 
-leave it open, and browse to http://localhost:%s
-
-The wizard asks for this one-time setup token:
-
-  %s
-
-(To show it again: sudo pgtijori setup-token)
-`, tunnelSpec(listen), portOf(listen), token)
+then browse to http://localhost:%s`, tunnelSpec(listen), portOf(listen))
+	if !upgrade {
+		fmt.Fprint(out, " and follow the setup wizard.")
 	}
+	fmt.Fprintln(out, "\n\nThere's no login: anyone who can open that tunnel can use it.")
 	return nil
 }
 

@@ -26,7 +26,6 @@ const DefaultPath = "/var/lib/pgtijori/state.db"
 var (
 	bucketRuns    = []byte("runs")
 	bucketDeleted = []byte("deleted")
-	bucketUsers   = []byte("users")
 	bucketAudit   = []byte("audit")
 	bucketMeta    = []byte("meta")
 )
@@ -78,7 +77,7 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{path: path}
 	err := s.update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketRuns, bucketDeleted, bucketUsers, bucketAudit, bucketMeta} {
+		for _, b := range [][]byte{bucketRuns, bucketDeleted, bucketAudit, bucketMeta} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}

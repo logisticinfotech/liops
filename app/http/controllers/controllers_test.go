@@ -11,16 +11,12 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pquerna/otp/totp"
-
-	"github.com/logisticinfotech/pgtijori/app/auth"
 	"github.com/logisticinfotech/pgtijori/app/command"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
@@ -34,11 +30,6 @@ import (
 	"github.com/logisticinfotech/pgtijori/config"
 )
 
-func TestMain(m *testing.M) {
-	auth.Cost = 4 // bcrypt's minimum, so tests are fast
-	os.Exit(m.Run())
-}
-
 type harness struct {
 	t          *testing.T
 	srv        *httptest.Server
@@ -48,7 +39,6 @@ type harness struct {
 	store      *storage.Memory
 	client     *http.Client
 	configPath string
-	tokenPath  string
 }
 
 func validConfig() *config.Config {
@@ -87,7 +77,7 @@ func fakeServer(program string, c command.Cmd) ([]byte, error) {
 func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 	t.Helper()
 	dir := t.TempDir()
-	h := &harness{t: t, configPath: filepath.Join(dir, "config.yaml"), tokenPath: filepath.Join(dir, "setup-token"), store: storage.NewMemory()}
+	h := &harness{t: t, configPath: filepath.Join(dir, "config.yaml"), store: storage.NewMemory()}
 	if err := cfg.Save(h.configPath); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +109,7 @@ func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 	t.Cleanup(h.svc.Close)
 	h.svc.WriteSettings = func(context.Context, *config.Config) (setup.Archiving, error) { return setup.Ready, nil }
 
-	h.ui, err = New(h.svc, h.tokenPath)
+	h.ui, err = New(h.svc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,122 +152,8 @@ func (h *harness) post(from, path string, form url.Values) (int, string, string)
 	return resp.StatusCode, resp.Header.Get("Location"), string(b)
 }
 
-const testPassword = "correct-horse-battery"
-
-// login creates a user with an enrolled authenticator and logs in.
-func (h *harness) login(username string) {
-	h.t.Helper()
-	key, err := auth.NewEnrollment("db-test", username, "")
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	hash, _ := auth.HashPassword(testPassword)
-	if err := h.st.CreateUser(&state.User{Username: username, PasswordHash: hash, TOTPSecret: key.Secret, Created: time.Now()}); err != nil {
-		h.t.Fatal(err)
-	}
-	if code, loc, _ := h.post("/login", "/login", url.Values{"username": {username}, "password": {testPassword}}); code != 303 || loc != "/login/totp" {
-		h.t.Fatalf("password step: %d %s", code, loc)
-	}
-	otp, _ := totp.GenerateCode(key.Secret, time.Now())
-	if code, loc, _ := h.post("/login/totp", "/login/totp", url.Values{"code": {otp}}); code != 303 || loc != "/" {
-		h.t.Fatalf("TOTP step: %d %s", code, loc)
-	}
-}
-
-func TestWizardCreatesFirstAdmin(t *testing.T) {
-	h := newHarness(t, config.Default(), false)
-	if _, loc, _ := h.get("/"); loc != "/login" {
-		t.Fatalf("anonymous / should go to /login, got %q", loc)
-	}
-	if _, loc, _ := h.get("/login"); loc != "/setup" {
-		t.Fatalf("with no users, /login should go to the wizard, got %q", loc)
-	}
-	if _, _, body := h.get("/setup"); !strings.Contains(body, "setup token") {
-		t.Fatalf("the wizard starts with the token:\n%s", body)
-	}
-
-	token, err := setup.NewToken(h.tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, body := h.post("/setup", "/setup/token", url.Values{"token": {"WRONG"}}); !strings.Contains(body, "not the setup token") {
-		t.Error("a wrong token must be refused")
-	}
-	if code, loc, _ := h.post("/setup", "/setup/token", url.Values{"token": {strings.ToLower(token)}}); code != 303 || loc != "/setup" {
-		t.Fatalf("token: %d %q", code, loc)
-	}
-	if _, _, body := h.post("/setup", "/setup/admin", url.Values{"username": {"admin"}, "password": {"short"}, "confirm": {"short"}}); !strings.Contains(body, "at least 12") {
-		t.Error("a short password must be refused")
-	}
-	code, loc, _ := h.post("/setup", "/setup/admin", url.Values{"username": {"admin"}, "password": {testPassword}, "confirm": {testPassword}})
-	if code != 303 || loc != "/login/totp" {
-		t.Fatalf("admin: %d %q", code, loc)
-	}
-	if _, err := os.Stat(h.tokenPath); !os.IsNotExist(err) {
-		t.Error("the setup token must be deleted once the admin exists")
-	}
-
-	// Enroll the authenticator shown on the page.
-	_, _, body := h.get("/login/totp")
-	m := regexp.MustCompile(`<code>([A-Z2-7]+)</code>`).FindStringSubmatch(body)
-	if m == nil {
-		t.Fatalf("no secret on the enrollment page:\n%s", body)
-	}
-	_, _, again := h.get("/login/totp")
-	if !strings.Contains(again, m[1]) {
-		t.Error("reloading the enrollment page must show the same secret")
-	}
-	otp, _ := totp.GenerateCode(m[1], time.Now())
-	if code, loc, _ := h.post("/login/totp", "/login/totp", url.Values{"code": {otp}}); code != 303 || loc != "/" {
-		t.Fatalf("enroll: %d %q", code, loc)
-	}
-	if u, _ := h.st.GetUser("admin"); !u.Enrolled() {
-		t.Error("the authenticator should be saved")
-	}
-
-	// Logged in but setup isn't done: on to the first step, which lists the clusters.
-	if _, loc, _ := h.get("/"); loc != "/setup" {
-		t.Fatalf("before setup is complete / goes to the wizard, got %q", loc)
-	}
-	if _, loc, _ := h.get("/setup"); loc != "/setup/postgres" {
-		t.Fatalf("got %q", loc)
-	}
-	if _, _, body := h.get("/setup/postgres"); !strings.Contains(body, "PostgreSQL 18 / main") {
-		t.Errorf("clusters missing:\n%s", body)
-	}
-	code, loc, _ = h.post("/setup/postgres", "/setup/postgres", url.Values{"cluster": {"0"}, "stanza": {"main"}, "name": {"db-test"}})
-	if code != 303 || loc != "/setup/storage" {
-		t.Fatalf("postgres step: %d %q", code, loc)
-	}
-	if cfg, _ := config.LoadDraft(h.configPath); cfg.PgBackRest.Stanza != "main" || cfg.Server.Name != "db-test" {
-		t.Errorf("the draft should be saved: %+v", cfg.PgBackRest)
-	}
-	if _, _, body := h.get("/setup/review"); !strings.Contains(body, "storage.s3.bucket") {
-		t.Error("review should list what's still missing")
-	}
-}
-
-func TestLoginLockout(t *testing.T) {
-	h := newHarness(t, validConfig(), true)
-	hash, _ := auth.HashPassword(testPassword)
-	h.st.CreateUser(&state.User{Username: "admin", PasswordHash: hash})
-	for range 5 {
-		if _, _, body := h.post("/login", "/login", url.Values{"username": {"admin"}, "password": {"nope"}}); !strings.Contains(body, "Wrong username or password") {
-			t.Fatal("expected a wrong-password error")
-		}
-	}
-	if _, _, body := h.post("/login", "/login", url.Values{"username": {"admin"}, "password": {testPassword}}); !strings.Contains(body, "Too many failed attempts") {
-		t.Error("the right password must be refused while locked out")
-	}
-	log, _ := h.st.AuditLog(0, 10)
-	if len(log) == 0 || log[0].OK {
-		t.Errorf("failed logins should be audited: %+v", log)
-	}
-}
-
 func TestDashboardAndDownload(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.login("admin")
 	h.store.Add(pgdump.Key("app", time.Now().Add(-time.Hour)), []byte("PGDMP"), time.Now())
 
 	code, _, body := h.get("/")
@@ -302,7 +178,7 @@ func TestDashboardAndDownload(t *testing.T) {
 	entries, _ := h.st.AuditLog(0, 20)
 	found := false
 	for _, e := range entries {
-		if e.Action == "download" && e.User == "admin" && e.Detail == m[1] && e.OK {
+		if e.Action == "download" && e.User == "ui" && e.Detail == m[1] && e.OK {
 			found = true
 		}
 	}
@@ -316,7 +192,6 @@ func TestDashboardAndDownload(t *testing.T) {
 
 func TestSettingsKeepSecrets(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.login("admin")
 	_, _, body := h.get("/settings")
 	if strings.Contains(body, "the-secret") || strings.Contains(body, "app-password") {
 		t.Fatal("secrets must never be sent to the browser")
@@ -345,7 +220,6 @@ func TestSettingsKeepSecrets(t *testing.T) {
 
 func TestRunNow(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.login("admin")
 	if code, loc, _ := h.post("/jobs", "/jobs/run", url.Values{"job": {"full"}}); code != 400 {
 		t.Errorf("full can't be started from the UI: %d %q", code, loc)
 	}
@@ -378,7 +252,6 @@ func TestProtections(t *testing.T) {
 		t.Errorf("a foreign Host must be refused: %d", rec.Code)
 	}
 
-	h.login("admin")
 	resp, err := h.client.PostForm(h.srv.URL+"/jobs/run", url.Values{"job": {"report"}})
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +267,6 @@ func TestProtections(t *testing.T) {
 
 func TestEveryPageRenders(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.login("admin")
 	h.store.Add(pgdump.Key("app", time.Now()), []byte("PGDMP"), time.Now())
 	h.store.Add(pgdump.GlobalsKey(time.Now()), []byte("CREATE ROLE"), time.Now())
 	run := &state.Run{Job: "dumps", Start: time.Now(), Dumps: []state.DumpRun{{DB: "app", Size: 5}, {DB: "gone", Error: "boom"}}}
@@ -403,7 +275,7 @@ func TestEveryPageRenders(t *testing.T) {
 	h.st.SaveRun(run)
 	h.st.SetDeleted("gone", time.Now())
 
-	for _, path := range []string{"/", "/backups", "/databases", "/databases/app", "/databases/gone", "/jobs", "/jobs?job=dumps", fmt.Sprintf("/jobs/%d", run.ID), "/settings", "/audit", "/account"} {
+	for _, path := range []string{"/", "/backups", "/databases", "/databases/app", "/databases/gone", "/jobs", "/jobs?job=dumps", fmt.Sprintf("/jobs/%d", run.ID), "/settings", "/audit"} {
 		code, loc, body := h.get(path)
 		if code != 200 {
 			t.Errorf("GET %s: %d %q\n%s", path, code, loc, body)
@@ -417,15 +289,28 @@ func TestEveryPageRenders(t *testing.T) {
 	}
 }
 
-func TestResetEndsSessions(t *testing.T) {
-	h := newHarness(t, validConfig(), true)
-	h.login("admin")
-	if code, _, _ := h.get("/"); code != 200 {
-		t.Fatal("should be logged in")
+func TestWizardStartsWithoutLogin(t *testing.T) {
+	h := newHarness(t, config.Default(), false)
+	if _, loc, _ := h.get("/"); loc != "/setup" {
+		t.Fatalf("before setup, / should go to the wizard, got %q", loc)
 	}
-	// What `pgtijori user reset admin` does, behind the service's back.
-	h.st.UpdateUser("admin", func(u *state.User) error { u.Epoch++; return nil })
-	if _, loc, _ := h.get("/"); loc != "/login" {
-		t.Errorf("a reset from the CLI must end open sessions, got %q", loc)
+	if _, loc, _ := h.get("/setup"); loc != "/setup/postgres" {
+		t.Fatalf("the wizard starts at the PostgreSQL step, got %q", loc)
+	}
+	if _, _, body := h.get("/setup/postgres"); !strings.Contains(body, "PostgreSQL 18 / main") {
+		t.Errorf("clusters missing:\n%s", body)
+	}
+	code, loc, _ := h.post("/setup/postgres", "/setup/postgres", url.Values{"cluster": {"0"}, "stanza": {"main"}, "name": {"db-test"}})
+	if code != 303 || loc != "/setup/storage" {
+		t.Fatalf("postgres step: %d %q", code, loc)
+	}
+	if cfg, _ := config.LoadDraft(h.configPath); cfg.PgBackRest.Stanza != "main" || cfg.Server.Name != "db-test" {
+		t.Errorf("the draft should be saved: %+v", cfg.PgBackRest)
+	}
+	if _, _, body := h.get("/setup/review"); !strings.Contains(body, "storage.s3.bucket") {
+		t.Error("review should list what's still missing")
+	}
+	if _, loc, _ := h.get("/settings"); loc != "/setup" {
+		t.Errorf("pages wait for setup, got %q", loc)
 	}
 }

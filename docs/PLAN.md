@@ -53,7 +53,7 @@ Nothing in this repository is specific to any particular deployment. Each server
 | Restore from UI | **No.** Restores are manual, using the runbook. |
 | Restore tests | Manual, using the runbook |
 | UI | **One per server**, no central dashboard in v1 |
-| UI access | **SSH tunnel only**. The UI binds to a loopback address, enforced by config validation (§5.3). |
+| UI access | **SSH tunnel only**, and **no login** (§5.2). The UI binds to a loopback address, enforced by config validation (§5.3). |
 | Emails | A daily summary every day, plus immediate failure emails |
 | Storage | S3-compatible (R2, AWS S3, B2, Wasabi, MinIO). Recommended: **one private bucket per server**, each with its own token scoped to that bucket, so a compromised server can't touch other servers' backups. |
 | Point-in-time retention | 30 days (default) |
@@ -193,7 +193,7 @@ Server-rendered pages (`html/template` + `embed`) with a little vanilla JS. Six 
 | **Databases** | One row per database: label, last dump time and size, history, **Download** button. Deleted databases show "deleted since … (dump kept until …)". |
 | **Jobs** | History of all runs, filterable, with each job's output. A **Run now** button for `diff`, `dumps` and `report`. |
 | **Settings** | Storage, email, schedules, retention, exclusions, label query. Each section has a **Test** button. |
-| **Audit log** | Who logged in, who downloaded which dump, who changed settings |
+| **Audit log** | Which dump was downloaded, which settings changed, which jobs were started, and when |
 
 ### 5.1 Downloads
 
@@ -202,11 +202,21 @@ Server-rendered pages (`html/template` + `embed`) with a little vanilla JS. Six 
   audit log.
 - Downloads cover **layer 2 dumps** only. Layer 1 files aren't usable on their own.
 
-### 5.2 Login
+### 5.2 No login
 
-- Local users stored in the state DB (bcrypt) with **mandatory TOTP** (`pquerna/otp`).
-- The first admin is created in the wizard. No roles system in v1.
-- Session cookie (HttpOnly, SameSite=Strict), CSRF tokens on forms, login rate limiting.
+There are no UI accounts: being able to open the SSH tunnel is the access control. This was
+decided after trying the first version, where a setup token, a password and a TOTP code in
+front of a page that's only reachable over SSH was too much friction.
+
+The trade-off, accepted on purpose: anything that can connect to `127.0.0.1:8899` **on the
+server** can use the UI, including downloading dumps and changing settings. That means every
+local user and process, for example a web app on the same server with an SSRF bug. If that
+becomes a concern, the planned fix is to listen on a Unix socket that only the `sudo` group
+can open (`ssh -L 8899:/run/pgtijori/ui.sock …`), which keeps the same convenience.
+
+Still in place, because they cost the user nothing: CSRF tokens on every form and an Origin
+check, SameSite=Strict cookies, a strict Content-Security-Policy, and refusing requests whose
+`Host` isn't localhost (DNS rebinding). Downloads and settings changes are in the audit log.
 
 ### 5.3 Access
 
@@ -295,22 +305,21 @@ Because the repository is public:
 2. Installs `pgbackrest` from PGDG (adds the repository if it's missing).
 3. Downloads the `pgtijori` binary (linux/amd64, static) and checks its SHA-256.
 4. Creates the directories, systemd unit and logrotate file, then starts the service.
-5. Prints **a one-time setup token** and the SSH-tunnel command to open the wizard.
+5. Prints the SSH-tunnel command to open the wizard.
 
 Re-running it **upgrades** the binary and keeps the config. `pgtijori uninstall` removes
 pgtijori, but leaves the backups in storage untouched.
 
-### 7.2 Wizard (in the browser, unlocked by the setup token)
+### 7.2 Wizard (in the browser)
 
-1. **Admin account:** username, password, TOTP enrolment (QR code).
-2. **PostgreSQL:** pick the cluster (auto-detected: version, data dir, port), then show the
+1. **PostgreSQL:** pick the cluster (auto-detected: version, data dir, port), then show the
    database list.
-3. **Storage:** endpoint, bucket, key and secret. **Test** writes, reads and deletes a probe
+2. **Storage:** endpoint, bucket, key and secret. **Test** writes, reads and deletes a probe
    object.
-4. **Email:** SMTP account, recipients. **Test** sends an email.
-5. **Schedules and retention:** defaults from §4.4 and §2, editable.
-6. **Labels (optional):** label database and query. **Test** shows the mapping.
-7. **Review and apply:**
+3. **Email:** SMTP account, recipients. **Test** sends an email.
+4. **Schedules and retention:** defaults from §4.4 and §2, editable.
+5. **Labels (optional):** label database and query. **Test** shows the mapping.
+6. **Review and apply:**
    - writes `pgbackrest.conf` and `conf.d/10-pgbackrest.conf`;
    - **asks before** restarting PostgreSQL (seconds of downtime, needed for `archive_mode`),
      or lets you schedule the restart for later;
@@ -340,10 +349,8 @@ Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 | Scheduler | `github.com/robfig/cron/v3` (with location) |
 | Object storage | `github.com/minio/minio-go/v7` |
 | SMTP | `github.com/wneessen/go-mail` |
-| TOTP | `github.com/pquerna/otp` |
 | State | `go.etcd.io/bbolt` |
 | Config | `gopkg.in/yaml.v3` |
-| Passwords | `golang.org/x/crypto/bcrypt` |
 
 ### 8.2 Layout
 
@@ -357,8 +364,8 @@ pgtijori/
     engines/pgdump/        # discovery, streamed dump, retention, deleted DBs
     storage/               # Store interface + S3 implementation
     notify/                # email templates + error → "likely reason" mapping
-    http/controllers/      # dashboard, backups, databases, jobs, settings, wizard, auth
-    http/middleware/       # auth, csrf, rate limit, audit
+    http/controllers/      # dashboard, backups, databases, jobs, settings, wizard
+    http/middleware/       # sessions, csrf, Host check, security headers
     state/                 # bbolt repositories
   config/                  # config struct, load/save, defaults, validation
   resources/views/         # templates (embedded)
@@ -386,8 +393,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
 |-------|-------------|-----------|----------|
 | **0. Skeleton** | License, README, layout, config load/save/validate, CLI (`version`, `config`), CI (gofmt, vet, tests, static build, `govulncheck`, test environment), release workflow, Docker test environment | A tag produces a GitHub Release, and CI starts the test environment | 2 days |
 | **1. Engine + CLI + emails** | Layer 1 jobs, layer 2 dumps (streamed, retention, deleted DBs), scheduler, state, daily and failure emails. Configured by hand-written `config.yaml`. | Integration test passes (backups, dumps, restore of both). Runs for a week on a test VM. | 1–1.5 weeks |
-| **2. UI** | Login + TOTP, dashboard, backups, databases + downloads, jobs + Run now, settings, audit log | All screens work against the test environment; downloads are audited | 1 week |
-| **3. Installer + wizard + docs** | `install.sh`, setup token, wizard steps 1–7, CLI, upgrade/uninstall, `docs/restore.md` | A fresh Ubuntu VM goes from nothing to its first backup using only the one command and the wizard | 1 week |
+| **2. UI** | Dashboard, backups, databases + downloads, jobs + Run now, settings, audit log | All screens work against the test environment; downloads are audited | 1 week |
+| **3. Installer + wizard + docs** | `install.sh`, wizard steps 1–6, CLI, upgrade/uninstall, `docs/restore.md` | A fresh Ubuntu VM goes from nothing to its first backup using only the one command and the wizard | 1 week |
 | **Later** | Google Drive for dumps, GCS, optional encryption, central dashboard | — | — |
 
 ---
@@ -409,17 +416,15 @@ Rough estimates for one developer. Each phase ends with a usable result.
   - The job lock is a file lock (`/var/lib/pgtijori/job.lock`), so `pgtijori run` over SSH
     queues behind a scheduled job instead of overlapping it.
   - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
-- **Phase 2:** implemented on branch `phase-2-ui`: all six screens, login with mandatory TOTP,
-  audited downloads, settings that apply without a restart, user management. Notes:
-  - Sessions are in memory: restarting the service logs everyone out. Each user has an
-    `epoch`, bumped on reset or password change, so `pgtijori user reset` from the CLI also
-    ends open sessions.
-  - Besides loopback-only listening, requests whose `Host` isn't localhost are refused
-    (DNS rebinding).
+- **Phase 2:** implemented on branch `phase-2-ui`: all six screens, audited downloads, settings
+  that apply without a restart. Login (password + TOTP) was built, then removed after a
+  first try on Ubuntu (§5.2). Notes:
+  - Requests whose `Host` isn't localhost are refused (DNS rebinding), on top of
+    loopback-only listening.
   - "Run now" is offered for `diff`, `dumps` and `report`. A full backup by hand is
     `sudo pgtijori run full`.
 - **Phase 3:** implemented on branch `phase-3-installer`: `scripts/install.sh`,
-  `install-system`, setup token, the wizard, `uninstall`, `logs`, `user`, `dumps list|url`,
+  `install-system`, the wizard, `uninstall`, `logs`, `dumps list|url`,
   and [restore.md](restore.md). Not yet done: the "done when" test, a fresh Ubuntu VM taken
   from nothing to its first backup with only the installer and the wizard.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM

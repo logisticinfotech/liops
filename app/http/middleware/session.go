@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package middleware protects the UI: sessions with mandatory TOTP, CSRF tokens,
-// login rate limiting, security headers, and a Host check that keeps the UI reachable
-// only as localhost (through the SSH tunnel).
+// Package middleware protects the UI. There is no login: reaching the UI means having
+// an SSH tunnel to the server (it listens on loopback only). What's left guards
+// against other web pages in the same browser: CSRF tokens, a Host check against DNS
+// rebinding, and security headers.
 package middleware
 
 import (
@@ -17,45 +18,30 @@ import (
 // CookieName is the session cookie.
 const CookieName = "pgtijori_session"
 
-// Session stages.
-const (
-	Anonymous = iota // not logged in; still carries a CSRF token for the login form
-	Password         // password checked, TOTP not yet (or being enrolled)
-	LoggedIn         // password and TOTP checked
-)
-
-// Session is one browser's session. Sessions live in memory: restarting pgtijori
-// logs everyone out, which is fine for a tool used now and then.
+// Session is one browser's session. It only carries the CSRF token and a one-time
+// message. Sessions live in memory.
 type Session struct {
-	ID    string
-	CSRF  string
-	User  string
-	Epoch int64 // the user's state.User.Epoch at login
-	Stage int
-	// PendingTOTP is a TOTP secret shown during enrollment, until a code confirms it.
-	PendingTOTP string
-	// SetupUnlocked: the setup token was entered, so the first admin can be created.
-	SetupUnlocked bool
+	ID   string
+	CSRF string
 	// Flash is a one-time message shown on the next page.
-	Flash   string
-	Created time.Time
-	Seen    time.Time
+	Flash string
+	Seen  time.Time
 }
 
 // Sessions stores sessions.
 type Sessions struct {
 	mu sync.Mutex
 	m  map[string]*Session
-	// Idle and Max are the inactivity and absolute timeouts.
-	Idle, Max time.Duration
-	Now       func() time.Time
+	// Idle is how long an unused session lives.
+	Idle time.Duration
+	Now  func() time.Time
 }
 
-// maxSessions bounds memory use: anonymous sessions are created per visitor.
+// maxSessions bounds memory use.
 const maxSessions = 1000
 
 func NewSessions() *Sessions {
-	return &Sessions{m: map[string]*Session{}, Idle: 30 * time.Minute, Max: 12 * time.Hour, Now: time.Now}
+	return &Sessions{m: map[string]*Session{}, Idle: 12 * time.Hour, Now: time.Now}
 }
 
 func token() string {
@@ -66,15 +52,24 @@ func token() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// Start creates a fresh session (a new ID, so a session can't be fixed by an
-// attacker) and sets its cookie.
-func (s *Sessions) Start(w http.ResponseWriter, user string, stage int) *Session {
+// Start creates a session and sets its cookie.
+func (s *Sessions) Start(w http.ResponseWriter) *Session {
 	now := s.Now()
-	sess := &Session{ID: token(), CSRF: token(), User: user, Stage: stage, Created: now, Seen: now}
+	sess := &Session{ID: token(), CSRF: token(), Seen: now}
 	s.mu.Lock()
-	s.expireLocked(now)
+	for id, old := range s.m {
+		if now.Sub(old.Seen) > s.Idle {
+			delete(s.m, id)
+		}
+	}
 	if len(s.m) >= maxSessions {
-		s.evictOldestLocked()
+		var oldest *Session
+		for _, old := range s.m {
+			if oldest == nil || old.Seen.Before(oldest.Seen) {
+				oldest = old
+			}
+		}
+		delete(s.m, oldest.ID)
 	}
 	s.m[sess.ID] = sess
 	s.mu.Unlock()
@@ -102,7 +97,7 @@ func (s *Sessions) Get(r *http.Request) *Session {
 	if sess == nil {
 		return nil
 	}
-	if now.Sub(sess.Seen) > s.Idle || now.Sub(sess.Created) > s.Max {
+	if now.Sub(sess.Seen) > s.Idle {
 		delete(s.m, sess.ID)
 		return nil
 	}
@@ -110,11 +105,11 @@ func (s *Sessions) Get(r *http.Request) *Session {
 	return sess
 }
 
-// Update applies fn to a session under the lock.
-func (s *Sessions) Update(sess *Session, fn func(*Session)) {
+// SetFlash sets the message shown on the next page.
+func (s *Sessions) SetFlash(sess *Session, msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fn(sess)
+	sess.Flash = msg
 }
 
 // TakeFlash returns and clears the session's flash message.
@@ -126,57 +121,14 @@ func (s *Sessions) TakeFlash(sess *Session) string {
 	return f
 }
 
-// Destroy ends the request's session and clears its cookie.
-func (s *Sessions) Destroy(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(CookieName); err == nil {
-		s.mu.Lock()
-		delete(s.m, c.Value)
-		s.mu.Unlock()
-	}
-	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
-}
-
-// DestroyUser ends every session of a user (after a password change or deletion).
-// keep, if not nil, survives.
-func (s *Sessions) DestroyUser(user string, keep *Session) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, sess := range s.m {
-		if sess.User == user && sess != keep {
-			delete(s.m, id)
-		}
-	}
-}
-
-func (s *Sessions) expireLocked(now time.Time) {
-	for id, sess := range s.m {
-		if now.Sub(sess.Seen) > s.Idle || now.Sub(sess.Created) > s.Max {
-			delete(s.m, id)
-		}
-	}
-}
-
-func (s *Sessions) evictOldestLocked() {
-	var oldest *Session
-	for _, sess := range s.m {
-		if sess.Stage == Anonymous && (oldest == nil || sess.Seen.Before(oldest.Seen)) {
-			oldest = sess
-		}
-	}
-	if oldest != nil {
-		delete(s.m, oldest.ID)
-	}
-}
-
 type ctxKey struct{}
 
-// WithSession makes sure every request has a session (anonymous if needed), so every
-// form, including login, carries a CSRF token.
+// WithSession makes sure every request has a session, so every form carries a CSRF token.
 func (s *Sessions) WithSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := s.Get(r)
 		if sess == nil {
-			sess = s.Start(w, "", Anonymous)
+			sess = s.Start(w)
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess)))
 	})
@@ -186,15 +138,4 @@ func (s *Sessions) WithSession(next http.Handler) http.Handler {
 func From(r *http.Request) *Session {
 	sess, _ := r.Context().Value(ctxKey{}).(*Session)
 	return sess
-}
-
-// RequireLogin redirects to the login page unless the session passed TOTP.
-func RequireLogin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if sess := From(r); sess == nil || sess.Stage != LoggedIn {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

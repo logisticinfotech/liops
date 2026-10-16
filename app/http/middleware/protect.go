@@ -7,8 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sync"
-	"time"
 )
 
 // SecurityHeaders sets headers that stop framing, sniffing, referrer leaks, and any
@@ -72,56 +70,4 @@ func CSRF(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// Limiter limits failed logins: after Max failures within Window for a key, the key
-// is blocked until the window passes.
-type Limiter struct {
-	Max    int
-	Window time.Duration
-	Now    func() time.Time
-
-	mu       sync.Mutex
-	failures map[string][]time.Time
-}
-
-func NewLimiter() *Limiter {
-	return &Limiter{Max: 5, Window: 15 * time.Minute, Now: time.Now, failures: map[string][]time.Time{}}
-}
-
-func (l *Limiter) recent(key string) []time.Time {
-	cutoff := l.Now().Add(-l.Window)
-	kept := l.failures[key][:0]
-	for _, t := range l.failures[key] {
-		if t.After(cutoff) {
-			kept = append(kept, t)
-		}
-	}
-	if len(kept) == 0 {
-		delete(l.failures, key)
-		return nil
-	}
-	l.failures[key] = kept
-	return kept
-}
-
-// Allowed reports whether another attempt is allowed for key.
-func (l *Limiter) Allowed(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.recent(key)) < l.Max
-}
-
-// Fail records a failed attempt.
-func (l *Limiter) Fail(key string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.failures[key] = append(l.recent(key), l.Now())
-}
-
-// Reset forgets failures after a successful login.
-func (l *Limiter) Reset(key string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.failures, key)
 }

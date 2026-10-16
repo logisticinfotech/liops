@@ -36,23 +36,4 @@
   {{template "fields-labels" .Cfg}}
   <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
 </form>
-<div class="panel" id="users">
-  <h2 style="margin-top:0">Users</h2>
-  <div class="table-wrap"><table>
-    <tr><th>User</th><th>Authenticator</th><th>Last login</th><th></th></tr>
-    {{range .Users}}<tr><td>{{.Username}}{{if eq .Username $.Data.Me}} <span class="muted">(you)</span>{{end}}</td>
-      <td>{{if .Enrolled}}<span class="badge ok">set up</span>{{else}}<span class="badge pending">at first login</span>{{end}}</td>
-      <td>{{when .LastLogin}}</td>
-      <td>{{if ne .Username $.Data.Me}}
-        <form method="post" action="/users/{{.Username}}/reset" class="inline" data-confirm="Give {{.Username}} a new password and make them set up a new authenticator?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small secondary">Reset</button></form>
-        <form method="post" action="/users/{{.Username}}/delete" class="inline" data-confirm="Delete {{.Username}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="small danger">Delete</button></form>
-      {{end}}</td></tr>{{end}}
-  </table></div>
-  <form method="post" action="/users" class="actions">
-    <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <input type="text" name="username" placeholder="new username" style="max-width:240px" required>
-    <button class="secondary">Add user</button>
-    <span class="hint">They get a random password, shown once, and set up their authenticator at first login.</span>
-  </form>
-</div>
 {{end}}{{end}}

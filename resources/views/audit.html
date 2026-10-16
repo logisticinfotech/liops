@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
 <h1>Audit log</h1>
-<p class="muted">Logins, downloads, settings changes and jobs started from the UI. Kept for a year.</p>
+<p class="muted">Downloads, settings changes and jobs started from the UI or the CLI. Kept for a year.</p>
 <div class="table-wrap"><table>
   <tr><th>When</th><th>User</th><th>Action</th><th>Details</th><th>Result</th></tr>
   {{range .Entries}}<tr><td>{{datetime .Time}}</td><td>{{or .User "—"}}</td><td>{{.Action}}</td><td class="mono">{{.Detail}}</td>

@@ -130,20 +130,16 @@ out=$(pg pgtijori status)
 echo "$out"
 grep -q "tenant_xyz since" <<<"$out" || fail "tenant_xyz should be listed as no longer found"
 
-step "UI: serve answers on loopback and sends a fresh install to the setup wizard"
+step "UI: serve answers on loopback, with no login, and refuses foreign Host headers"
 pg sh -c 'nohup pgtijori serve >/tmp/serve.log 2>&1 &'
 for _ in $(seq 1 30); do
     pg curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break
     sleep 1
 done
-loc=$(pg curl -sS -o /dev/null -w '%{redirect_url}' http://127.0.0.1:8899/login)
-case "$loc" in */setup) echo "login redirects to the wizard (no users yet)" ;; *) pg cat /tmp/serve.log; fail "expected a redirect to /setup, got '$loc'" ;; esac
-code=$(pg curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example.com' http://127.0.0.1:8899/login)
+# Setup was done with the CLI, so the dashboard opens straight away.
+pg curl -fsS http://127.0.0.1:8899/ | grep -q "Can restore back to" || { pg cat /tmp/serve.log; fail "the dashboard didn't load"; }
+code=$(pg curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example.com' http://127.0.0.1:8899/)
 [ "$code" = 421 ] || fail "a foreign Host header should get 421, got $code"
-token=$(pg pgtijori setup-token)
-[ ${#token} -eq 27 ] || fail "unexpected setup token '$token'"
-pg pgtijori user add admin >/dev/null
-pg pgtijori user list | grep -q admin || fail "user add/list"
 pg pkill -f "pgtijori serve" || true
 
 step "Emails"

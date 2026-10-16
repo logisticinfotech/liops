@@ -3,7 +3,6 @@
 package setup
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/logisticinfotech/pgtijori/config"
@@ -30,25 +29,5 @@ garbage line
 	Apply(cfg, clusters[0])
 	if cfg.Postgres.Version != 16 || cfg.Postgres.Port != 5433 || ServiceName(cfg) != "postgresql@16-main" {
 		t.Errorf("Apply: %+v", cfg.Postgres)
-	}
-}
-
-func TestToken(t *testing.T) {
-	path := t.TempDir() + "/sub/setup-token"
-	if CheckToken(path, "") {
-		t.Fatal("no token file accepts nothing")
-	}
-	tok, err := NewToken(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tok) != 27 || !CheckToken(path, tok) || !CheckToken(path, " "+strings.ToLower(strings.ReplaceAll(tok, "-", ""))+" ") {
-		t.Errorf("token %q should be accepted however it's typed", tok)
-	}
-	if CheckToken(path, "AAAAAA-AAAAAA-AAAAAA-AAAAAA") || CheckToken(path, "") {
-		t.Error("a wrong token must be rejected")
-	}
-	if err := RemoveToken(path); err != nil || CheckToken(path, tok) {
-		t.Error("a removed token must be rejected")
 	}
 }

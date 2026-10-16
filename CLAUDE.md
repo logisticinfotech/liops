@@ -35,8 +35,7 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 
 - **Plain Go, minimal dependencies, no web framework** (PLAN.md §3). It runs as root and holds
   credentials, so justify every new dependency. The approved stack is listed in PLAN.md §8.1
-  (net/http, html/template+embed, robfig/cron, minio-go, go-mail, pquerna/otp, bbolt,
-  yaml.v3, bcrypt). The folder layout follows Laravel/Goravel conventions (`app/`, `config/`,
+  (net/http, html/template+embed, robfig/cron, minio-go, go-mail, bbolt, yaml.v3). The folder layout follows Laravel/Goravel conventions (`app/`, `config/`,
   `resources/views/`).
 - **CLI** (`main.go`): hand-rolled subcommand dispatch with a `run(args, out)` function, so it's
   testable (`main_test.go`). Each subcommand uses its own `flag.FlagSet`. Keep the `usage`
@@ -71,6 +70,9 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   The strict CSP means no inline scripts or styles. Controller tests
   (`controllers_test.go`) drive the real handler through `httptest` with a cookie jar and
   fake runners. Use that harness for new pages.
+- **No login** in the UI, by decision (PLAN.md §5.2): the SSH tunnel is the access control.
+  Keep the protections that cost the user nothing: CSRF tokens, the localhost Host check,
+  security headers. Don't add accounts back without asking.
 - **Setup** steps (`app/setup`) are shared by the CLI and the wizard. Never restart
   PostgreSQL without the user asking for it.
 - Plain-language failure reasons come from `notify.LikelyReason` (substring table, first match

@@ -13,8 +13,8 @@ import (
 type AuditEntry struct {
 	ID     uint64    `json:"id"`
 	Time   time.Time `json:"time"`
-	User   string    `json:"user"`             // empty before login
-	Action string    `json:"action"`           // e.g. "login", "download", "settings"
+	User   string    `json:"user"`             // "ui" or "root (CLI)"
+	Action string    `json:"action"`           // e.g. "download", "settings", "run"
 	Detail string    `json:"detail,omitempty"` // e.g. the downloaded key
 	OK     bool      `json:"ok"`
 }

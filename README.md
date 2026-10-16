@@ -22,8 +22,8 @@ Also:
 
 - **One-command install** and a browser-based setup wizard
 - **Status UI** (on `127.0.0.1` only, reached through an SSH tunnel): health, backup history,
-  storage use, per-database dump downloads, settings, and an audit log. Login needs a
-  password and an authenticator code.
+  storage use, per-database dump downloads, settings, and an audit log. There's no login:
+  the SSH tunnel is the access control.
 - **Email**: a daily summary and immediate failure alerts, in plain language
 - Restores stay manual and use pgBackRest and `pg_restore` directly, following
   [docs/restore.md](docs/restore.md). The UI doesn't restore anything.
@@ -36,9 +36,8 @@ On the database server (Ubuntu, PostgreSQL 13+ from PGDG):
 curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
 ```
 
-The installer installs pgBackRest if needed, checks the binary against `SHA256SUMS`,
-starts the `pgtijori` service, and prints a one-time setup token. Then, on your own
-computer:
+The installer installs pgBackRest if needed, checks the binary against `SHA256SUMS`, and
+starts the `pgtijori` service. Then, on your own computer:
 
 ```bash
 ssh -L 8899:127.0.0.1:8899 <you>@<server>
@@ -69,7 +68,6 @@ sudo pgtijori status                  # recent job runs
 sudo pgtijori run full                # run a job now: full, diff, dumps or report
 sudo pgtijori logs -f                 # follow the log
 sudo pgtijori dumps list [DB]         # stored dumps; `dumps url KEY` prints a download link
-sudo pgtijori user reset NAME         # new password and authenticator for a locked-out user
 sudo pgtijori config validate         # check the config after editing it by hand
 sudo pgtijori setup                   # redo the pgBackRest/PostgreSQL settings without the wizard
 ```

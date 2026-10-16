@@ -15,10 +15,8 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/logisticinfotech/pgtijori/app/auth"
 	"github.com/logisticinfotech/pgtijori/app/command"
 	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/http/middleware"
 	"github.com/logisticinfotech/pgtijori/app/jobs"
 	"github.com/logisticinfotech/pgtijori/app/notify"
 	"github.com/logisticinfotech/pgtijori/app/setup"
@@ -26,7 +24,7 @@ import (
 	"github.com/logisticinfotech/pgtijori/config"
 )
 
-// The wizard's steps after the admin account, in order (PLAN.md §7.2).
+// The wizard's steps, in order (PLAN.md §7.2).
 var wizardSteps = []struct{ ID, Title string }{
 	{"postgres", "PostgreSQL"},
 	{"storage", "Storage"},
@@ -86,12 +84,10 @@ func (wz *wizard) set(i int, status, detail string) {
 
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup", s.setupStart)
-	mux.HandleFunc("POST /setup/token", s.setupToken)
-	mux.HandleFunc("POST /setup/admin", s.setupAdmin)
-	step := func(h http.HandlerFunc) http.Handler { return middleware.RequireLogin(s.beforeSetupDone(h)) }
+	step := func(h http.HandlerFunc) http.Handler { return s.beforeSetupDone(h) }
 	mux.Handle("GET /setup/{step}", step(s.setupStep))
 	mux.Handle("POST /setup/{step}", step(s.setupSave))
-	mux.Handle("GET /setup/apply/progress", middleware.RequireLogin(http.HandlerFunc(s.setupProgress)))
+	mux.HandleFunc("GET /setup/apply/progress", s.setupProgress)
 	mux.Handle("POST /setup/apply/start", step(s.setupApply))
 	mux.Handle("POST /setup/apply/restart", step(s.setupRestart))
 }
@@ -133,93 +129,13 @@ func (s *Server) wizardPage(w http.ResponseWriter, r *http.Request, name string,
 	s.render(w, r, name, page{Title: "Set up pgtijori", Wizard: true, Data: d})
 }
 
-// setupStart: the token, then the first admin, then the first step.
+// setupStart goes to the first step, or the dashboard once setup is complete.
 func (s *Server) setupStart(w http.ResponseWriter, r *http.Request) {
-	has, err := s.Svc.State.HasUsers()
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	sess := middleware.From(r)
-	switch {
-	case !has && !sess.SetupUnlocked:
-		s.wizardPage(w, r, "setup_token", wizardData{})
-	case !has:
-		s.wizardPage(w, r, "setup_admin", wizardData{})
-	case sess.Stage != middleware.LoggedIn:
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-	case s.Svc.SetupComplete() && s.Svc.Runner() != nil:
+	if s.Svc.SetupComplete() && s.Svc.Runner() != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
-	default:
-		http.Redirect(w, r, "/setup/"+wizardSteps[0].ID, http.StatusSeeOther)
-	}
-}
-
-func (s *Server) setupToken(w http.ResponseWriter, r *http.Request) {
-	if has, _ := s.Svc.State.HasUsers(); has {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	const key = "setup-token"
-	if !s.Limiter.Allowed(key) {
-		s.render(w, r, "setup_token", page{Title: "Set up pgtijori", Wizard: true, Error: "Too many wrong tokens. Wait 15 minutes and try again.", Data: wizardData{}})
-		return
-	}
-	if !setup.CheckToken(s.SetupTokenPath, r.PostFormValue("token")) {
-		s.Limiter.Fail(key)
-		s.auditAs("", "setup", "wrong setup token", false)
-		s.render(w, r, "setup_token", page{Title: "Set up pgtijori", Wizard: true,
-			Error: "That's not the setup token. On the server, run: sudo pgtijori setup-token", Data: wizardData{}})
-		return
-	}
-	s.Limiter.Reset(key)
-	sess := middleware.From(r)
-	s.Sessions.Update(sess, func(se *middleware.Session) { se.SetupUnlocked = true })
-	s.auditAs("", "setup", "setup token accepted", true)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
-}
-
-// setupAdmin creates the first admin. They then log in and enroll TOTP like anyone else.
-func (s *Server) setupAdmin(w http.ResponseWriter, r *http.Request) {
-	sess := middleware.From(r)
-	if has, _ := s.Svc.State.HasUsers(); has || !sess.SetupUnlocked {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-		return
-	}
-	username := strings.TrimSpace(strings.ToLower(r.PostFormValue("username")))
-	password := r.PostFormValue("password")
-	fail := func(msg string) {
-		s.render(w, r, "setup_admin", page{Title: "Set up pgtijori", Wizard: true, Error: msg, Data: wizardData{}})
-	}
-	if !usernameRE.MatchString(username) {
-		fail("Usernames are 2–32 characters: lower-case letters, digits, dot, dash, underscore; starting with a letter.")
-		return
-	}
-	if password != r.PostFormValue("confirm") {
-		fail("The passwords don't match.")
-		return
-	}
-	if err := auth.CheckNewPassword(password); err != nil {
-		fail(capitalize(err.Error()) + ".")
-		return
-	}
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if err := s.Svc.State.CreateUser(&state.User{Username: username, PasswordHash: hash, Created: s.Now()}); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if err := setup.RemoveToken(s.SetupTokenPath); err != nil {
-		s.logf("remove setup token: %v", err)
-	}
-	s.auditAs(username, "user", "created the first admin "+username, true)
-	// Straight on to authenticator enrollment.
-	s.Sessions.Destroy(w, r)
-	s.Sessions.Start(w, username, middleware.Password)
-	http.Redirect(w, r, "/login/totp", http.StatusSeeOther)
+	http.Redirect(w, r, "/setup/"+wizardSteps[0].ID, http.StatusSeeOther)
 }
 
 func validStep(id string) bool {

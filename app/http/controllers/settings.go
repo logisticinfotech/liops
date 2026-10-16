@@ -6,26 +6,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/logisticinfotech/pgtijori/app/http/middleware"
-	"github.com/logisticinfotech/pgtijori/app/state"
 	"github.com/logisticinfotech/pgtijori/config"
 )
 
 type settingsData struct {
 	Cfg    *config.Config
-	Users  []state.User
-	Me     string
 	Result *testResult
 	Errors map[string][]string // per section
 }
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, cfg *config.Config, res *testResult, errs map[string][]string) {
-	users, err := s.Svc.State.Users()
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	d := settingsData{Cfg: cfg, Users: users, Me: middleware.From(r).User, Result: res, Errors: errs}
+	d := settingsData{Cfg: cfg, Result: res, Errors: errs}
 	s.render(w, r, "settings", page{Title: "Settings", Nav: "settings", Data: d})
 }
 
