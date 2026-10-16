@@ -69,7 +69,18 @@ func fakeServer(program string, c command.Cmd) ([]byte, error) {
 		if strings.Contains(args, "pg_stat_archiver") {
 			return fmt.Appendf(nil, "%d\t0\n", now), nil
 		}
+		if strings.Contains(args, "pg_database WHERE datname") {
+			if strings.Contains(args, "datname = 'app'") {
+				return []byte("1\n"), nil
+			}
+			return nil, nil
+		}
+		if strings.Contains(args, "ALTER DATABASE") || strings.Contains(args, "pg_terminate_backend") {
+			return nil, nil
+		}
 		return []byte(hex.EncodeToString([]byte("app")) + "\n"), nil
+	case "chown", "dropdb", "createdb", "pg_restore":
+		return nil, nil
 	}
 	return nil, nil
 }
@@ -157,7 +168,7 @@ func (h *harness) post(from, path string, form url.Values) (int, string, string)
 
 func TestDashboardAndDownload(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.store.Add(pgdump.Key("app", time.Now().Add(-time.Hour)), []byte("PGDMP"), time.Now())
+	h.store.Add(pgdump.Key("main", "app", time.Now().Add(-time.Hour)), []byte("PGDMP"), time.Now())
 
 	code, _, body := h.get("/")
 	if code != 200 || !strings.Contains(body, "Last full backup") {
@@ -167,12 +178,12 @@ func TestDashboardAndDownload(t *testing.T) {
 		t.Errorf("backups page:\n%s", body)
 	}
 	_, _, body = h.get("/databases")
-	m := regexp.MustCompile(`name="key" value="(dumps/[^"]+)"`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`name="key" value="(pgbackrest/backup/main/dumps/[^"]+)"`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no download button:\n%s", body)
 	}
 	code, loc, _ := h.post("/databases", "/download", url.Values{"key": {m[1]}})
-	if code != 303 || !strings.HasPrefix(loc, "https://storage.example.com/dumps/app/") {
+	if code != 303 || !strings.HasPrefix(loc, "https://storage.example.com/pgbackrest/backup/main/dumps/app/") {
 		t.Fatalf("download: %d %q", code, loc)
 	}
 	if code, _, _ := h.post("/databases", "/download", url.Values{"key": {"pgbackrest/archive/x"}}); code != 400 {
@@ -190,6 +201,67 @@ func TestDashboardAndDownload(t *testing.T) {
 	}
 	if _, _, body := h.get("/audit"); !strings.Contains(body, m[1]) {
 		t.Error("the audit page should show the download")
+	}
+}
+
+func TestRestoreInPlace(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	key := pgdump.Key("main", "app", time.Now().Add(-time.Hour))
+	h.store.Add(key, []byte("PGDMP"), time.Now())
+
+	_, _, body := h.get("/databases")
+	if !strings.Contains(body, `action="/restore/confirm"`) || !strings.Contains(body, "Download") {
+		t.Fatalf("databases page should offer Download and Restore:\n%s", body)
+	}
+
+	code, _, body := h.post("/databases", "/restore/confirm", url.Values{"key": {key}})
+	if code != 200 || !strings.Contains(body, "Rename and restore") || !strings.Contains(body, "app_old") {
+		t.Fatalf("confirm page: %d\n%s", code, body)
+	}
+
+	code, _, body = h.post("/databases", "/restore", url.Values{"key": {key}, "confirm_name": {"wrong"}})
+	if code != 200 || !strings.Contains(body, "Type the database name") {
+		t.Fatalf("mismatch should re-show confirm: %d\n%s", code, body)
+	}
+	entries, _ := h.st.AuditLog(0, 20)
+	for _, e := range entries {
+		if e.Action == "restore" && e.OK {
+			t.Fatalf("mismatch must not audit as ok: %+v", e)
+		}
+	}
+
+	code, loc, _ := h.post("/databases", "/restore", url.Values{"key": {key}, "confirm_name": {"app"}})
+	if code != 303 || loc != "/restore/progress" {
+		t.Fatalf("restore: %d %q", code, loc)
+	}
+	sawBar, doneOK, foundStart, foundDone := false, false, false, false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, body = h.get("/restore/progress")
+		if strings.Contains(body, "<progress") {
+			sawBar = true
+		}
+		if strings.Contains(body, "Restored") && strings.Contains(body, "app") {
+			doneOK = true
+		}
+		entries, _ = h.st.AuditLog(0, 20)
+		for _, e := range entries {
+			if e.Action != "restore" || !e.OK || !strings.Contains(e.Detail, key) {
+				continue
+			}
+			if strings.Contains(e.Detail, "started") {
+				foundStart = true
+			} else {
+				foundDone = true
+			}
+		}
+		if doneOK && foundStart && foundDone {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !doneOK || !foundStart || !foundDone {
+		t.Fatalf("restore incomplete: doneOK=%v start=%v finish=%v sawBar=%v\n%s", doneOK, foundStart, foundDone, sawBar, body)
 	}
 }
 
@@ -273,8 +345,8 @@ func TestProtections(t *testing.T) {
 
 func TestEveryPageRenders(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
-	h.store.Add(pgdump.Key("app", time.Now()), []byte("PGDMP"), time.Now())
-	h.store.Add(pgdump.GlobalsKey(time.Now()), []byte("CREATE ROLE"), time.Now())
+	h.store.Add(pgdump.Key("main", "app", time.Now()), []byte("PGDMP"), time.Now())
+	h.store.Add(pgdump.GlobalsKey("main", time.Now()), []byte("CREATE ROLE"), time.Now())
 	run := &state.Run{Job: "dumps", Start: time.Now(), Dumps: []state.DumpRun{{DB: "app", Size: 5}, {DB: "gone", Error: "boom"}}}
 	h.st.StartRun(run)
 	run.Status, run.End = state.StatusFailed, time.Now()

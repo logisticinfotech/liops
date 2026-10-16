@@ -22,11 +22,13 @@ Also:
 
 - **One-command install** and a browser-based setup wizard
 - **Status UI** (on `127.0.0.1` only, reached through an SSH tunnel): health, backup history,
-  storage use, per-database dump downloads, settings, and an audit log. There's no login:
-  the SSH tunnel is the access control.
+  storage use, per-database dump downloads and in-place restores, settings, and an audit log.
+  There's no login: the SSH tunnel is the access control.
 - **Email**: a daily summary and immediate failure alerts, in plain language
-- Restores stay manual and use pgBackRest and `pg_restore` directly, following
-  [docs/restore.md](docs/restore.md). The UI doesn't restore anything.
+- **Per-database restore** from the UI: renames the live database to `<name>_old`, then
+  recreates it from the chosen dump under the same name (type the name to confirm).
+  **Download** still fetches the dump for a manual `pg_restore`. Cluster point-in-time restore
+  stays manual ([docs/restore.md](docs/restore.md)).
 
 ## Install
 

@@ -7,7 +7,10 @@
 <div class="table-wrap"><table>
   <tr><th>Taken</th><th class="num">Size</th><th>Key</th><th></th></tr>
   {{range .Dumps}}<tr><td>{{datetime .Taken}}</td><td class="num">{{bytes .Size}}</td><td class="mono muted">{{.Key}}</td>
-    <td><form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form></td></tr>
+    <td class="actions">
+      <form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form>
+      <form method="post" action="/restore/confirm" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small danger" type="submit">Restore</button></form>
+    </td></tr>
   {{else}}<tr><td colspan="4" class="muted">No dumps stored.</td></tr>{{end}}
 </table></div>
 <h2>Recent nights</h2>
@@ -17,5 +20,5 @@
     <td class="num">{{bytes .Size}}</td><td class="num">{{duration .Duration}}</td></tr>
   {{else}}<tr><td colspan="4" class="muted">No runs in the history.</td></tr>{{end}}
 </table></div>
-<p class="muted">Restore one into a new database: <code>createdb NEWNAME &amp;&amp; pg_restore --no-owner -d NEWNAME FILE.dump</code></p>
+<p class="muted"><strong>Restore</strong> renames the live database to <code>{{.Row.Name}}_old</code> and recreates it from the chosen dump (same name). <strong>Download</strong> only fetches the file for a manual <code>pg_restore</code>.</p>
 {{end}}{{end}}

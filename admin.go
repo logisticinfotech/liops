@@ -294,15 +294,23 @@ func runDumps(sub string, args []string, out io.Writer) error {
 
 	switch sub {
 	case "list":
-		prefix := storage.DumpsPrefix
+		stanza := cfg.PgBackRest.Stanza
+		var objs []storage.Object
 		if db := flags.Arg(0); db != "" {
-			prefix = pgdump.Prefix(db)
+			cur, err := store.List(ctx, pgdump.Prefix(stanza, db))
+			if err != nil {
+				return err
+			}
+			legacy, _ := store.List(ctx, storage.LegacyDumpsPrefix+db+"/")
+			objs = append(cur, legacy...)
+		} else {
+			var err error
+			objs, err = storage.ListDumps(ctx, store, stanza)
+			if err != nil {
+				return err
+			}
 		}
-		objs, err := store.List(ctx, prefix)
-		if err != nil {
-			return err
-		}
-		globals, err := store.List(ctx, storage.GlobalsPrefix)
+		globals, err := storage.ListGlobals(ctx, store, stanza)
 		if err != nil {
 			return err
 		}
@@ -314,8 +322,8 @@ func runDumps(sub string, args []string, out io.Writer) error {
 		return tw.Flush()
 	case "url":
 		key := flags.Arg(0)
-		if !strings.HasPrefix(key, storage.DumpsPrefix) && !strings.HasPrefix(key, storage.GlobalsPrefix) {
-			return errors.New("dumps url: give a key from `pgtijori dumps list`, e.g. dumps/app/2026-10-05T200102Z.dump")
+		if !pgdump.IsDumpKey(key) && !storage.IsGlobalsKey(key, cfg.PgBackRest.Stanza) {
+			return errors.New("dumps url: give a key from `pgtijori dumps list`, e.g. pgbackrest/backup/main/dumps/app/2026-10-05T200102Z.dump")
 		}
 		url, err := store.DownloadURL(ctx, key, 10*time.Minute)
 		if err != nil {

@@ -65,7 +65,27 @@ func applyForm(cfg *config.Config, section string, f url.Values) error {
 		e.To = splitList(f.Get("to"))
 	case sectionSchedules:
 		p := &cfg.PgBackRest
-		p.FullSchedule, p.DiffSchedule, cfg.Report.Schedule = text("full_schedule"), text("diff_schedule"), text("report_schedule")
+		readSchedule := func(prefix, fallbackField string, dest *string) {
+			if clock := text(prefix + "_time"); clock != "" {
+				days := text(prefix + "_days")
+				if days == "" {
+					days = "*"
+				}
+				spec, err := config.BuildCron(clock, days)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("%s: %v", prefix, err))
+					return
+				}
+				*dest = spec
+				return
+			}
+			if v := text(fallbackField); v != "" {
+				*dest = v
+			}
+		}
+		readSchedule("full", "full_schedule", &p.FullSchedule)
+		readSchedule("diff", "diff_schedule", &p.DiffSchedule)
+		readSchedule("report", "report_schedule", &cfg.Report.Schedule)
 		if d, err := time.ParseDuration(text("archive_timeout")); err != nil {
 			errs = append(errs, fmt.Errorf("archive_timeout: %q is not a duration (examples: 15m, 1h)", text("archive_timeout")))
 		} else {

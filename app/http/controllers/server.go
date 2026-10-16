@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package controllers serves the UI: dashboard, backups, databases and downloads,
-// jobs, settings, audit log, and the setup wizard. There is no login: the UI is
-// only reachable through an SSH tunnel (see PLAN.md §5.2). Pages are rendered on the
-// server with html/template; the UI works without JavaScript.
+// Package controllers serves the UI: dashboard, backups, databases (download and
+// in-place restore), jobs, settings, audit log, and the setup wizard. There is no
+// login: the UI is only reachable through an SSH tunnel (see PLAN.md §5.2). Pages
+// are rendered on the server with html/template; the UI works without JavaScript.
 package controllers
 
 import (
@@ -21,6 +21,7 @@ import (
 	"github.com/logisticinfotech/pgtijori/app/service"
 	"github.com/logisticinfotech/pgtijori/app/state"
 	"github.com/logisticinfotech/pgtijori/app/version"
+	"github.com/logisticinfotech/pgtijori/config"
 	"github.com/logisticinfotech/pgtijori/resources"
 )
 
@@ -89,13 +90,18 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return t.In(loc()).Format("2 Jan 2006 15:04:05 MST")
 		},
-		"bytes":    notify.Bytes,
-		"duration": notify.Duration,
-		"since":    func(a, b time.Time) string { return notify.Duration(b.Sub(a)) },
-		"name":     notify.Name,
-		"join":     strings.Join,
-		"lines":    func(s []string) string { return strings.Join(s, "\n") },
-		"has":      func(m map[string]string, k string) bool { _, ok := m[k]; return ok },
+		"bytes":     notify.Bytes,
+		"duration":  notify.Duration,
+		"since":     func(a, b time.Time) string { return notify.Duration(b.Sub(a)) },
+		"name":      notify.Name,
+		"join":      strings.Join,
+		"lines":     func(s []string) string { return strings.Join(s, "\n") },
+		"has":          func(m map[string]string, k string) bool { _, ok := m[k]; return ok },
+		"cronDesc":     config.DescribeSchedule,
+		"scheduleUI":   config.ParseFriendly,
+		"dayPresetsFor": config.DayPresetsFor,
+		"walPresets":    func() []config.DayPreset { return config.ArchiveTimeoutPresets },
+		"hasWalPreset":  config.HasArchiveTimeoutPreset,
 	}
 }
 
@@ -113,6 +119,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /databases", page(s.databases))
 	mux.Handle("GET /databases/{db}", page(s.database))
 	mux.Handle("POST /download", page(s.download))
+	mux.Handle("POST /restore/confirm", page(s.restoreConfirm))
+	mux.Handle("POST /restore", page(s.restore))
+	mux.Handle("GET /restore/progress", page(s.restoreProgress))
 	mux.Handle("GET /jobs", page(s.jobs))
 	mux.Handle("GET /jobs/{id}", page(s.job))
 	mux.Handle("POST /jobs/run", page(s.runNow))

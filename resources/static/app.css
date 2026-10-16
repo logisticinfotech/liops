@@ -28,6 +28,17 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px
 h1 { font-size: 22px; margin: 0 0 16px; }
 h2 { font-size: 17px; margin: 28px 0 10px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+.progress-panel { margin-bottom: 16px; }
+.progress-label { margin-bottom: 8px; }
+progress {
+  display: block; width: 100%; height: 12px; border: 0; border-radius: 6px;
+  background: var(--bg); overflow: hidden;
+}
+progress::-webkit-progress-bar { background: var(--bg); border-radius: 6px; }
+progress::-webkit-progress-value { background: var(--accent); border-radius: 6px; }
+progress::-moz-progress-bar { background: var(--accent); border-radius: 6px; }
+progress:indeterminate::-webkit-progress-value { background: var(--accent); }
+progress:indeterminate::-moz-progress-bar { background: var(--accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .stat .label { color: var(--muted); font-size: 13px; }
@@ -63,13 +74,17 @@ form.inline { display: inline; }
 label { display: block; font-weight: 600; font-size: 14px; margin: 12px 0 4px; }
 label.check { font-weight: 400; display: flex; gap: 8px; align-items: center; }
 .hint { color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 2px; }
-input[type=text], input[type=password], input[type=number], input[type=email], select, textarea {
+input[type=text], input[type=password], input[type=number], input[type=email], input[type=time], select, textarea {
   width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit;
 }
 textarea { font-family: var(--mono); font-size: 13px; min-height: 80px; }
 input.code { font-family: var(--mono); font-size: 22px; letter-spacing: 6px; text-align: center; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 16px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; align-items: center; }
+td.actions { margin-top: 0; justify-content: flex-end; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 16px 0; }
+dt { color: var(--muted); }
+dd { margin: 0; }
 button, .button { display: inline-block; padding: 8px 16px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 button.secondary, .button.secondary { background: transparent; color: var(--accent); }
 button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }

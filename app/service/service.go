@@ -51,6 +51,20 @@ type Service struct {
 	healthMu sync.Mutex
 	health   *jobs.Health
 	healthAt time.Time
+
+	restoreMu sync.Mutex
+	restore   RestoreOp // last / current UI restore
+}
+
+// RestoreOp is the UI-triggered in-place restore, for the progress page.
+type RestoreOp struct {
+	DB      string
+	Key     string
+	KeptAs  string // previous live DB renamed here (e.g. app_old); empty if none
+	Running bool
+	Done    bool
+	OK      bool
+	Err     string
 }
 
 // New loads the config (a draft is fine) and starts the scheduler if setup is
@@ -228,6 +242,70 @@ func (s *Service) Active() map[string]string {
 		m[k] = v
 	}
 	return m
+}
+
+// RestoreNow starts an in-place dump restore in the background (under the job lock).
+func (s *Service) RestoreNow(db, key string) error {
+	r := s.Runner()
+	if r == nil {
+		return errors.New("the config is incomplete: finish setup first")
+	}
+	s.mu.Lock()
+	if _, busy := s.active["restore"]; busy {
+		s.mu.Unlock()
+		return errors.New("a restore is already queued or running")
+	}
+	s.active["restore"] = "queued"
+	s.mu.Unlock()
+
+	s.restoreMu.Lock()
+	s.restore = RestoreOp{DB: db, Key: key, Running: true}
+	s.restoreMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			delete(s.active, "restore")
+			s.mu.Unlock()
+			s.invalidateHealth()
+		}()
+		s.mu.Lock()
+		s.active["restore"] = "running"
+		s.mu.Unlock()
+
+		keptAs, err := r.RestoreDump(s.ctx, db, key)
+
+		s.restoreMu.Lock()
+		s.restore.Running = false
+		s.restore.Done = true
+		s.restore.OK = err == nil
+		s.restore.KeptAs = keptAs
+		if err != nil {
+			s.restore.Err = err.Error()
+			s.logf("restore of %s failed: %v", db, err)
+		}
+		s.restoreMu.Unlock()
+		r.ClearProgress()
+
+		detail := key
+		ok := err == nil
+		if keptAs != "" && ok {
+			detail = key + " (previous kept as " + keptAs + ")"
+		} else if err != nil {
+			detail = key + ": " + err.Error()
+		}
+		if aerr := s.State.Audit(state.AuditEntry{Time: time.Now(), User: "ui", Action: "restore", Detail: detail, OK: ok}); aerr != nil {
+			s.logf("audit restore: %v", aerr)
+		}
+	}()
+	return nil
+}
+
+// RestoreOp returns the current or last UI restore.
+func (s *Service) RestoreOp() RestoreOp {
+	s.restoreMu.Lock()
+	defer s.restoreMu.Unlock()
+	return s.restore
 }
 
 // Health returns a recent health check (at most a minute old), or nil while the

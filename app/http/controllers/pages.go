@@ -5,6 +5,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -135,11 +136,12 @@ type databasesData struct {
 func (s *Server) dumpsInventory(r *http.Request) (databasesData, error) {
 	var d databasesData
 	runner := s.Svc.Runner()
-	objs, err := runner.Store.List(r.Context(), storage.DumpsPrefix)
+	stanza := runner.Cfg.PgBackRest.Stanza
+	objs, err := storage.ListDumps(r.Context(), runner.Store, stanza)
 	if err != nil {
 		return d, err
 	}
-	globals, err := runner.Store.List(r.Context(), storage.GlobalsPrefix)
+	globals, err := storage.ListGlobals(r.Context(), runner.Store, stanza)
 	if err != nil {
 		return d, err
 	}
@@ -211,10 +213,15 @@ type dbRun struct {
 
 func (s *Server) database(w http.ResponseWriter, r *http.Request) {
 	db := r.PathValue("db")
-	objs, err := s.Svc.Runner().Store.List(r.Context(), pgdump.Prefix(db))
+	runner := s.Svc.Runner()
+	objs, err := runner.Store.List(r.Context(), pgdump.Prefix(runner.Cfg.PgBackRest.Stanza, db))
 	if err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	// Also show legacy dumps/<db>/ objects still in the bucket.
+	if legacy, lerr := runner.Store.List(r.Context(), storage.LegacyDumpsPrefix+url.PathEscape(db)+"/"); lerr == nil {
+		objs = append(objs, legacy...)
 	}
 	dumps := pgdump.Group(objs)[db]
 	slices.Reverse(dumps)
@@ -248,7 +255,8 @@ func (s *Server) database(w http.ResponseWriter, r *http.Request) {
 // download sends the browser to a short-lived link for one dump. Every download is audited.
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	key := r.PostFormValue("key")
-	if !strings.HasPrefix(key, storage.DumpsPrefix) && !strings.HasPrefix(key, storage.GlobalsPrefix) {
+	stanza := s.Svc.Runner().Cfg.PgBackRest.Stanza
+	if !pgdump.IsDumpKey(key) && !storage.IsGlobalsKey(key, stanza) {
 		http.Error(w, "only database dumps can be downloaded", http.StatusBadRequest)
 		return
 	}
@@ -269,12 +277,113 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusSeeOther)
 }
 
+type restoreConfirmData struct {
+	DB       string
+	Label    string
+	Key      string
+	Taken    time.Time
+	Confirm  string
+	Mismatch bool
+}
+
+// restoreConfirm shows the type-the-name page before an in-place restore.
+func (s *Server) restoreConfirm(w http.ResponseWriter, r *http.Request) {
+	d, err := s.restoreConfirmFromKey(r, r.PostFormValue("key"), "")
+	if err != nil {
+		s.audit(r, "restore", r.PostFormValue("key")+" (not found)", false)
+		s.flash(w, r, "/databases", err.Error())
+		return
+	}
+	s.render(w, r, "restore_confirm", page{Title: "Restore " + d.DB, Nav: "databases", Data: d})
+}
+
+// restore starts an in-place restore in the background and sends the browser to the progress page.
+func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
+	key := r.PostFormValue("key")
+	confirm := r.PostFormValue("confirm_name")
+	d, err := s.restoreConfirmFromKey(r, key, confirm)
+	if err != nil {
+		s.audit(r, "restore", key+" (not found)", false)
+		s.flash(w, r, "/databases", err.Error())
+		return
+	}
+	if confirm != d.DB {
+		d.Mismatch = true
+		s.audit(r, "restore", key+" (name mismatch)", false)
+		s.render(w, r, "restore_confirm", page{Title: "Restore " + d.DB, Nav: "databases", Data: d})
+		return
+	}
+	if err := s.Svc.RestoreNow(d.DB, key); err != nil {
+		s.audit(r, "restore", key, false)
+		s.flash(w, r, "/databases/"+d.DB, capitalize(err.Error())+".")
+		return
+	}
+	s.audit(r, "restore", key+" (started)", true)
+	http.Redirect(w, r, "/restore/progress", http.StatusSeeOther)
+}
+
+type restoreProgressData struct {
+	DB       string
+	KeptAs   string
+	Running  bool
+	Done     bool
+	OK       bool
+	Err      string
+	Progress jobs.Progress
+}
+
+func (s *Server) restoreProgress(w http.ResponseWriter, r *http.Request) {
+	op := s.Svc.RestoreOp()
+	d := restoreProgressData{DB: op.DB, KeptAs: op.KeptAs, Running: op.Running, Done: op.Done, OK: op.OK, Err: op.Err}
+	if runner := s.Svc.Runner(); runner != nil {
+		d.Progress = runner.Progress()
+	}
+	if d.DB == "" && d.Progress.Kind == "restore" {
+		// Restore just started; RestoreOp may not be visible yet — use progress label.
+		d.DB = strings.TrimPrefix(d.Progress.Label, "Restoring ")
+		d.Running = !d.Progress.Done
+	}
+	refresh := 0
+	if d.Running || (d.Progress.Kind == "restore" && !d.Progress.Done) {
+		refresh = 2
+		d.Running = true
+	}
+	title := "Restore"
+	if d.DB != "" {
+		title = "Restore " + d.DB
+	}
+	s.render(w, r, "restore_progress", page{Title: title, Nav: "databases", Refresh: refresh, Data: d})
+}
+
+func (s *Server) restoreConfirmFromKey(r *http.Request, key, confirm string) (restoreConfirmData, error) {
+	db, taken, ok := pgdump.ParseKey(key)
+	if !ok {
+		return restoreConfirmData{}, errors.New("That isn't a database dump.")
+	}
+	store := s.Svc.Runner().Store
+	objs, err := store.List(r.Context(), key)
+	if err != nil || !slices.ContainsFunc(objs, func(o storage.Object) bool { return o.Key == key }) {
+		return restoreConfirmData{}, errors.New("That dump doesn't exist any more.")
+	}
+	d := restoreConfirmData{DB: db, Key: key, Taken: taken, Confirm: confirm}
+	if inv, err := s.dumpsInventory(r); err == nil {
+		for _, row := range inv.Rows {
+			if row.Name == db {
+				d.Label = row.Label
+				break
+			}
+		}
+	}
+	return d, nil
+}
+
 type jobsData struct {
-	Runs   []state.Run
-	Job    string
-	Active map[string]string
-	Names  []string
-	Manual []string
+	Runs     []state.Run
+	Job      string
+	Active   map[string]string
+	Names    []string
+	Manual   []string
+	Progress jobs.Progress
 }
 
 func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
@@ -288,9 +397,12 @@ func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := jobsData{Runs: runs, Job: job, Active: s.Svc.Active(), Names: jobs.Names, Manual: []string{jobs.Diff, jobs.Dumps, jobs.Report}}
+	if runner := s.Svc.Runner(); runner != nil {
+		d.Progress = runner.Progress()
+	}
 	refresh := 0
-	if len(d.Active) > 0 || slices.ContainsFunc(runs, func(r state.Run) bool { return r.Status == state.StatusRunning }) {
-		refresh = 5
+	if len(d.Active) > 0 || d.Progress.Active() || slices.ContainsFunc(runs, func(r state.Run) bool { return r.Status == state.StatusRunning }) {
+		refresh = 2
 	}
 	s.render(w, r, "jobs", page{Title: "Jobs", Nav: "jobs", Refresh: refresh, Data: d})
 }

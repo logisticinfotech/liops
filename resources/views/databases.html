@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
 <h1>Databases</h1>
-<p class="muted">Each database is dumped every night after the backup. Dumps restore with <code>pg_restore</code>. Download links work for 10 minutes and every download is in the audit log.</p>
+<p class="muted">Each database is dumped every night after the backup. <strong>Download</strong> saves the dump file (link works 10 minutes; audited). <strong>Restore</strong> renames the live database to <code>name_old</code> and recreates it from that dump — type the name to confirm. Restores also work with <code>pg_restore</code> by hand.</p>
 <div class="table-wrap"><table>
   <tr><th>Database</th><th>Last dump</th><th class="num">Size</th><th class="num">Kept</th><th>Status</th><th></th></tr>
   {{range .Rows}}<tr>
@@ -12,7 +12,10 @@
     <td>{{if not .DeletedSince.IsZero}}<span class="badge deleted">no longer found since {{date .DeletedSince}}</span> <span class="muted">dump kept until {{date .KeptUntil}}</span>
         {{else if .LastError}}<span class="badge failed">last dump failed</span> <span class="muted">{{.LastError}}</span>
         {{else if .Last}}<span class="badge ok">ok</span>{{end}}</td>
-    <td>{{with .Last}}<form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form>{{end}}</td>
+    <td class="actions">{{with .Last}}
+      <form method="post" action="/download" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small">Download</button></form>
+      <form method="post" action="/restore/confirm" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="key" value="{{.Key}}"><button class="small danger" type="submit">Restore</button></form>
+    {{end}}</td>
   </tr>{{else}}<tr><td colspan="6" class="muted">No dumps yet.</td></tr>{{end}}
 </table></div>
 <h2>Roles and tablespaces</h2>

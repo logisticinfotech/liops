@@ -67,6 +67,19 @@ func (s *S3) Put(ctx context.Context, key string, r io.Reader) (int64, error) {
 	return info.Size, nil
 }
 
+func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", key, err)
+	}
+	// Stat so a missing key fails here, not on the first Read.
+	if _, err := obj.Stat(); err != nil {
+		obj.Close()
+		return nil, fmt.Errorf("download %s: %w", key, err)
+	}
+	return obj, nil
+}
+
 func (s *S3) List(ctx context.Context, prefix string) ([]Object, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

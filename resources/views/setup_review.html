@@ -6,7 +6,7 @@
   <p><strong>PostgreSQL {{.Cfg.Postgres.Version}} / {{.Cfg.Postgres.Cluster}}</strong> on port {{.Cfg.Postgres.Port}}, stanza <code>{{.Cfg.PgBackRest.Stanza}}</code></p>
   <p><strong>Storage:</strong> bucket <code>{{.Cfg.Storage.S3.Bucket}}</code> at <code>{{.Cfg.Storage.S3.Endpoint}}</code></p>
   <p><strong>Email:</strong> {{join .Cfg.Email.To ", "}} via {{.Cfg.Email.SMTPHost}}</p>
-  <p><strong>Backups:</strong> full <code>{{.Cfg.PgBackRest.FullSchedule}}</code>, differential <code>{{.Cfg.PgBackRest.DiffSchedule}}</code> ({{.Cfg.Server.Timezone}}), kept {{.Cfg.PgBackRest.RetentionDays}} days, WAL at least every {{.Cfg.PgBackRest.ArchiveTimeout}}</p>
+  <p><strong>Backups:</strong> full {{with cronDesc .Cfg.PgBackRest.FullSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.FullSchedule}}</code>{{end}}, differential {{with cronDesc .Cfg.PgBackRest.DiffSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.DiffSchedule}}</code>{{end}} ({{.Cfg.Server.Timezone}}), kept {{.Cfg.PgBackRest.RetentionDays}} days, WAL at least every {{.Cfg.PgBackRest.ArchiveTimeout}}</p>
   <p><strong>Dumps:</strong> {{if .Cfg.Dumps.Enabled}}every night, kept {{.Cfg.Dumps.RetentionDays}} days{{if .Cfg.Dumps.Exclude}}, except {{join .Cfg.Dumps.Exclude ", "}}{{end}}{{else}}off{{end}}</p>
 </div>
 <div class="panel">

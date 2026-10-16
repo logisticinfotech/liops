@@ -12,6 +12,9 @@ import (
 
 // backup runs a pgBackRest full or differential backup (layer 1).
 func (r *Runner) backup(ctx context.Context, typ, trigger string, run *state.Run) error {
+	r.setProgress(Progress{Kind: typ, Label: backupName(typ), Detail: "Running pgBackRest…"})
+	defer r.clearProgress()
+
 	out, err := r.Backrest.Backup(ctx, typ)
 	r.logOutput(typ, out)
 	run.Output = command.LastLines(string(out), outputLines)

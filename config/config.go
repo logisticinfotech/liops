@@ -416,10 +416,32 @@ func checkSchedule(errs *[]error, field, spec string) {
 // Duration is a time.Duration written in YAML as "1h", "15m", etc.
 type Duration time.Duration
 
-func (d Duration) String() string { return time.Duration(d).String() }
+// String formats d without zero units: "1h" not "1h0m0s".
+func (d Duration) String() string {
+	td := time.Duration(d)
+	if td == 0 {
+		return "0s"
+	}
+	if td < 0 {
+		return "-" + Duration(-td).String()
+	}
+	var b strings.Builder
+	if h := td / time.Hour; h > 0 {
+		fmt.Fprintf(&b, "%dh", h)
+		td -= h * time.Hour
+	}
+	if m := td / time.Minute; m > 0 {
+		fmt.Fprintf(&b, "%dm", m)
+		td -= m * time.Minute
+	}
+	if s := td / time.Second; s > 0 || b.Len() == 0 {
+		fmt.Fprintf(&b, "%ds", s)
+	}
+	return b.String()
+}
 
 func (d Duration) MarshalYAML() (any, error) {
-	return time.Duration(d).String(), nil
+	return d.String(), nil
 }
 
 func (d *Duration) UnmarshalYAML(node *yaml.Node) error {

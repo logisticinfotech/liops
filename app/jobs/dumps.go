@@ -52,11 +52,15 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 	}
 
 	// What was in storage before tonight, to spot databases dumped for the first time.
-	before, listErr := r.Store.List(ctx, storage.DumpsPrefix)
+	before, listErr := storage.ListDumps(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
 	if listErr != nil {
 		note("warning: %v (retention is skipped tonight)", listErr)
 	}
 	previous := pgdump.Group(before)
+
+	total := len(dbs) + 1 // +1 for globals
+	r.setProgress(Progress{Kind: Dumps, Label: "Database dumps", Detail: "Starting…", Total: total})
+	defer r.clearProgress()
 
 	run.Dumps = r.dumpAll(ctx, dbs, labels)
 	var failed []state.DumpRun
@@ -70,6 +74,7 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 		}
 	}
 
+	r.bumpProgress(len(dbs), "Roles and tablespaces…")
 	var problems []error
 	if _, size, err := r.Dumps.DumpGlobals(ctx, r.now()); err != nil {
 		note("roles and tablespaces (pg_dumpall --globals-only): FAILED: %v", err)
@@ -77,6 +82,7 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 	} else {
 		run.Size += size
 	}
+	r.bumpProgress(total, "Finishing…")
 
 	// First dumps ever (e.g. right after setup): don't send an email per database.
 	if listErr == nil && len(previous) > 0 {
@@ -110,6 +116,9 @@ func (r *Runner) dumpAll(ctx context.Context, dbs []string, labels map[string]st
 	results := make([]state.DumpRun, len(dbs))
 	sem := make(chan struct{}, max(1, r.Cfg.Dumps.Concurrency))
 	var wg sync.WaitGroup
+	var doneMu sync.Mutex
+	done := 0
+	dbTotal := len(dbs)
 	for i, db := range dbs {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -125,6 +134,11 @@ func (r *Runner) dumpAll(ctx context.Context, dbs []string, labels map[string]st
 				res.Key, res.Size = key, size
 			}
 			results[i] = res
+			doneMu.Lock()
+			done++
+			n := done
+			doneMu.Unlock()
+			r.bumpProgress(n, fmt.Sprintf("%s (%d of %d)", notify.Name(db, labels[db]), n, dbTotal))
 		}()
 	}
 	wg.Wait()
@@ -133,7 +147,7 @@ func (r *Runner) dumpAll(ctx context.Context, dbs []string, labels map[string]st
 
 // retention deletes old dumps and handles databases that disappeared or came back.
 func (r *Runner) retention(ctx context.Context, live []string, labels map[string]string, note func(string, ...any)) error {
-	objs, err := r.Store.List(ctx, storage.DumpsPrefix)
+	objs, err := storage.ListDumps(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
 	if err != nil {
 		return err
 	}
@@ -152,7 +166,7 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 	})
 
 	var errs []error
-	globals, err := r.Store.List(ctx, storage.GlobalsPrefix)
+	globals, err := storage.ListGlobals(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
 	if err != nil {
 		errs = append(errs, err)
 	}

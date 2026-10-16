@@ -68,22 +68,66 @@
 {{end}}
 
 {{define "fields-schedules"}}
-<div class="hint">Schedules are 5-field cron: minute hour day-of-month month day-of-week. “30 1 * * 0” is Sunday 01:30.</div>
+<div class="hint">Pick a day and a clock time (server timezone above). These cover the whole PostgreSQL server.</div>
+
+{{with $s := scheduleUI .PgBackRest.FullSchedule}}
+<label>Full backup</label>
+{{if $s.OK}}
 <div class="row">
-  <div><label for="full_schedule">Full backup</label>
-    <input type="text" id="full_schedule" name="full_schedule" value="{{.PgBackRest.FullSchedule}}" class="mono"></div>
-  <div><label for="diff_schedule">Differential backup</label>
-    <input type="text" id="diff_schedule" name="diff_schedule" value="{{.PgBackRest.DiffSchedule}}" class="mono">
-    <div class="hint">The database dumps run right after each backup.</div></div>
-  <div><label for="report_schedule">Daily summary email</label>
-    <input type="text" id="report_schedule" name="report_schedule" value="{{.Report.Schedule}}" class="mono"></div>
+  <div><label for="full_days">On</label>
+    <select id="full_days" name="full_days">{{range dayPresetsFor $s.Days}}
+      <option value="{{.Value}}" {{if eq .Value $s.Days}}selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+  <div><label for="full_time">At</label>
+    <input type="time" id="full_time" name="full_time" value="{{$s.Time}}" required></div>
 </div>
+{{else}}
+<input type="text" id="full_schedule" name="full_schedule" value="{{$s.Spec}}" class="mono">
+<div class="hint">Custom cron schedule.</div>
+{{end}}{{end}}
+
+{{with $s := scheduleUI .PgBackRest.DiffSchedule}}
+<label>Differential backup</label>
+{{if $s.OK}}
+<div class="row">
+  <div><label for="diff_days">On</label>
+    <select id="diff_days" name="diff_days">{{range dayPresetsFor $s.Days}}
+      <option value="{{.Value}}" {{if eq .Value $s.Days}}selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+  <div><label for="diff_time">At</label>
+    <input type="time" id="diff_time" name="diff_time" value="{{$s.Time}}" required>
+    <div class="hint">Database dumps run right after each backup.</div></div>
+</div>
+{{else}}
+<input type="text" id="diff_schedule" name="diff_schedule" value="{{$s.Spec}}" class="mono">
+<div class="hint">Custom cron schedule.</div>
+{{end}}{{end}}
+
+{{with $s := scheduleUI .Report.Schedule}}
+<label>Daily summary email</label>
+{{if $s.OK}}
+<div class="row">
+  <div><label for="report_time">Every day at</label>
+    <input type="time" id="report_time" name="report_time" value="{{$s.Time}}" required>
+    <input type="hidden" name="report_days" value="*"></div>
+</div>
+{{else}}
+<input type="text" id="report_schedule" name="report_schedule" value="{{$s.Spec}}" class="mono">
+<div class="hint">Custom cron schedule.</div>
+{{end}}{{end}}
+
 <div class="row">
   <div><label for="retention_days">Point-in-time retention (days)</label>
     <input type="number" id="retention_days" name="retention_days" value="{{.PgBackRest.RetentionDays}}">
     <div class="hint">You can restore to any moment in this window.</div></div>
   <div><label for="archive_timeout">WAL upload at least every</label>
-    <input type="text" id="archive_timeout" name="archive_timeout" value="{{.PgBackRest.ArchiveTimeout}}" class="mono">
+    <select id="archive_timeout" name="archive_timeout">
+      {{$cur := .PgBackRest.ArchiveTimeout.String}}
+      {{if not (hasWalPreset .PgBackRest.ArchiveTimeout)}}
+      <option value="{{$cur}}" selected>Every {{$cur}} (current)</option>
+      {{end}}
+      {{range walPresets}}
+      <option value="{{.Value}}" {{if eq .Value $cur}}selected{{end}}>{{.Label}}</option>
+      {{end}}
+    </select>
     <div class="hint">At most this much recent work can be lost. Between 1m and 24h.</div></div>
 </div>
 {{end}}
