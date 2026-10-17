@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
 <h1>Jobs</h1>
-{{if .Progress.Kind}}{{if not .Progress.Done}}{{template "progress" .Progress}}{{else if .Progress.Err}}{{template "progress" .Progress}}{{end}}{{end}}
+{{if .Progress.Active}}{{template "progress" .Progress}}{{end}}
 <div class="panel">
   <strong>Run now:</strong>
   {{range .Manual}}

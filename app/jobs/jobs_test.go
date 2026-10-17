@@ -109,17 +109,6 @@ func (w *world) handle(program string, c command.Cmd) ([]byte, error) {
 		if strings.Contains(args, "pg_stat_archiver") {
 			return fmt.Appendf(nil, "%d\t0\n", w.now.Unix()), nil
 		}
-		if strings.Contains(args, "pg_database WHERE datname") {
-			for _, db := range w.databases {
-				if strings.Contains(args, "datname = "+quoteSQLLiteral(db)) {
-					return []byte("1\n"), nil
-				}
-			}
-			return nil, nil
-		}
-		if strings.Contains(args, "ALTER DATABASE") || strings.Contains(args, "pg_terminate_backend") {
-			return nil, nil
-		}
 		var out strings.Builder
 		for _, db := range w.databases {
 			out.WriteString(hex.EncodeToString([]byte(db)) + "\n")
@@ -135,8 +124,6 @@ func (w *world) handle(program string, c command.Cmd) ([]byte, error) {
 		return []byte("PGDMP " + args), nil
 	case "pg_dumpall":
 		return []byte("CREATE ROLE app;\n"), nil
-	case "chown", "dropdb", "createdb", "pg_restore":
-		return nil, nil
 	}
 	return nil, fmt.Errorf("unexpected command %s %s", program, args)
 }
@@ -158,10 +145,6 @@ func (w *world) subjects() []string {
 	return s
 }
 
-func quoteSQLLiteral(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
 func TestDiffThenDumps(t *testing.T) {
 	w := newWorld(t, "app", "postgres", "tenant_abc")
 	if err := w.runner.Run(context.Background(), Diff, Scheduled); err != nil {
@@ -174,7 +157,7 @@ func TestDiffThenDumps(t *testing.T) {
 	if got := len(runs[0].Dumps); got != 2 {
 		t.Errorf("postgres is excluded by default, so 2 databases are dumped, got %d", got)
 	}
-	if len(w.keys("pgbackrest/backup/main/dumps/app/")) != 1 || len(w.keys("pgbackrest/backup/main/dumps/tenant_abc/")) != 1 || len(w.keys("pgbackrest/backup/main/globals/")) != 1 {
+	if len(w.keys("dumps/app/")) != 1 || len(w.keys("dumps/tenant_abc/")) != 1 || len(w.keys("globals/")) != 1 {
 		t.Errorf("stored: %v", w.keys(""))
 	}
 	if len(w.mail.Sent) != 0 {
@@ -206,8 +189,8 @@ func TestFailedDumpSendsOneEmail(t *testing.T) {
 			t.Errorf("body is missing %q:\n%s", want, email.Body)
 		}
 	}
-	if len(w.keys("pgbackrest/backup/main/dumps/app/")) != 2 || len(w.keys("pgbackrest/backup/main/dumps/tenant_xyz/")) != 1 {
-		t.Errorf("app is dumped again, tenant_xyz keeps its old dump: %v", w.keys("pgbackrest/backup/main/dumps/"))
+	if len(w.keys("dumps/app/")) != 2 || len(w.keys("dumps/tenant_xyz/")) != 1 {
+		t.Errorf("app is dumped again, tenant_xyz keeps its old dump: %v", w.keys("dumps/"))
 	}
 	last, _ := w.runner.State.LastRun(Dumps, "")
 	if last.Status != state.StatusFailed {
@@ -241,14 +224,14 @@ func TestNewAndDeletedDatabases(t *testing.T) {
 	if err := w.runner.Run(context.Background(), Dumps, Scheduled); err != nil {
 		t.Fatal(err)
 	}
-	if keys := w.keys("pgbackrest/backup/main/dumps/old_tenant/"); len(keys) != 0 {
+	if keys := w.keys("dumps/old_tenant/"); len(keys) != 0 {
 		t.Errorf("old_tenant's dump should be gone: %v", keys)
 	}
 	if deleted, _ := w.runner.State.Deleted(); len(deleted) != 0 {
 		t.Errorf("old_tenant should no longer be tracked: %v", deleted)
 	}
 	// Live databases keep the newest dump plus the ones within 7 days.
-	if keys := w.keys("pgbackrest/backup/main/dumps/app/"); len(keys) != 1 {
+	if keys := w.keys("dumps/app/"); len(keys) != 1 {
 		t.Errorf("app should have only its newest dump left: %v", keys)
 	}
 }
@@ -335,11 +318,8 @@ func TestUnknownJob(t *testing.T) {
 }
 
 func TestProgressHelpers(t *testing.T) {
-	if (Progress{}).Active() || (Progress{Kind: "dumps", Done: true}).Active() {
-		t.Fatal("idle or successful-done progress should not be Active")
-	}
-	if !(Progress{Kind: "dumps", Total: 3}).Active() || !(Progress{Kind: "dumps", Done: true, Err: "x"}).Active() {
-		t.Fatal("running or failed progress should be Active")
+	if (Progress{}).Active() || !(Progress{Kind: "dumps"}).Active() {
+		t.Fatal("Active should follow Kind")
 	}
 	if !(Progress{Total: 3}).Determinate() || (Progress{}).Determinate() {
 		t.Fatal("Determinate should follow Total > 0")
@@ -354,25 +334,5 @@ func TestDumpsReportsProgress(t *testing.T) {
 	// Finished dumps clear progress.
 	if p := w.runner.Progress(); p.Kind != "" {
 		t.Errorf("progress should be cleared after dumps: %+v", p)
-	}
-}
-
-func TestRestoreDumpProgress(t *testing.T) {
-	w := newWorld(t, "app")
-	key := pgdump.Key("main", "app", w.now)
-	w.store.Add(key, []byte("PGDMP"), w.now)
-	keptAs, err := w.runner.RestoreDump(context.Background(), "app", key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if keptAs != "app_old" {
-		t.Errorf("keptAs = %q", keptAs)
-	}
-	p := w.runner.Progress()
-	if !p.Done || p.Kind != "restore" || p.Err != "" {
-		t.Errorf("expected finished restore progress, got %+v", p)
-	}
-	if p.Current != 4 || p.Total != 4 {
-		t.Errorf("expected 4/4, got %d/%d", p.Current, p.Total)
 	}
 }

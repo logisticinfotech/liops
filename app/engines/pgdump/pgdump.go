@@ -26,42 +26,30 @@ const keyTime = "2006-01-02T150405Z"
 // Engine dumps the databases of one cluster into a Store.
 type Engine struct {
 	Cfg     config.Dumps
-	Stanza  string
 	Cluster postgres.Cluster
 	Store   storage.Store
 }
 
 func New(cfg *config.Config, run command.Runner, store storage.Store) *Engine {
-	return &Engine{
-		Cfg:     cfg.Dumps,
-		Stanza:  cfg.PgBackRest.Stanza,
-		Cluster: postgres.Cluster{Cfg: cfg.Postgres, Run: run},
-		Store:   store,
-	}
+	return &Engine{Cfg: cfg.Dumps, Cluster: postgres.Cluster{Cfg: cfg.Postgres, Run: run}, Store: store}
 }
 
-// Key is the object key of a dump of db taken at t under the stanza:
-// pgbackrest/backup/<stanza>/dumps/<db>/<UTC time>.dump.
+// Key is the object key of a dump of db taken at t: dumps/<db>/<UTC time>.dump.
 // The name is path-escaped, so a "/" in a database name can't change the layout.
-func Key(stanza, db string, t time.Time) string {
-	return Prefix(stanza, db) + t.UTC().Format(keyTime) + ".dump"
+func Key(db string, t time.Time) string {
+	return Prefix(db) + t.UTC().Format(keyTime) + ".dump"
 }
 
-// Prefix is where the dumps of db are stored for this stanza.
-func Prefix(stanza, db string) string {
-	return storage.DumpsPrefix(stanza) + url.PathEscape(db) + "/"
+// Prefix is where the dumps of db are stored: dumps/<db>/.
+func Prefix(db string) string {
+	return storage.DumpsPrefix + url.PathEscape(db) + "/"
 }
 
-// ParseKey returns the database and time encoded in a dump key (stanza layout or legacy dumps/).
+// ParseKey returns the database and time encoded in a dump key.
 func ParseKey(key string) (db string, t time.Time, ok bool) {
-	rest, found := strings.CutPrefix(key, storage.LegacyDumpsPrefix)
+	rest, found := strings.CutPrefix(key, storage.DumpsPrefix)
 	if !found {
-		const marker = "/dumps/"
-		i := strings.Index(key, marker)
-		if i < 0 || !strings.HasPrefix(key, storage.PgBackRestPrefix+"backup/") {
-			return "", time.Time{}, false
-		}
-		rest = key[i+len(marker):]
+		return "", time.Time{}, false
 	}
 	escaped, file, found := strings.Cut(rest, "/")
 	if !found || strings.Contains(file, "/") {
@@ -78,15 +66,9 @@ func ParseKey(key string) (db string, t time.Time, ok bool) {
 	return db, t, true
 }
 
-// IsDumpKey reports whether key is a per-database dump object.
-func IsDumpKey(key string) bool {
-	_, _, ok := ParseKey(key)
-	return ok
-}
-
 // GlobalsKey is the object key of the roles and tablespaces dump taken at t.
-func GlobalsKey(stanza string, t time.Time) string {
-	return storage.GlobalsPrefix(stanza) + t.UTC().Format(keyTime) + ".sql"
+func GlobalsKey(t time.Time) string {
+	return storage.GlobalsPrefix + t.UTC().Format(keyTime) + ".sql"
 }
 
 // Discover returns the databases to dump: every database that accepts connections
@@ -142,7 +124,7 @@ func (e *Engine) compression() string {
 // Dump streams a custom-format dump of db to storage. Nothing is written to local
 // disk. If pg_dump or the upload fails, no object is left behind.
 func (e *Engine) Dump(ctx context.Context, db string, at time.Time) (key string, size int64, err error) {
-	key = Key(e.Stanza, db, at)
+	key = Key(db, at)
 	cmd := e.Cluster.Command("pg_dump", "-Fc", "-Z", e.compression(), "-d", postgres.Conn(db))
 	size, err = e.stream(ctx, cmd, key)
 	return key, size, err
@@ -151,7 +133,7 @@ func (e *Engine) Dump(ctx context.Context, db string, at time.Time) (key string,
 // DumpGlobals streams `pg_dumpall --globals-only` (roles, tablespaces) to storage.
 // Restoring a single database dump on a fresh server needs its roles first.
 func (e *Engine) DumpGlobals(ctx context.Context, at time.Time) (key string, size int64, err error) {
-	key = GlobalsKey(e.Stanza, at)
+	key = GlobalsKey(at)
 	size, err = e.stream(ctx, e.Cluster.Command("pg_dumpall", "--globals-only"), key)
 	return key, size, err
 }

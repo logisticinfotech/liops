@@ -109,38 +109,6 @@ func (r *Runner) location() *time.Location {
 
 func (r *Runner) now() time.Time { return r.Now().In(r.location()) }
 
-// RestoreDump renames the live database to <db>_old (when present), recreates db
-// from a stored dump, under the job lock so it does not overlap full/diff/dumps.
-// keptAs is the renamed previous database, or "". It is not a scheduled job; the
-// UI records the attempt in the audit log.
-func (r *Runner) RestoreDump(ctx context.Context, db, key string) (keptAs string, err error) {
-	r.logf("restore", "waiting for any running job to finish")
-	r.setProgress(Progress{Kind: "restore", Label: "Restoring " + db, Detail: "Waiting for any running job to finish…", Total: 4})
-	unlock, err := r.lock(ctx)
-	if err != nil {
-		r.finishProgress(err)
-		return "", err
-	}
-	defer unlock()
-
-	r.logf("restore", "restoring %s from %s", db, key)
-	start := r.now()
-	keptAs, err = r.Dumps.Restore(ctx, db, key, func(step int, detail string) {
-		r.setProgress(Progress{Kind: "restore", Label: "Restoring " + db, Detail: detail, Current: step, Total: 4})
-	})
-	r.finishProgress(err)
-	if err != nil {
-		r.logf("restore", "FAILED after %s: %v", notify.Duration(r.now().Sub(start)), err)
-		return keptAs, err
-	}
-	if keptAs != "" {
-		r.logf("restore", "finished %s in %s (previous kept as %s)", db, notify.Duration(r.now().Sub(start)), keptAs)
-	} else {
-		r.logf("restore", "finished %s in %s", db, notify.Duration(r.now().Sub(start)))
-	}
-	return keptAs, nil
-}
-
 // Run runs one job. full and diff are followed by dumps when dumps are enabled,
 // recorded as a separate run.
 func (r *Runner) Run(ctx context.Context, job, trigger string) error {

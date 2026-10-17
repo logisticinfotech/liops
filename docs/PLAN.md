@@ -30,9 +30,9 @@ Nothing in this repository is specific to any particular deployment. Each server
 
 **Non-goals (v1)**
 
-- **Point-in-time restore from the UI.** Cluster PITR stays manual (`pgbackrest restore` over SSH,
-  `docs/restore.md`). Per-database **in-place** restore from a dump is available in the UI
-  (type the database name to confirm; renames the live DB to `_old`, then restores into the same name).
+- **Restoring from the UI.** Restores are manual, using pgBackRest and `pg_restore` over SSH,
+  following a documented runbook (`docs/restore.md`, Phase 3). The UI shows the commands for a
+  dump, filled in, but never runs them.
 - **A central dashboard for many servers.** v1 has one UI per server.
 - **Automatic restore tests.** Restore tests are manual, following the runbook.
 - **Browser access over the internet.** The UI is reached through an SSH tunnel only.
@@ -51,7 +51,7 @@ Nothing in this repository is specific to any particular deployment. Each server
 | Code and releases | Public repo [`logisticinfotech/pgtijori`](https://github.com/logisticinfotech/pgtijori), with GitHub Releases for the binary and `install.sh` (§7.1) |
 | License | **Apache-2.0** |
 | Users | Developers. Emails and UI are plain, but don't need to be non-technical. |
-| Restore from UI | **Per-database dump only** (rename live DB to `_old`, restore into same name; confirm by typing the name). Cluster PITR stays manual. |
+| Restore from UI | **No.** Restores are manual, using the runbook. An in-place restore button was built and removed (October 2026): with no login (§5.2) any local process could replace a live database, and swapping a database is the moment a person has to stop the app. The UI shows filled-in commands instead. |
 | Restore tests | Manual, using the runbook |
 | UI | **One per server**, no central dashboard in v1 |
 | UI access | **SSH tunnel only**, and **no login** (§5.2). The UI binds to a loopback address, enforced by config validation (§5.3). |
@@ -98,7 +98,7 @@ so it feels familiar to developers coming from those frameworks.
         ▼                                    ▼ (streamed, no local file)
    S3-compatible bucket (one per server)
      pgbackrest/                  ← layer 1: full + diff + WAL (point-in-time)
-     pgbackrest/backup/<stanza>/dumps/<database>/<date>.dump ← layer 2: nightly pg_dump per database
+     dumps/<database>/<date>.dump ← layer 2: nightly pg_dump per database
 ```
 
 ### 4.1 Layer 1: point-in-time backups (pgBackRest)
@@ -121,8 +121,8 @@ so it feels familiar to developers coming from those frameworks.
   night.
 - **Order**: dumps run **after** the nightly backup, one database at a time (`concurrency`,
   default 1).
-- **Retention**: keep N days per database (default 7). pgtijori lists
-  `pgbackrest/backup/<stanza>/dumps/<db>/` and deletes older objects.
+- **Retention**: keep N days per database (default 7). pgtijori lists `dumps/<db>/` and deletes
+  older objects.
 - **Deleted databases**: when a database disappears from discovery, pgtijori marks it
   `deleted since <date>`, sends an email, keeps its **newest** dump for N days (default 14),
   then deletes it. Note: layer 1 still contains the deleted database until its backups
@@ -191,20 +191,17 @@ Server-rendered pages (`html/template` + `embed`) with a little vanilla JS. Six 
 |--------|---------|
 | **Dashboard** | Overall health (OK / ATTENTION / FAILED), last full and differential, **can restore back to `<date>`**, newest WAL upload, storage used, server disk, next scheduled jobs |
 | **Point-in-time backups** | Table from `pgbackrest info --output=json`: type, start/end, duration, size |
-| **Databases** | One row per database: label, last dump time and size, history, **Download** and **Restore** (in-place, confirm by typing the name). Deleted databases show "deleted since … (dump kept until …)". |
+| **Databases** | One row per database: label, last dump time and size, history, **Download** button. Deleted databases show "deleted since … (dump kept until …)". |
 | **Jobs** | History of all runs, filterable, with each job's output. A **Run now** button for `diff`, `dumps` and `report`. |
 | **Settings** | Storage, email, schedules, retention, exclusions, label query. Each section has a **Test** button. |
 | **Audit log** | Which dump was downloaded, which settings changed, which jobs were started, and when |
 
-### 5.1 Downloads and in-place restore
+### 5.1 Downloads
 
 - **Download** creates a **short-lived presigned URL** (10 minutes), so the browser downloads
   straight from storage and the server isn't in the path. Every download is written to the
   audit log.
 - Downloads cover **layer 2 dumps** only. Layer 1 files aren't usable on their own.
-- **Restore** renames the live database to `<name>_old` and `pg_restore`s the chosen dump into
-  the **same name**. The operator must type the database name to confirm. System databases are
-  refused. The job lock is held so restore does not overlap backups/dumps. Audited like downloads.
 
 ### 5.2 No login
 
@@ -220,7 +217,7 @@ can open (`ssh -L 8899:/run/pgtijori/ui.sock …`), which keeps the same conveni
 
 Still in place, because they cost the user nothing: CSRF tokens on every form and an Origin
 check, SameSite=Strict cookies, a strict Content-Security-Policy, and refusing requests whose
-`Host` isn't localhost (DNS rebinding). Downloads, in-place restores and settings changes are in the audit log.
+`Host` isn't localhost (DNS rebinding). Downloads and settings changes are in the audit log.
 
 ### 5.3 Access
 
@@ -337,7 +334,7 @@ safe to run again.
 ### 7.3 CLI (for SSH use)
 
 `pgtijori status | run <full|diff|dumps|report> | logs | version | config init|validate | uninstall`.
-Per-database in-place restore is in the UI; cluster PITR uses `pgbackrest` over SSH (see `docs/restore.md`).
+Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 
 ---
 
@@ -412,7 +409,7 @@ Rough estimates for one developer. Each phase ends with a usable result.
   integration test (`test/integration.sh`: setup, backups, dumps, a dump restore and a
   point-in-time restore, emails) still has to pass in CI, then run for a week on a test VM.
   Notes from building it:
-  - Dump keys are `pgbackrest/backup/<stanza>/dumps/<db>/<UTC time>.dump`, with the time to the second so a manual
+  - Dump keys are `dumps/<db>/<UTC time>.dump`, with the time to the second so a manual
     "Run now" doesn't overwrite the night's dump. Roles go to `globals/<time>.sql`.
   - Retention always keeps a live database's newest dump, even past the retention period, so
     failed nights can't leave a database with no dump.
@@ -421,7 +418,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
     queues behind a scheduled job instead of overlapping it.
   - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
 - **Phase 2:** implemented on branch `phase-2-ui`: all six screens, audited downloads, settings
-  that apply without a restart. Login (password + TOTP) was built, then removed after a
+  that apply without a restart, schedules picked as day + time (custom cron still accepted),
+  a progress bar for running jobs, and filled-in restore commands for each database. Login (password + TOTP) was built, then removed after a
   first try on Ubuntu (§5.2). Notes:
   - Requests whose `Host` isn't localhost are refused (DNS rebinding), on top of
     loopback-only listening.

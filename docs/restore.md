@@ -1,8 +1,7 @@
 # Restoring from pgtijori backups
 
-pgtijori takes the backups. You can restore **one database in place** from the UI (Databases →
-Restore), or do restores by hand over SSH with `pgbackrest` and `pg_restore`, following this
-page. Cluster point-in-time restore is always manual.
+pgtijori takes the backups. Restores are done by hand over SSH, with `pgbackrest` and
+`pg_restore`, following this page. The UI never restores anything.
 
 Commands below use these placeholders. Replace them with your values from
 `/etc/pgtijori/config.yaml`:
@@ -17,8 +16,7 @@ Commands below use these placeholders. Replace them with your values from
 
 | Situation | Use | Section |
 |---|---|---|
-| One database is damaged; replace it with last night's dump **in place** | UI **Restore**, or dump + `pg_restore` | [0](#0-restore-one-database-in-place-from-the-ui) / [1](#1-restore-one-database-from-a-dump) |
-| One database; restore next to the original and check first | its nightly **dump** | [1](#1-restore-one-database-from-a-dump) |
+| One database is damaged, or you need an old copy of one database | its nightly **dump** | [1](#1-restore-one-database-from-a-dump) |
 | Someone deleted or broke data; you need everything back as it was at a certain time | **point-in-time** backup | [2](#2-restore-the-whole-cluster-to-a-point-in-time) |
 | The server is gone | **point-in-time** backup, on a new server | [3](#3-restore-onto-a-new-server) |
 | You want to check that backups restore (do this every few months) | both, without touching production | [4](#4-restore-test) |
@@ -30,37 +28,16 @@ Dumps of different databases are taken minutes apart. If databases must match ea
 > server**, for example in your password manager. If the server is lost, you need the
 > bucket, endpoint, access key, secret key and stanza name to restore anything.
 
-## 0. Restore one database in place from the UI
-
-On the **Databases** page (or a database's dump history), press **Restore** next to the dump.
-Type the **exact database name** to confirm. pgtijori then:
-
-1. downloads that dump from storage to a temp file,
-2. terminates connections to the live database,
-3. **renames** it to `<name>_old` (or `<name>_old_2` if that name is taken),
-4. creates the database again under the **same name**,
-5. runs `pg_restore --exit-on-error` into it.
-
-The previous database stays on the server as `<name>_old` until you drop it. **Download** still
-only fetches the dump file; it does not change PostgreSQL.
-
-If `pg_restore` fails after the rename, pgtijori drops the partial new database and tries to
-rename `<name>_old` back to `<name>`. If that rollback fails, check with `psql -l` and use
-**Download** + restore by hand (§1). System databases (`postgres`, `template0`, `template1`)
-cannot be restored from the UI. Every attempt is in the audit log. A restore waits if a backup
-or dump job is running.
-
 ## 1. Restore one database from a dump
 
 Dumps are pg_dump custom-format files, compressed with zstd from PostgreSQL 16. You need
-`pg_restore` of the same or a newer major version. Prefer this path when you want to check the
-data in a **new** database name before replacing production.
+`pg_restore` of the same or a newer major version.
 
 **Get the dump.** Use the UI (Databases, then Download), or do it on the server:
 
 ```bash
 sudo pgtijori dumps list tenant_abc
-sudo pgtijori dumps url pgbackrest/backup/main/dumps/tenant_abc/2026-10-05T200102Z.dump    # prints a link, valid 10 minutes
+sudo pgtijori dumps url dumps/tenant_abc/2026-10-05T200102Z.dump    # prints a link, valid 10 minutes
 curl -fsSL -o /tmp/tenant_abc.dump '<the link>'
 sudo chown postgres: /tmp/tenant_abc.dump
 ```

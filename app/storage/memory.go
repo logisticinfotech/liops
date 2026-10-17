@@ -3,10 +3,8 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -56,20 +54,12 @@ func (m *Memory) Add(key string, data []byte, modified time.Time) {
 	m.objects[key] = memObject{data: data, modified: modified}
 }
 
-// Bytes returns an object's content for tests.
-func (m *Memory) Bytes(key string) ([]byte, bool) {
+// Get returns an object's content.
+func (m *Memory) Get(key string) ([]byte, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, ok := m.objects[key]
 	return o.data, ok
-}
-
-func (m *Memory) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	data, ok := m.Bytes(key)
-	if !ok {
-		return nil, fmt.Errorf("download %s: not found", key)
-	}
-	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 func (m *Memory) List(ctx context.Context, prefix string) ([]Object, error) {

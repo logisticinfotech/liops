@@ -52,7 +52,7 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 	}
 
 	// What was in storage before tonight, to spot databases dumped for the first time.
-	before, listErr := storage.ListDumps(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
+	before, listErr := r.Store.List(ctx, storage.DumpsPrefix)
 	if listErr != nil {
 		note("warning: %v (retention is skipped tonight)", listErr)
 	}
@@ -147,7 +147,7 @@ func (r *Runner) dumpAll(ctx context.Context, dbs []string, labels map[string]st
 
 // retention deletes old dumps and handles databases that disappeared or came back.
 func (r *Runner) retention(ctx context.Context, live []string, labels map[string]string, note func(string, ...any)) error {
-	objs, err := storage.ListDumps(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
+	objs, err := r.Store.List(ctx, storage.DumpsPrefix)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 	})
 
 	var errs []error
-	globals, err := storage.ListGlobals(ctx, r.Store, r.Cfg.PgBackRest.Stanza)
+	globals, err := r.Store.List(ctx, storage.GlobalsPrefix)
 	if err != nil {
 		errs = append(errs, err)
 	}

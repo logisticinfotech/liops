@@ -81,10 +81,6 @@ textarea { font-family: var(--mono); font-size: 13px; min-height: 80px; }
 input.code { font-family: var(--mono); font-size: 22px; letter-spacing: 6px; text-align: center; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 16px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; align-items: center; }
-td.actions { margin-top: 0; justify-content: flex-end; }
-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 16px 0; }
-dt { color: var(--muted); }
-dd { margin: 0; }
 button, .button { display: inline-block; padding: 8px 16px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 button.secondary, .button.secondary { background: transparent; color: var(--accent); }
 button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
