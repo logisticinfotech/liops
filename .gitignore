@@ -11,6 +11,9 @@ coverage.*
 # Local config files must never be committed: they hold secrets.
 config.yaml
 
+# Laptop dev environment (scripts/dev.sh): config, state, certificates, MinIO data.
+/dev/
+
 # OS / editors
 .DS_Store
 .idea/

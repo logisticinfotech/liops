@@ -91,7 +91,7 @@ func run(args []string, out io.Writer) error {
 
 func runConfig(sub string, args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("config "+sub, flag.ContinueOnError)
-	path := flags.String("config", config.DefaultPath, "config file path")
+	path := flags.String("config", defaultPaths().config, "config file path")
 	force := flags.Bool("force", false, "overwrite an existing file (init only)")
 	if err := flags.Parse(args); err != nil {
 		return err

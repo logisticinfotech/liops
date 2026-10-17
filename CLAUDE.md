@@ -23,6 +23,8 @@ make vuln           # govulncheck
 make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS), runs test/smoke.sh
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
 make testenv-down   # tear down and delete volumes
+make dev-up         # laptop/macOS dev without Docker: MinIO + Mailpit + dev/config.yaml
+make dev            # serve against it (PGTIJORI_DEV=1); see docs/development.md
 
 go test -run TestUIMustListenOnLoopback ./config   # single test
 ```
@@ -73,6 +75,10 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **No login** in the UI, by decision (PLAN.md §5.2): the SSH tunnel is the access control.
   Keep the protections that cost the user nothing: CSRF tokens, the localhost Host check,
   security headers. Don't add accounts back without asking.
+- **Development mode** (`PGTIJORI_DEV=1`, `dev.go`): no root check, paths default to
+  `./dev/`, and `setup --skip-pgbackrest` is allowed. It exists for working on a Mac, where
+  `postgres.bin_dir` and `postgres.os_user` point at Homebrew PostgreSQL. It isn't a
+  production feature: don't make server behaviour depend on it.
 - **Setup** steps (`app/setup`) are shared by the CLI and the wizard. Never restart
   PostgreSQL without the user asking for it.
 - Plain-language failure reasons come from `notify.LikelyReason` (substring table, first match

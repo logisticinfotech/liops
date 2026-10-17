@@ -20,6 +20,7 @@ Commands below use these placeholders. Replace them with your values from
 | Someone deleted or broke data; you need everything back as it was at a certain time | **point-in-time** backup | [2](#2-restore-the-whole-cluster-to-a-point-in-time) |
 | The server is gone | **point-in-time** backup, on a new server | [3](#3-restore-onto-a-new-server) |
 | You want to check that backups restore (do this every few months) | both, without touching production | [4](#4-restore-test) |
+| You want to check a dump on your own laptop (macOS included) | its nightly **dump** | [5](#5-check-a-dump-on-your-laptop) |
 
 Dumps of different databases are taken minutes apart. If databases must match each other
 (for example a central database plus tenant databases), use a point-in-time restore.
@@ -200,3 +201,61 @@ sudo rm -rf /var/lib/postgresql/restore-test
 
 Write down the date and how long it took. `test/integration.sh` runs the same steps
 automatically in CI against the Docker test environment.
+
+## 5. Check a dump on your laptop
+
+A dump is a logical backup (SQL objects and data, not data files), so it restores on any
+operating system and CPU, including a Mac with Homebrew PostgreSQL. This is a real check
+of the dump, and production isn't touched.
+
+You need `pg_restore` of the **same or a newer major version** than the server
+(`brew install postgresql@18`), plus any extensions the database uses (e.g.
+`brew install postgis`). Otherwise `--exit-on-error` stops at the first `CREATE EXTENSION`.
+
+**Get a link on the server, download on the laptop.** The link works from anywhere for 10
+minutes:
+
+```bash
+# on the server
+sudo pgtijori dumps list tenant_abc
+sudo pgtijori dumps url dumps/tenant_abc/2026-10-05T200102Z.dump
+
+# on the laptop
+curl -fsSL -o ~/Downloads/tenant_abc.dump '<the link>'
+```
+
+**Restore into a scratch database.** `--no-owner --no-privileges` skips the server's roles,
+which don't exist on the laptop:
+
+```bash
+pg_restore --version                       # same or newer major version than the server
+createdb tenant_abc_check
+pg_restore --exit-on-error --no-owner --no-privileges -d tenant_abc_check ~/Downloads/tenant_abc.dump
+```
+
+**Compare row counts** with production. Run this on both (on the server as
+`sudo -u postgres psql -d tenant_abc`, on the laptop as `psql -d tenant_abc_check`):
+
+```sql
+SELECT table_schema, table_name,
+       (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text::bigint AS rows
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
+ORDER BY 1, 2;
+```
+
+Production has changed since the dump was taken, so busy tables can differ a little. A
+table that is empty on the laptop but not on the server is a problem. So is a large gap.
+
+**Clean up.** The file and the database hold production data:
+
+```bash
+dropdb tenant_abc_check
+rm ~/Downloads/tenant_abc.dump
+```
+
+**Don't check point-in-time backups on a Mac.** pgBackRest restores PostgreSQL's data files,
+which are only supported on the same platform. A Linux server's files on a Mac may even
+start, but macOS sorts text differently from Linux (glibc), so text indexes can be silently
+wrong. Use section 4 on a Linux machine, or `make integration` in Docker (OrbStack or Colima
+on a Mac).

@@ -429,5 +429,10 @@ Rough estimates for one developer. Each phase ends with a usable result.
   `install-system`, the wizard, `uninstall`, `logs`, `dumps list|url`,
   and [restore.md](restore.md). Not yet done: the "done when" test, a fresh Ubuntu VM taken
   from nothing to its first backup with only the installer and the wizard.
+- **Laptop development:** `make dev-up` / `make dev` run the UI, scheduler, dumps and emails
+  on a Mac with Homebrew PostgreSQL, MinIO and Mailpit, without Docker
+  ([development.md](development.md)). pgBackRest and point-in-time restores stay on Linux.
+  Added `postgres.bin_dir` and `PGTIJORI_DEV=1` for it. `scripts/dev.sh` hasn't been run
+  end to end yet.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

@@ -62,6 +62,10 @@ type Postgres struct {
 	DataDir string `yaml:"data_dir"`
 	Port    int    `yaml:"port"`
 	OSUser  string `yaml:"os_user"`
+	// BinDir holds psql, pg_dump and pg_dumpall. Empty means the Debian/Ubuntu
+	// location for Version, /usr/lib/postgresql/<version>/bin. Set it for other
+	// installs, e.g. /opt/homebrew/opt/postgresql@18/bin on a Mac used for development.
+	BinDir string `yaml:"bin_dir"`
 }
 
 // PgBackRest is layer 1: point-in-time backups (full + differential + WAL).
@@ -305,6 +309,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Postgres.OSUser == "" {
 		add("postgres.os_user: required")
+	}
+	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
+		add("postgres.bin_dir: must be an absolute path (or empty for /usr/lib/postgresql/%d/bin)", c.Postgres.Version)
 	}
 
 	if c.PgBackRest.Stanza == "" {

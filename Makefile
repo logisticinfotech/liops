@@ -4,7 +4,7 @@ BINARY  := pgtijori
 VERSION ?= dev
 LDFLAGS := -s -w -X github.com/logisticinfotech/pgtijori/app/version.Version=$(VERSION)
 
-.PHONY: build build-linux test lint vuln testenv integration testenv-down
+.PHONY: build build-linux test lint vuln testenv integration testenv-down dev-up dev dev-down
 
 build:            ## Build for this machine
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -31,3 +31,12 @@ integration:      ## Setup, backups, dumps, emails and restores in the Docker te
 
 testenv-down:     ## Stop the test environment and delete its data
 	docker compose -f test/compose.yaml down -v
+
+dev-up:           ## Laptop dev environment without Docker: MinIO, Mailpit, dev/config.yaml (docs/development.md)
+	./scripts/dev.sh up
+
+dev: build        ## Serve the UI and scheduler against the dev environment
+	PGTIJORI_DEV=1 ./$(BINARY) serve
+
+dev-down:         ## Stop MinIO and Mailpit (dev/ is kept)
+	./scripts/dev.sh down

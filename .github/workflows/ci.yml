@@ -35,7 +35,7 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o pgtijori-linux-amd64 .
 
       - name: shellcheck
-        run: shellcheck scripts/install.sh test/*.sh test/docker/pg/entrypoint.sh
+        run: shellcheck scripts/*.sh test/*.sh test/docker/pg/entrypoint.sh
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

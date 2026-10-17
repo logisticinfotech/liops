@@ -36,12 +36,19 @@ type paths struct {
 }
 
 func parseFlags(name string, args []string) (*flag.FlagSet, *paths, error) {
+	flags, p := newFlags(name)
+	return flags, p, flags.Parse(args)
+}
+
+// newFlags is parseFlags for commands that add flags of their own before parsing.
+func newFlags(name string) (*flag.FlagSet, *paths) {
+	d := defaultPaths()
 	p := &paths{}
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.StringVar(&p.config, "config", config.DefaultPath, "config file path")
-	flags.StringVar(&p.state, "state", state.DefaultPath, "state file path")
-	flags.StringVar(&p.log, "log", defaultLogPath, "log file path")
-	return flags, p, flags.Parse(args)
+	flags.StringVar(&p.config, "config", d.config, "config file path")
+	flags.StringVar(&p.state, "state", d.state, "state file path")
+	flags.StringVar(&p.log, "log", d.log, "log file path")
+	return flags, p
 }
 
 func (p *paths) lock() string { return filepath.Join(filepath.Dir(p.state), "job.lock") }
@@ -60,7 +67,7 @@ func openLog(path string, extra ...io.Writer) (io.Writer, func(), error) {
 
 // requireRoot is a variable so tests can run commands as a normal user.
 var requireRoot = func(what string) error {
-	if os.Geteuid() != 0 {
+	if os.Geteuid() != 0 && !devMode() {
 		return fmt.Errorf("%s needs root (run it with sudo)", what)
 	}
 	return nil
@@ -258,9 +265,13 @@ func runDetail(r *state.Run) string {
 // stanza. Turning on archive_mode needs a PostgreSQL restart, which setup never does
 // by itself: it says so and stops, and the next run continues from there.
 func runSetup(args []string, out io.Writer) error {
-	_, p, err := parseFlags("setup", args)
-	if err != nil {
+	flags, p := newFlags("setup")
+	skipPgBackRest := flags.Bool("skip-pgbackrest", false, "development only: mark setup complete without pgBackRest")
+	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *skipPgBackRest && !devMode() {
+		return fmt.Errorf("--skip-pgbackrest is only for development (set %s=1); on a server, run setup without it", devEnv)
 	}
 	if err := requireRoot("pgtijori setup"); err != nil {
 		return err
@@ -268,6 +279,9 @@ func runSetup(args []string, out io.Writer) error {
 	cfg, err := config.Load(p.config)
 	if err != nil {
 		return err
+	}
+	if *skipPgBackRest {
+		return skipSetup(p, out)
 	}
 	ctx, stop := signalContext()
 	defer stop()
@@ -292,15 +306,30 @@ func runSetup(args []string, out io.Writer) error {
 		}
 		return err
 	}
-	st, err := state.Open(p.state)
-	if err != nil {
-		return err
-	}
-	if err := st.SetMeta(service.MetaSetupComplete, time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := markSetupComplete(p); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "\nSetup is complete. WAL archiving works.")
 	fmt.Fprintln(out, "Next: take the first full backup and dumps, then start the service:")
 	fmt.Fprintln(out, "\n  sudo pgtijori run full\n  sudo systemctl enable --now pgtijori")
+	return nil
+}
+
+func markSetupComplete(p *paths) error {
+	st, err := state.Open(p.state)
+	if err != nil {
+		return err
+	}
+	return st.SetMeta(service.MetaSetupComplete, time.Now().UTC().Format(time.RFC3339))
+}
+
+// skipSetup marks setup complete without touching pgBackRest or PostgreSQL, so the UI,
+// the scheduler and dumps can be worked on where pgBackRest setup can't run (a Mac).
+func skipSetup(p *paths, out io.Writer) error {
+	if err := markSetupComplete(p); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "Development setup: pgBackRest was skipped and setup is marked complete.")
+	fmt.Fprintln(out, "Dumps, the report and the UI work; full and diff backups will fail.")
 	return nil
 }

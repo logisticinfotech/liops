@@ -22,8 +22,11 @@ type Cluster struct {
 }
 
 // Bin returns the path of a PostgreSQL client program matching the server version,
-// e.g. /usr/lib/postgresql/18/bin/pg_dump on Debian/Ubuntu.
+// e.g. /usr/lib/postgresql/18/bin/pg_dump on Debian/Ubuntu, or in postgres.bin_dir.
 func (c Cluster) Bin(name string) string {
+	if c.Cfg.BinDir != "" {
+		return filepath.Join(c.Cfg.BinDir, name)
+	}
 	return filepath.Join("/usr/lib/postgresql", strconv.Itoa(c.Cfg.Version), "bin", name)
 }
 

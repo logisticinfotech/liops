@@ -47,7 +47,7 @@ func runLogs(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("logs", flag.ContinueOnError)
 	n := flags.Int("n", 100, "number of lines")
 	follow := flags.Bool("f", false, "keep printing new lines")
-	path := flags.String("log", defaultLogPath, "log file path")
+	path := flags.String("log", defaultPaths().log, "log file path")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
