@@ -87,8 +87,9 @@ make integration  # setup, backups, dumps, emails and restores in that environme
 make testenv-down # stop it and delete its data
 ```
 
-To work on the UI, dumps and emails on a laptop (a Mac with Homebrew PostgreSQL) without
-Docker, see [docs/development.md](docs/development.md): `make dev-up`, then `make dev`.
+To run everything, including the wizard and pgBackRest backups, on a Mac with Homebrew
+PostgreSQL and pgBackRest (no Docker), see [docs/development.md](docs/development.md):
+`make dev-up`, then `make dev`.
 
 Releases are built by GitHub Actions when a `v*` tag is pushed. Each release has the binary
 and `SHA256SUMS` attached.

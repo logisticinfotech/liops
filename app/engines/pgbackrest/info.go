@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -17,6 +18,13 @@ type Info struct {
 	Backups []Backup // oldest first
 	// WAL range in the repository, as segment names.
 	WALMin, WALMax string
+	// Running is true while a backup of the stanza is in progress. SizeDone of Size
+	// bytes are copied so far (pgBackRest 2.48 and newer; zero before that).
+	Running        bool
+	SizeDone, Size int64
+	// SystemID is the PostgreSQL system identifier the stanza belongs to (the newest
+	// one, after a major upgrade). Empty when the stanza doesn't exist in the bucket.
+	SystemID string
 }
 
 // Backup is one full or differential backup.
@@ -57,7 +65,18 @@ type rawStanza struct {
 	Status struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
+		Lock    struct {
+			Backup struct {
+				Held     bool  `json:"held"`
+				Size     int64 `json:"size"`
+				SizeCplt int64 `json:"size-cplt"`
+			} `json:"backup"`
+		} `json:"lock"`
 	} `json:"status"`
+	DB []struct {
+		ID       int    `json:"id"`
+		SystemID uint64 `json:"system-id"`
+	} `json:"db"`
 	Archive []struct {
 		Min string `json:"min"`
 		Max string `json:"max"`
@@ -89,7 +108,15 @@ func ParseInfo(data []byte, stanza string) (*Info, error) {
 		if s.Name != stanza {
 			continue
 		}
-		info := &Info{Stanza: s.Name, Status: s.Status.Message, OK: s.Status.Code == 0}
+		lock := s.Status.Lock.Backup
+		info := &Info{Stanza: s.Name, Status: s.Status.Message, OK: s.Status.Code == 0,
+			Running: lock.Held, SizeDone: lock.SizeCplt, Size: lock.Size}
+		newest := 0
+		for _, db := range s.DB {
+			if db.ID > newest {
+				newest, info.SystemID = db.ID, strconv.FormatUint(db.SystemID, 10)
+			}
+		}
 		for _, b := range s.Backup {
 			info.Backups = append(info.Backups, Backup{
 				Label:    b.Label,

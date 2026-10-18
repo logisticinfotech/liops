@@ -8,11 +8,11 @@
   {{range $i, $c := .Data.Clusters}}
   <label class="cluster"><input type="radio" name="cluster" value="{{$i}}" {{if and (eq $c.Version $.Data.Cfg.Postgres.Version) (eq $c.Name $.Data.Cfg.Postgres.Cluster)}}checked{{end}}>
     <span><strong>PostgreSQL {{$c.Version}} / {{$c.Name}}</strong> — port {{$c.Port}}, {{$c.Status}}<br><span class="muted mono">{{$c.DataDir}}</span></span></label>
-  {{else}}<div class="error">No PostgreSQL cluster was found. pgtijori needs PostgreSQL 13 or newer from the PGDG repository.</div>{{end}}
+  {{else}}<div class="error">No PostgreSQL cluster was found. pgtijori needs PostgreSQL 13 or newer from the PGDG repository (or from Homebrew on a Mac, for development).</div>{{end}}
   <div class="row">
-    <div><label for="stanza">pgBackRest stanza name</label>
-      <input type="text" id="stanza" name="stanza" value="{{or .Data.Cfg.PgBackRest.Stanza "main"}}" class="mono">
-      <div class="hint">A short name for this cluster's backups, e.g. the app's name. Don't change it later.</div></div>
+    <div><label for="stanza">Backup name</label>
+      <input type="text" id="stanza" name="stanza" value="{{.Data.Cfg.PgBackRest.Stanza}}" placeholder="app-prod-1" class="mono">
+      <div class="hint">This server's folder in the bucket (and its pgBackRest stanza). Use a new name for every server, including a replacement for a lost one. It can't be changed later. Keep it with your storage credentials: restores need it.</div></div>
     <div><label for="name">Server name</label>
       <input type="text" id="name" name="name" value="{{.Data.Cfg.Server.Name}}" placeholder="the hostname">
       <div class="hint">Shown in emails.</div></div>

@@ -4,6 +4,7 @@
 <ul class="task">
   {{range .Task.Steps}}<li><span class="badge {{.Status}}">{{.Status}}</span> <strong>{{.Title}}</strong>{{if .Detail}}<pre>{{.Detail}}</pre>{{end}}</li>{{end}}
 </ul>
+{{if .Progress.Active}}{{template "progress" .Progress}}{{end}}
 {{if .Task.Restart}}
 <div class="panel">
   <p><strong>PostgreSQL needs one restart</strong> to turn on WAL archiving. Connections drop for a few seconds.</p>

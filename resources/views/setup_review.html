@@ -3,7 +3,7 @@
 <h1>Review and apply</h1>
 {{if .Problems}}<div class="error">These settings are still missing or wrong:<pre>{{lines .Problems}}</pre></div>{{end}}
 <div class="panel">
-  <p><strong>PostgreSQL {{.Cfg.Postgres.Version}} / {{.Cfg.Postgres.Cluster}}</strong> on port {{.Cfg.Postgres.Port}}, stanza <code>{{.Cfg.PgBackRest.Stanza}}</code></p>
+  <p><strong>PostgreSQL {{.Cfg.Postgres.Version}} / {{.Cfg.Postgres.Cluster}}</strong> on port {{.Cfg.Postgres.Port}}, backup name <code>{{.Cfg.PgBackRest.Stanza}}</code> (folder <code>{{.Cfg.PgBackRest.Stanza}}/</code> in the bucket)</p>
   <p><strong>Storage:</strong> bucket <code>{{.Cfg.Storage.S3.Bucket}}</code> at <code>{{.Cfg.Storage.S3.Endpoint}}</code></p>
   <p><strong>Email:</strong> {{join .Cfg.Email.To ", "}} via {{.Cfg.Email.SMTPHost}}</p>
   <p><strong>Backups:</strong> full {{with cronDesc .Cfg.PgBackRest.FullSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.FullSchedule}}</code>{{end}}, differential {{with cronDesc .Cfg.PgBackRest.DiffSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.DiffSchedule}}</code>{{end}} ({{.Cfg.Server.Timezone}}), kept {{.Cfg.PgBackRest.RetentionDays}} days, WAL at least every {{.Cfg.PgBackRest.ArchiveTimeout}}</p>

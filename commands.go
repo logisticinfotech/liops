@@ -291,10 +291,10 @@ func runSetup(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Settings are in %s and %s.\n", pgbackrest.ConfPath, engine.Cluster.ConfDPath())
+	fmt.Fprintf(out, "Settings are in %s and %s.\n", pgbackrest.ConfPath(cfg), engine.Cluster.ConfDPath())
 	if archiving == setup.NeedsRestart {
 		fmt.Fprintf(out, "\nPostgreSQL must be restarted once to turn on WAL archiving (a few seconds of downtime).\n"+
-			"When it suits you, run:\n\n  %s\n  sudo pgtijori setup\n", setup.RestartCommand(cfg))
+			"When it suits you, run:\n\n  %s\n  %s setup\n", setup.RestartCommand(cfg), self())
 		return nil
 	}
 
@@ -311,7 +311,11 @@ func runSetup(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "\nSetup is complete. WAL archiving works.")
 	fmt.Fprintln(out, "Next: take the first full backup and dumps, then start the service:")
-	fmt.Fprintln(out, "\n  sudo pgtijori run full\n  sudo systemctl enable --now pgtijori")
+	if engine.Cluster.Homebrew() {
+		fmt.Fprintf(out, "\n  %s run full\n  make dev\n", self())
+	} else {
+		fmt.Fprintln(out, "\n  sudo pgtijori run full\n  sudo systemctl enable --now pgtijori")
+	}
 	return nil
 }
 
@@ -332,4 +336,13 @@ func skipSetup(p *paths, out io.Writer) error {
 	fmt.Fprintln(out, "Development setup: pgBackRest was skipped and setup is marked complete.")
 	fmt.Fprintln(out, "Dumps, the report and the UI work; full and diff backups will fail.")
 	return nil
+}
+
+// self is how to type a pgtijori command in hints: with sudo on a server, with
+// PGTIJORI_DEV=1 in development mode.
+func self() string {
+	if devMode() {
+		return devEnv + "=1 ./pgtijori"
+	}
+	return "sudo pgtijori"
 }

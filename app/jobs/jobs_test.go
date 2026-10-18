@@ -336,3 +336,42 @@ func TestDumpsReportsProgress(t *testing.T) {
 		t.Errorf("progress should be cleared after dumps: %+v", p)
 	}
 }
+
+func TestBackupProgressFromPgBackRest(t *testing.T) {
+	w := newWorld(t)
+	old := backupPollInterval
+	backupPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { backupPollInterval = old })
+
+	seen := make(chan Progress, 1)
+	fake := &command.Fake{Handle: func(_ string, c command.Cmd) ([]byte, error) {
+		if strings.HasSuffix(strings.Join(c.Args, " "), " info") {
+			return []byte(`[{"name":"main","archive":[],"backup":[],"status":{"code":2,"message":"no valid backups",
+				"lock":{"backup":{"held":true,"size":4096,"size-cplt":1024}}}}]`), nil
+		}
+		// The backup itself: keep running until the bar shows pgBackRest's numbers.
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+			if p := w.runner.Progress(); p.Bytes {
+				seen <- p
+				break
+			}
+		}
+		return []byte("INFO: backup command end: completed successfully\n"), nil
+	}}
+	w.runner.Backrest = pgbackrest.New(w.runner.Cfg, fake)
+
+	if err := w.runner.backup(context.Background(), Full, Manual, &state.Run{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-seen:
+		if p.Current != 1024 || p.Total != 4096 || p.Percent() != 25 || !strings.Contains(p.Detail, " of ") {
+			t.Errorf("progress = %+v", p)
+		}
+	default:
+		t.Fatal("the progress bar never showed pgBackRest's progress")
+	}
+	if w.runner.Progress().Active() {
+		t.Error("progress should be cleared after the backup")
+	}
+}

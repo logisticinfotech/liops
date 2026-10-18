@@ -96,14 +96,21 @@ so it feels familiar to developers coming from those frameworks.
  │      │                                    │  SMTP                     │
  └──────┼────────────────────────────────────┼──────────────────────────┘
         ▼                                    ▼ (streamed, no local file)
-   S3-compatible bucket (one per server)
-     pgbackrest/                  ← layer 1: full + diff + WAL (point-in-time)
-     dumps/<database>/<date>.dump ← layer 2: nightly pg_dump per database
+   S3-compatible bucket
+     <backup name>/                 ← one folder per server (pgbackrest.stanza)
+       pgbackrest/                  ← layer 1: full + diff + WAL (point-in-time)
+       dumps/<database>/<date>.dump ← layer 2: nightly pg_dump per database
+       globals/<date>.sql           ← roles and tablespaces
 ```
 
 ### 4.1 Layer 1: point-in-time backups (pgBackRest)
 
-- One **stanza per server**. It covers **every database in the cluster**, all captured at the
+- One **backup name per server** (`pgbackrest.stanza`). It is both the pgBackRest stanza and
+  the server's folder in the bucket, so servers can share a bucket, and a replacement
+  server set up under a new name never touches the old server's backups. Setup refuses a
+  name whose folder holds another cluster's backups (compared by PostgreSQL system
+  identifier), before WAL archiving is turned on.
+- The stanza covers **every database in the cluster**, all captured at the
   same moment, so they stay consistent. New databases are included automatically.
 - Weekly full, nightly differential, `archive_timeout = 1h` (configurable, 1m–24h), 30-day
   retention, zstd.
@@ -417,6 +424,13 @@ Rough estimates for one developer. Each phase ends with a usable result.
   - The job lock is a file lock (`/var/lib/pgtijori/job.lock`), so `pgtijori run` over SSH
     queues behind a scheduled job instead of overlapping it.
   - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
+  - pgBackRest runs with `repo1-bundle=y` and `process-max=4` (October 2026). A first full
+    backup of a 128 MB cluster to R2 took about 35 minutes without bundling: each of its
+    ~4,500 small files was its own upload at about 0.9 s. Full and diff backups show
+    pgBackRest's progress (bytes copied, from `pgbackrest info`) as a progress bar.
+  - Everything a server stores is under `<backup name>/` in the bucket (October 2026, before
+    any production install, so there was nothing to migrate). Restoring onto a new server
+    then setting it up under a new name is restore.md §3.
 - **Phase 2:** implemented on branch `phase-2-ui`: all six screens, audited downloads, settings
   that apply without a restart, schedules picked as day + time (custom cron still accepted),
   a progress bar for running jobs, and filled-in restore commands for each database. Login (password + TOTP) was built, then removed after a
@@ -429,10 +443,12 @@ Rough estimates for one developer. Each phase ends with a usable result.
   `install-system`, the wizard, `uninstall`, `logs`, `dumps list|url`,
   and [restore.md](restore.md). Not yet done: the "done when" test, a fresh Ubuntu VM taken
   from nothing to its first backup with only the installer and the wizard.
-- **Laptop development:** `make dev-up` / `make dev` run the UI, scheduler, dumps and emails
-  on a Mac with Homebrew PostgreSQL, MinIO and Mailpit, without Docker
-  ([development.md](development.md)). pgBackRest and point-in-time restores stay on Linux.
-  Added `postgres.bin_dir` and `PGTIJORI_DEV=1` for it. `scripts/dev.sh` hasn't been run
-  end to end yet.
+- **Mac development:** `postgres.layout: homebrew` covers the Debian-only spots (cluster
+  discovery, binary and settings paths, the pgBackRest config path, restarts), so the wizard,
+  full/diff backups, WAL archiving and dumps all run on a Mac with Homebrew PostgreSQL,
+  pgBackRest, MinIO and Mailpit ([development.md](development.md)). Servers keep the
+  default `debian` layout and behave as before. `PGTIJORI_DEV=1` drops the root check and
+  keeps files in `./dev/`. macOS is still not a deployment target. Not yet run end to end:
+  `scripts/dev.sh` and a real `setup` against Homebrew pgBackRest.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

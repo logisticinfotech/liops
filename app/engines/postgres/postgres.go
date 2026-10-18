@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -21,19 +22,72 @@ type Cluster struct {
 	Run command.Runner
 }
 
-// Bin returns the path of a PostgreSQL client program matching the server version,
-// e.g. /usr/lib/postgresql/18/bin/pg_dump on Debian/Ubuntu, or in postgres.bin_dir.
+// HomebrewPrefix is where Homebrew is installed: /opt/homebrew on Apple silicon,
+// /usr/local on Intel Macs.
+var HomebrewPrefix = func() string {
+	if runtime.GOARCH == "arm64" {
+		return "/opt/homebrew"
+	}
+	return "/usr/local"
+}()
+
+// Homebrew reports whether the cluster is Homebrew's (postgres.layout: homebrew).
+func (c Cluster) Homebrew() bool { return c.Cfg.Layout == config.LayoutHomebrew }
+
+// Bin returns the path of a PostgreSQL client program matching the server version:
+// postgres.bin_dir if set, else e.g. /usr/lib/postgresql/18/bin/pg_dump on
+// Debian/Ubuntu or /opt/homebrew/opt/postgresql@18/bin/pg_dump with Homebrew.
 func (c Cluster) Bin(name string) string {
-	if c.Cfg.BinDir != "" {
+	switch {
+	case c.Cfg.BinDir != "":
 		return filepath.Join(c.Cfg.BinDir, name)
+	case c.Homebrew():
+		return filepath.Join(HomebrewPrefix, "opt", "postgresql@"+strconv.Itoa(c.Cfg.Version), "bin", name)
 	}
 	return filepath.Join("/usr/lib/postgresql", strconv.Itoa(c.Cfg.Version), "bin", name)
 }
 
 // ConfDPath is where pgtijori's PostgreSQL settings go. Debian/Ubuntu clusters
-// include conf.d/ from postgresql.conf by default.
+// include /etc/postgresql/<version>/<cluster>/conf.d/ by default. Homebrew keeps
+// postgresql.conf in the data directory, and setup adds an include_dir for conf.d/ there.
 func (c Cluster) ConfDPath() string {
+	if c.Homebrew() {
+		return filepath.Join(c.Cfg.DataDir, "conf.d", "10-pgbackrest.conf")
+	}
 	return filepath.Join("/etc/postgresql", strconv.Itoa(c.Cfg.Version), c.Cfg.Cluster, "conf.d", "10-pgbackrest.conf")
+}
+
+// ServiceName is what runs the cluster: the systemd unit (postgresql@18-main) or
+// the Homebrew service (postgresql@18).
+func (c Cluster) ServiceName() string {
+	if c.Homebrew() {
+		return "postgresql@" + strconv.Itoa(c.Cfg.Version)
+	}
+	return fmt.Sprintf("postgresql@%d-%s", c.Cfg.Version, c.Cfg.Cluster)
+}
+
+// RestartCmd restarts the cluster.
+func (c Cluster) RestartCmd() command.Cmd {
+	if c.Homebrew() {
+		return command.Cmd{Name: "brew", Args: []string{"services", "restart", c.ServiceName()}}
+	}
+	return command.Cmd{Name: "systemctl", Args: []string{"restart", c.ServiceName()}}
+}
+
+// RestartCommand is what to type to restart the cluster.
+func (c Cluster) RestartCommand() string {
+	if c.Homebrew() {
+		return "brew services restart " + c.ServiceName()
+	}
+	return "sudo systemctl restart " + c.ServiceName()
+}
+
+// StartCommand is what to type to start the cluster.
+func (c Cluster) StartCommand() string {
+	if c.Homebrew() {
+		return "brew services start " + c.ServiceName()
+	}
+	return "sudo systemctl start " + c.ServiceName()
 }
 
 // Conn is a libpq connection string for one database. Passing a bare name to

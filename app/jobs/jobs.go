@@ -75,7 +75,7 @@ type Runner struct {
 
 // New builds a Runner with the real storage, SMTP and command runner.
 func New(cfg *config.Config, st *state.Store, lockPath string, log io.Writer) (*Runner, error) {
-	store, err := storage.NewS3(cfg.Storage.S3)
+	store, err := storage.Open(cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -55,16 +56,27 @@ type UI struct {
 	Listen string `yaml:"listen"`
 }
 
+// Postgres layouts: where a PostgreSQL install keeps its programs and settings, and
+// how it is restarted.
+const (
+	// LayoutDebian is PostgreSQL from PGDG on Debian/Ubuntu (pg_lsclusters, systemd).
+	// It is what pgtijori is built for.
+	LayoutDebian = "debian"
+	// LayoutHomebrew is Homebrew's postgresql@N on macOS, for development.
+	LayoutHomebrew = "homebrew"
+)
+
 // Postgres identifies the local cluster to back up.
 type Postgres struct {
+	// Layout is LayoutDebian or LayoutHomebrew. The setup wizard sets it.
+	Layout  string `yaml:"layout"`
 	Version int    `yaml:"version"`
 	Cluster string `yaml:"cluster"`
 	DataDir string `yaml:"data_dir"`
 	Port    int    `yaml:"port"`
 	OSUser  string `yaml:"os_user"`
-	// BinDir holds psql, pg_dump and pg_dumpall. Empty means the Debian/Ubuntu
-	// location for Version, /usr/lib/postgresql/<version>/bin. Set it for other
-	// installs, e.g. /opt/homebrew/opt/postgresql@18/bin on a Mac used for development.
+	// BinDir holds psql, pg_dump and pg_dumpall. Empty means the layout's location
+	// for Version: /usr/lib/postgresql/<version>/bin, or <brew prefix>/opt/postgresql@<version>/bin.
 	BinDir string `yaml:"bin_dir"`
 }
 
@@ -137,6 +149,7 @@ func Default() *Config {
 		Server: Server{Timezone: "Asia/Kolkata"},
 		UI:     UI{Listen: "127.0.0.1:8899"},
 		Postgres: Postgres{
+			Layout:  LayoutDebian,
 			Version: 18,
 			Cluster: "main",
 			DataDir: "/var/lib/postgresql/18/main",
@@ -282,6 +295,10 @@ func (c *Config) Location() (*time.Location, error) {
 	return time.LoadLocation(c.Server.Timezone)
 }
 
+// backupNameRe is what a backup name (pgbackrest.stanza) may look like. It is both the
+// pgBackRest stanza and the server's folder in the bucket.
+var backupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
 // Validate reports every problem at once, joined with errors.Join.
 func (c *Config) Validate() error {
 	var errs []error
@@ -295,6 +312,9 @@ func (c *Config) Validate() error {
 		add("ui.listen: %v", err)
 	}
 
+	if c.Postgres.Layout != LayoutDebian && c.Postgres.Layout != LayoutHomebrew {
+		add("postgres.layout: %q must be %q or %q", c.Postgres.Layout, LayoutDebian, LayoutHomebrew)
+	}
 	if c.Postgres.Version < 13 {
 		add("postgres.version: %d is not supported (need 13 or newer)", c.Postgres.Version)
 	}
@@ -311,13 +331,13 @@ func (c *Config) Validate() error {
 		add("postgres.os_user: required")
 	}
 	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
-		add("postgres.bin_dir: must be an absolute path (or empty for /usr/lib/postgresql/%d/bin)", c.Postgres.Version)
+		add("postgres.bin_dir: must be an absolute path (or empty for the layout's default)")
 	}
 
 	if c.PgBackRest.Stanza == "" {
-		add("pgbackrest.stanza: required (e.g. the server's main database name)")
-	} else if strings.ContainsAny(c.PgBackRest.Stanza, " /\\[]='\"") {
-		add("pgbackrest.stanza: %q contains characters that can't be used in a stanza name", c.PgBackRest.Stanza)
+		add("pgbackrest.stanza: required: a backup name for this server, e.g. app-prod-1")
+	} else if !backupNameRe.MatchString(c.PgBackRest.Stanza) {
+		add("pgbackrest.stanza: %q can't be used as a backup name: use 1-63 letters, digits, '-', '_' or '.', starting with a letter or digit", c.PgBackRest.Stanza)
 	}
 	if t := time.Duration(c.PgBackRest.ArchiveTimeout); t < time.Minute || t > 24*time.Hour {
 		add("pgbackrest.archive_timeout: %s must be between 1m and 24h", t)

@@ -5,11 +5,12 @@
 # MinIO stands in for S3 and Mailpit catches every email. Everything lives in ./dev/,
 # which git ignores. See docs/development.md.
 #
-#   scripts/dev.sh up      certificates, MinIO, Mailpit, bucket, dev/config.yaml, setup
+#   scripts/dev.sh up      certificates, MinIO, Mailpit, bucket, dev/config.yaml
 #   scripts/dev.sh down    stop MinIO and Mailpit (data in ./dev/ is kept)
 #
 # Needs: brew install minio mailpit, and PostgreSQL from Homebrew (postgresql@18 by
-# default; set PG_VERSION=17 etc. for another one).
+# default; set PG_VERSION=17 etc. for another one). With pgbackrest installed too, the
+# setup wizard and full/diff backups work as on a server (postgres.layout: homebrew).
 #
 # pgtijori always uses TLS for S3 and SMTP, so `up` makes a local certificate for
 # localhost and, on macOS, asks you once to trust its CA in your login keychain. The
@@ -107,18 +108,23 @@ write_config() {
 			server:
 			  name: dev-laptop
 			postgres:
+			  layout: homebrew
 			  version: $PG_VERSION
+			  cluster: postgresql@$PG_VERSION
 			  data_dir: $prefix/var/postgresql@$PG_VERSION
 			  os_user: $(id -un)
-			  bin_dir: $bin
 			pgbackrest:
 			  stanza: dev
 			storage:
 			  s3:
 			    endpoint: localhost:9000
+			    region: us-east-1
 			    bucket: $BUCKET
 			    access_key_id: $MINIO_USER
 			    secret_access_key: $MINIO_SECRET
+			    # pgBackRest checks TLS with OpenSSL, not the macOS keychain, so it can't
+			    # see the dev CA. Test setups only.
+			    verify_tls: false
 			email:
 			  smtp_host: localhost
 			  smtp_port: 1025
@@ -153,17 +159,33 @@ up() {
 	write_config
 	go build -o pgtijori .
 	PGTIJORI_DEV=1 ./pgtijori config validate
-	PGTIJORI_DEV=1 ./pgtijori setup --skip-pgbackrest
 
 	cat <<-EOF
 
 		Ready. MinIO console: https://localhost:9001 ($MINIO_USER / $MINIO_SECRET)
 		       Mailpit:       http://127.0.0.1:8025
-
-		  make dev                                  # build and serve the UI on http://127.0.0.1:8899
-		  PGTIJORI_DEV=1 ./pgtijori run dumps       # dump every database now
-		  PGTIJORI_DEV=1 ./pgtijori run report      # send the daily email to Mailpit
 	EOF
+	if command -v pgbackrest >/dev/null; then
+		cat <<-EOF
+
+			Next, set up pgBackRest as on a server, either way:
+			  make dev                                  # then open http://127.0.0.1:8899 for the setup wizard
+			  PGTIJORI_DEV=1 ./pgtijori setup           # or the command line
+
+			This turns on WAL archiving in your Homebrew PostgreSQL (one restart). See
+			docs/development.md for turning it off again.
+		EOF
+	else
+		PGTIJORI_DEV=1 ./pgtijori setup --skip-pgbackrest
+		cat <<-EOF
+
+			pgBackRest isn't installed, so only dumps, emails and the UI work.
+			For full and diff backups: brew install pgbackrest, then PGTIJORI_DEV=1 ./pgtijori setup
+
+			  make dev                                  # build and serve the UI on http://127.0.0.1:8899
+			  PGTIJORI_DEV=1 ./pgtijori run dumps       # dump every database now
+		EOF
+	fi
 }
 
 down() {
@@ -174,6 +196,14 @@ down() {
 			rm -f "$pid"
 		fi
 	done
+	if [ -f "$(brew --prefix)/var/postgresql@$PG_VERSION/conf.d/10-pgbackrest.conf" ]; then
+		cat <<-EOF
+
+			WAL archiving to MinIO is on in your Homebrew PostgreSQL. While MinIO is stopped,
+			WAL files pile up in pg_wal. Start it again (make dev-up), or turn archiving off:
+			see docs/development.md.
+		EOF
+	fi
 }
 
 case "${1:-}" in

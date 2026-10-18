@@ -82,6 +82,8 @@ func TestLikelyReason(t *testing.T) {
 		"HTTP 403 Forbidden <Code>SignatureDoesNotMatch</Code>":                                             "storage key was rejected",
 		"dial tcp: lookup example.r2.cloudflarestorage.com: no such host":                                   "couldn't reach storage",
 		"ERROR: [055]: unable to load info file '/pgbackrest/archive/main/archive.info' ... missing stanza": "stanza",
+		"ERROR: [028]: backup and archive info files exist but do not match the database":                   "different PostgreSQL server",
+		"ERROR: [044]: WAL file system-id 7683116411252273504 do not match stanza system-id 7000":           "different PostgreSQL server",
 		"something new and strange":                           "unknown",
 		"archived 000000010000000000000403 then failed oddly": "unknown", // a WAL name is not an HTTP 403
 	}

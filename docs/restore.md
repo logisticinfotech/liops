@@ -8,7 +8,7 @@ Commands below use these placeholders. Replace them with your values from
 
 | Placeholder | Meaning | Example |
 |---|---|---|
-| `main` | pgBackRest stanza (`pgbackrest.stanza`) | `main` |
+| `app-prod-1` | the backup name (`pgbackrest.stanza`): the server's folder in the bucket, and its pgBackRest stanza | `app-prod-1` |
 | `18` / `main` | PostgreSQL version and cluster | `postgresql@18-main` |
 | `tenant_abc` | the database to restore | |
 
@@ -25,9 +25,9 @@ Commands below use these placeholders. Replace them with your values from
 Dumps of different databases are taken minutes apart. If databases must match each other
 (for example a central database plus tenant databases), use a point-in-time restore.
 
-> **Keep a copy of the storage credentials and the stanza name somewhere other than the
+> **Keep a copy of the storage credentials and the backup name somewhere other than the
 > server**, for example in your password manager. If the server is lost, you need the
-> bucket, endpoint, access key, secret key and stanza name to restore anything.
+> bucket, endpoint, access key, secret key and backup name to restore anything.
 
 ## 1. Restore one database from a dump
 
@@ -83,7 +83,7 @@ Changes made after that time are lost.
 1. Find the window you can restore to:
 
    ```bash
-   sudo -u postgres pgbackrest --stanza=main info
+   sudo -u postgres pgbackrest --stanza=app-prod-1 info
    ```
 
    The oldest backup's stop time is the earliest point. The dashboard shows it as
@@ -101,7 +101,7 @@ Changes made after that time are lost.
    give an offset:
 
    ```bash
-   sudo -u postgres pgbackrest --stanza=main --delta \
+   sudo -u postgres pgbackrest --stanza=app-prod-1 --delta \
        --type=time "--target=2026-10-05 14:30:00+05:30" --target-action=promote \
        restore
    ```
@@ -134,13 +134,14 @@ Changes made after that time are lost.
    sudo systemctl stop postgresql@18-main
    ```
 
-2. Write `/etc/pgbackrest/pgbackrest.conf` with the old server's storage settings (from
-   your password manager). Use the same stanza name:
+2. Write `/etc/pgbackrest/pgbackrest.conf` with the old server's storage settings and
+   backup name (from your password manager). `repo1-path` is the old server's folder in the
+   bucket, and the section name is its backup name:
 
    ```ini
    [global]
    repo1-type=s3
-   repo1-path=/pgbackrest
+   repo1-path=/app-prod-1/pgbackrest
    repo1-s3-endpoint=<account-id>.r2.cloudflarestorage.com
    repo1-s3-bucket=<bucket>
    repo1-s3-region=auto
@@ -148,7 +149,7 @@ Changes made after that time are lost.
    repo1-s3-key-secret=<secret access key>
    repo1-s3-uri-style=path
 
-   [main]
+   [app-prod-1]
    pg1-path=/var/lib/postgresql/18/main
    ```
 
@@ -160,14 +161,26 @@ Changes made after that time are lost.
 3. Restore into the empty data directory, then start:
 
    ```bash
-   sudo -u postgres pgbackrest --stanza=main --delta restore
+   sudo -u postgres pgbackrest --stanza=app-prod-1 --delta restore
    sudo systemctl start postgresql@18-main
    ```
 
-4. Make sure the **old server can't come back** and archive into the same stanza. Then
-   install pgtijori on the new server and run the setup wizard with the same storage
-   settings and stanza name. Setup creates nothing new in the bucket for an existing
-   stanza; it checks it and takes a full backup.
+4. Install pgtijori on the new server and run the setup wizard with the same storage
+   settings and a **new backup name** (e.g. `app-prod-2`). New backups go to a new folder
+   in the bucket, and the old server's folder is never touched again:
+
+   - Its backups stay restorable for as long as you keep them. Nothing expires them any
+     more, so delete the old folder in your storage provider's console once you're sure
+     you don't need it.
+   - To restore to a moment before the move, use the old folder (as in step 2). After the
+     move, use the new one.
+
+   Reusing the old name also works, because the restored cluster is the same cluster as
+   far as pgBackRest is concerned. But then the old server must never come back online:
+   it would archive into the same folder. A new name avoids that risk.
+
+   Setup refuses a backup name whose folder holds another server's backups, so running the
+   wizard before restoring can't harm them.
 
    ```bash
    curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
@@ -181,7 +194,7 @@ about the size of the database.
 
 ```bash
 sudo install -d -o postgres -g postgres -m 700 /var/lib/postgresql/restore-test
-sudo -u postgres pgbackrest --stanza=main --pg1-path=/var/lib/postgresql/restore-test restore
+sudo -u postgres pgbackrest --stanza=app-prod-1 --pg1-path=/var/lib/postgresql/restore-test restore
 
 # archive_mode=off is essential: the copy must never send WAL into the real stanza.
 sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /var/lib/postgresql/restore-test -w -l /tmp/restore-test.log \
@@ -254,8 +267,8 @@ dropdb tenant_abc_check
 rm ~/Downloads/tenant_abc.dump
 ```
 
-**Don't check point-in-time backups on a Mac.** pgBackRest restores PostgreSQL's data files,
-which are only supported on the same platform. A Linux server's files on a Mac may even
-start, but macOS sorts text differently from Linux (glibc), so text indexes can be silently
+**Don't restore a server's point-in-time backup on a Mac.** pgBackRest restores PostgreSQL's
+data files, which are only supported on the same platform. A Linux server's files on a Mac
+may even start, but macOS sorts text differently from Linux (glibc), so text indexes can be silently
 wrong. Use section 4 on a Linux machine, or `make integration` in Docker (OrbStack or Colima
 on a Mac).

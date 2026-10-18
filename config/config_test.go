@@ -131,8 +131,9 @@ func TestValidateChecksSchedulesAndValues(t *testing.T) {
 	c.Email.To = []string{"not-an-address"}
 	c.Dumps.Labels.Database = "central" // sql missing
 	c.Email.TLS = "none"
-	c.PgBackRest.Stanza = "it's"
+	c.PgBackRest.Stanza = "app/prod"
 	c.Postgres.BinDir = "opt/pg/bin"
+	c.Postgres.Layout = "windows"
 
 	err := c.Validate()
 	if err == nil {
@@ -148,6 +149,7 @@ func TestValidateChecksSchedulesAndValues(t *testing.T) {
 		"email.tls",
 		"pgbackrest.stanza",
 		"postgres.bin_dir",
+		"postgres.layout",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected error to mention %q, got:\n%v", want, err)

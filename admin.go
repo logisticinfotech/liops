@@ -265,9 +265,9 @@ Still in place, on purpose:
     expires old ones any more. To turn archiving off:
       sudo rm %s
       %s
-  - The backups in bucket %q (stanza %q). Delete them in your storage provider's
-    console when you no longer need them.
-`, pgbackrest.ConfPath, cluster.ConfDPath(), cluster.ConfDPath(), setup.RestartCommand(cfg), cfg.Storage.S3.Bucket, cfg.PgBackRest.Stanza)
+  - The backups in folder %q of bucket %q. Delete that folder in your storage
+    provider's console when you no longer need them.
+`, pgbackrest.ConfPath(cfg), cluster.ConfDPath(), cluster.ConfDPath(), setup.RestartCommand(cfg), storage.Folder(cfg), cfg.Storage.S3.Bucket)
 	}
 	return nil
 }
@@ -285,7 +285,7 @@ func runDumps(sub string, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	store, err := storage.NewS3(cfg.Storage.S3)
+	store, err := storage.Open(cfg)
 	if err != nil {
 		return err
 	}

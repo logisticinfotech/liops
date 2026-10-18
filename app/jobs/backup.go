@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"context"
+	"time"
 
 	"github.com/logisticinfotech/pgtijori/app/command"
 	"github.com/logisticinfotech/pgtijori/app/notify"
@@ -15,7 +16,15 @@ func (r *Runner) backup(ctx context.Context, typ, trigger string, run *state.Run
 	r.setProgress(Progress{Kind: typ, Label: backupName(typ), Detail: "Running pgBackRest…"})
 	defer r.clearProgress()
 
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		r.watchBackup(watchCtx, typ)
+	}()
 	out, err := r.Backrest.Backup(ctx, typ)
+	stopWatch()
+	<-watched
 	r.logOutput(typ, out)
 	run.Output = command.LastLines(string(out), outputLines)
 	if err != nil {
@@ -44,4 +53,31 @@ func (r *Runner) backup(ctx context.Context, typ, trigger string, run *state.Run
 		}
 	}
 	return nil
+}
+
+// backupPollInterval is how often a running backup's progress is read. Each read is
+// a `pgbackrest info`, which reads the repository, so not too often.
+var backupPollInterval = 5 * time.Second
+
+// watchBackup turns pgBackRest's own progress (bytes copied so far, from `pgbackrest
+// info`) into the progress bar until ctx ends.
+func (r *Runner) watchBackup(ctx context.Context, typ string) {
+	t := time.NewTicker(backupPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		info, err := r.Backrest.Info(ctx)
+		if err != nil || !info.Running || info.Size <= 0 || ctx.Err() != nil {
+			continue
+		}
+		r.setProgress(Progress{
+			Kind: typ, Label: backupName(typ), Bytes: true,
+			Current: int(info.SizeDone), Total: int(info.Size),
+			Detail: notify.Bytes(info.SizeDone) + " of " + notify.Bytes(info.Size) + " copied",
+		})
+	}
 }

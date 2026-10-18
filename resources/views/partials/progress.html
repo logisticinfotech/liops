@@ -4,7 +4,7 @@
   <div class="progress-label"><strong>{{.Label}}</strong>{{if .Detail}} — {{.Detail}}{{end}}</div>
   {{if .Determinate}}
   <progress value="{{.Current}}" max="{{.Total}}"></progress>
-  <div class="hint">{{.Current}} of {{.Total}}</div>
+  <div class="hint">{{if .Bytes}}{{.Percent}}%{{else}}{{.Current}} of {{.Total}}{{end}}</div>
   {{else}}
   <progress></progress>
   <div class="hint">In progress…</div>

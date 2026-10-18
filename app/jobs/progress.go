@@ -10,6 +10,17 @@ type Progress struct {
 	Detail  string
 	Current int
 	Total   int
+	// Bytes means Current and Total are byte counts (a backup), so the bar shows a
+	// percentage; otherwise they are items (databases).
+	Bytes bool
+}
+
+// Percent is Current as a whole percentage of Total.
+func (p Progress) Percent() int {
+	if p.Total <= 0 {
+		return 0
+	}
+	return int(int64(p.Current) * 100 / int64(p.Total))
 }
 
 // Active reports whether a job is running.

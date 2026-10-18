@@ -114,6 +114,7 @@ type wizardData struct {
 	Clusters []setup.Cluster
 	Problems []string // for the review step
 	Task     *applyTask
+	Progress jobs.Progress // the backup or dumps the apply step is running
 }
 
 func (s *Server) wizardPage(w http.ResponseWriter, r *http.Request, name string, d wizardData) {
@@ -190,8 +191,8 @@ func (s *Server) setupSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !clusters[idx].Online() {
-			d.Errors = []string{fmt.Sprintf("Cluster %d/%s is %s. Start it first: sudo systemctl start postgresql@%d-%s",
-				clusters[idx].Version, clusters[idx].Name, clusters[idx].Status, clusters[idx].Version, clusters[idx].Name)}
+			d.Errors = []string{fmt.Sprintf("Cluster %d/%s is %s. Start it first: %s",
+				clusters[idx].Version, clusters[idx].Name, clusters[idx].Status, clusters[idx].StartCommand())}
 			s.wizardPage(w, r, "setup_postgres", d)
 			return
 		}
@@ -333,7 +334,7 @@ func (s *Server) runApply(cfg *config.Config, restart bool) {
 		wz.mu.Unlock()
 		return
 	}
-	wz.set(0, stepDone, "Wrote "+pgbackrest.ConfPath+" and "+engine.Cluster.ConfDPath()+"; WAL archiving is on.")
+	wz.set(0, stepDone, "Wrote "+pgbackrest.ConfPath(cfg)+" and "+engine.Cluster.ConfDPath()+"; WAL archiving is on.")
 
 	// 2. Stanza.
 	wz.set(1, stepRunning, "")
@@ -413,6 +414,9 @@ func (s *Server) setupProgress(w http.ResponseWriter, r *http.Request) {
 		refresh = 3
 	}
 	d := wizardData{Step: "review", Task: t}
+	if runner := s.Svc.Runner(); runner != nil && t.Running {
+		d.Progress = runner.Progress()
+	}
 	d.Steps = wizardSteps
 	d.Cfg = s.Svc.Config()
 	s.render(w, r, "setup_apply", page{Title: "Set up pgtijori", Wizard: true, Refresh: refresh, Data: d})

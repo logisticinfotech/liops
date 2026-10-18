@@ -15,6 +15,7 @@ var reasons = []struct {
 	{[]string{"nosuchbucket", "bucket does not exist", "specified bucket does not exist"}, "the storage bucket doesn't exist"},
 	{[]string{"invalidaccesskeyid", "signaturedoesnotmatch", "access denied", "accessdenied", "403 forbidden", "403 (forbidden)", "status code 403", "http 403"}, "the storage key was rejected"},
 	{[]string{"x509:", "certificate verify failed", "certificate is not valid"}, "the storage server's TLS certificate wasn't trusted"},
+	{[]string{"do not match the database", "do not match stanza", "system-id"}, "the backups in this folder belong to a different PostgreSQL server (each server needs its own backup name; see docs/restore.md section 3)"},
 	{[]string{"does not exist in repo", "missing stanza", "stanza-create"}, "the pgBackRest stanza hasn't been created (run: pgtijori setup)"},
 	{[]string{"unable to acquire lock"}, "another pgBackRest command was already running"},
 	{[]string{"could not connect to server", "connection to server on socket", "connection refused", "the database system is starting up", "the database system is shutting down"}, "the database refused the connection (is PostgreSQL running?)"},

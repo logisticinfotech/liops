@@ -23,7 +23,7 @@ make vuln           # govulncheck
 make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS), runs test/smoke.sh
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
 make testenv-down   # tear down and delete volumes
-make dev-up         # laptop/macOS dev without Docker: MinIO + Mailpit + dev/config.yaml
+make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
 make dev            # serve against it (PGTIJORI_DEV=1); see docs/development.md
 
 go test -run TestUIMustListenOnLoopback ./config   # single test
@@ -60,6 +60,11 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   away, and a broken state file or a failed email never stops a backup.
 - **State** (`app/state`, bbolt) opens the file per transaction, because bbolt allows one
   process at a time and both the service and the CLI use it.
+- **Bucket layout**: everything a server stores is under its backup name
+  (`pgbackrest.stanza` + "/", `storage.Folder`). Get a store with `storage.Open(cfg)`, which
+  adds the folder, so keys in code stay relative (`dumps/<db>/…`). pgBackRest's
+  `repo1-path` is `/<name>/pgbackrest`. `setup.CheckOwner` refuses a name whose folder
+  belongs to another cluster, before archiving is turned on.
 - **Dumps** stream `pg_dump` stdout through an `io.Pipe` into a multipart upload; there is no
   local file, and a failed dump leaves no object behind. Retention rules are a pure function
   (`pgdump.PlanRetention`) that the job applies. Database names are hex-encoded in discovery
@@ -75,10 +80,14 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **No login** in the UI, by decision (PLAN.md §5.2): the SSH tunnel is the access control.
   Keep the protections that cost the user nothing: CSRF tokens, the localhost Host check,
   security headers. Don't add accounts back without asking.
+- **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
+  development). Everything that differs between them (cluster discovery, binary and config
+  paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`
+  and `setup.DetectClusters`. Never hard-code a Debian path elsewhere, and keep the
+  `debian` output byte-for-byte unchanged when touching these.
 - **Development mode** (`PGTIJORI_DEV=1`, `dev.go`): no root check, paths default to
-  `./dev/`, and `setup --skip-pgbackrest` is allowed. It exists for working on a Mac, where
-  `postgres.bin_dir` and `postgres.os_user` point at Homebrew PostgreSQL. It isn't a
-  production feature: don't make server behaviour depend on it.
+  `./dev/`, and `setup --skip-pgbackrest` is allowed. It isn't a production feature: don't
+  make server behaviour depend on it. See `docs/development.md`.
 - **Setup** steps (`app/setup`) are shared by the CLI and the wizard. Never restart
   PostgreSQL without the user asking for it.
 - Plain-language failure reasons come from `notify.LikelyReason` (substring table, first match

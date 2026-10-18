@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
 	"github.com/logisticinfotech/pgtijori/config"
 )
 
@@ -30,12 +31,14 @@ func TestRenderConfig(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[global]\n",
-		"repo1-path=/pgbackrest\n",
+		"repo1-path=/main/pgbackrest\n", // the server's folder in the bucket
 		"repo1-s3-bucket=example-bucket\n",
 		"repo1-s3-key-secret=secret\n",
 		"repo1-s3-uri-style=path\n",
 		"repo1-retention-full-type=time\n",
 		"repo1-retention-full=30\n",
+		"repo1-bundle=y\n",
+		"process-max=4\n",
 		"[main]\npg1-path=/var/lib/postgresql/18/main\npg1-port=5432\n",
 	} {
 		if !strings.Contains(conf, want) {
@@ -131,6 +134,21 @@ func TestParseInfo(t *testing.T) {
 		t.Errorf("empty stanza parsed wrongly: %+v", other)
 	}
 
+	if info.Running || other.Running {
+		t.Error("no backup is running in the sample")
+	}
+	if info.SystemID != "" {
+		t.Errorf("SystemID = %q, the sample has no db list", info.SystemID)
+	}
+	running, err := ParseInfo([]byte(`[{"name":"main","archive":[],"backup":[],
+		"db":[{"id":1,"system-id":7000000000000000001,"version":"17"},{"id":2,"system-id":7683116411252273504,"version":"18"}],
+		"status":{"code":2,"message":"no valid backups",
+		"lock":{"backup":{"held":true,"size":134772515,"size-cplt":119095330}}}}]`), "main")
+	if err != nil || !running.Running || running.Size != 134772515 || running.SizeDone != 119095330 ||
+		running.SystemID != "7683116411252273504" {
+		t.Errorf("running backup: %+v, %v", running, err)
+	}
+
 	if _, err := ParseInfo([]byte(infoJSON), "missing"); err == nil {
 		t.Error("an unknown stanza should be an error")
 	}
@@ -167,5 +185,61 @@ func TestWriteIfChangedChecksModeAndOwner(t *testing.T) {
 	}
 	if ok, _ := upToDate(path, "a", 0o640, uid+1, gid); ok {
 		t.Error("a wrong owner must count as out of date")
+	}
+}
+
+func homebrewConfig() *config.Config {
+	c := testConfig()
+	c.Postgres.Layout = config.LayoutHomebrew
+	c.Postgres.DataDir = postgres.HomebrewPrefix + "/var/postgresql@18"
+	return c
+}
+
+func TestHomebrewLayout(t *testing.T) {
+	c := homebrewConfig()
+	prefix := postgres.HomebrewPrefix
+	if got := ConfPath(c); got != prefix+"/etc/pgbackrest/pgbackrest.conf" {
+		t.Errorf("ConfPath = %q", got)
+	}
+	want := prefix + "/bin/pgbackrest --config=" + prefix + "/etc/pgbackrest/pgbackrest.conf --stanza=main archive-push %p"
+	if got := ArchiveCommand(c); got != want {
+		t.Errorf("ArchiveCommand = %q, want %q", got, want)
+	}
+	conf, err := RenderConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"log-path=" + prefix + "/var/log/pgbackrest\n", "pg1-socket-path=/tmp\n"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing %q in:\n%s", want, conf)
+		}
+	}
+	e := New(c, nil)
+	if cmd := e.cmd("check"); cmd.Name != prefix+"/bin/pgbackrest" || cmd.Args[0] != "--config="+ConfPath(c) || cmd.Args[1] != "--stanza=main" {
+		t.Errorf("cmd = %+v", cmd)
+	}
+
+	// Debian stays as it was: pgBackRest's default config, found on PATH.
+	if got := ArchiveCommand(testConfig()); got != "pgbackrest --stanza=main archive-push %p" {
+		t.Errorf("debian ArchiveCommand = %q", got)
+	}
+	if conf, _ := RenderConfig(testConfig()); strings.Contains(conf, "log-path") || strings.Contains(conf, "socket") {
+		t.Errorf("debian config shouldn't set log-path or the socket:\n%s", conf)
+	}
+}
+
+func TestIncludeConfD(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "postgresql.conf")
+	os.WriteFile(path, []byte("port = 5432\n#include_dir = 'conf.d'"), 0o600)
+	if changed, err := includeConfD(path); err != nil || !changed {
+		t.Fatalf("first run: %v %v", changed, err)
+	}
+	if changed, err := includeConfD(path); err != nil || changed {
+		t.Fatalf("second run must find the line: %v %v", changed, err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.HasPrefix(string(data), "port = 5432\n#include_dir = 'conf.d'\n\n# Added by pgtijori") ||
+		!strings.HasSuffix(string(data), "\ninclude_dir = 'conf.d'\n") {
+		t.Errorf("postgresql.conf =\n%s", data)
 	}
 }
