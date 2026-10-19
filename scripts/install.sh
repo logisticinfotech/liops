@@ -28,12 +28,16 @@ die() { printf '\033[31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run this as root (pipe it to: sudo bash)"
 
 [ -r /etc/os-release ] || die "can't tell which Linux this is (/etc/os-release is missing)"
+# Read os-release in a subshell: it defines VERSION (e.g. "26.04 (Resolute Raccoon)"),
+# which would overwrite ours.
 # shellcheck disable=SC1091
-. /etc/os-release
-if [ "${ID:-}" != "ubuntu" ]; then
-    case " ${ID_LIKE:-} " in
-        *" debian "*|*" ubuntu "*) echo "Warning: pgtijori is made for Ubuntu; ${PRETTY_NAME:-this system} may work but isn't tested." ;;
-        *) die "pgtijori needs Ubuntu (found ${PRETTY_NAME:-unknown})" ;;
+os_field() { (. /etc/os-release && eval "printf '%s' \"\${$1:-}\""); }
+os_id=$(os_field ID)
+os_name=$(os_field PRETTY_NAME)
+if [ "$os_id" != "ubuntu" ]; then
+    case " $(os_field ID_LIKE) " in
+        *" debian "*|*" ubuntu "*) echo "Warning: pgtijori is made for Ubuntu; ${os_name:-this system} may work but isn't tested." ;;
+        *) die "pgtijori needs Ubuntu (found ${os_name:-unknown})" ;;
     esac
 fi
 
