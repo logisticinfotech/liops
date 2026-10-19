@@ -28,9 +28,11 @@ services:
         chmod 644 /certs/private.key /certs/public.crt
 
   minio:
-    # MinIO no longer publishes new community images; this tag still works for tests.
+    # MinIO removed its images from Docker Hub; Chainguard builds the same server from
+    # source. Its image runs as uid 65532, which can't create /data, so run as root.
     # If it ever disappears, swap in another S3-compatible server.
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
+    user: "0:0"
     command: server /data --certs-dir /certs --console-address :9001
     environment:
       MINIO_ROOT_USER: pgtijori-test
@@ -46,7 +48,9 @@ services:
 
   # Creates the test bucket (pgBackRest doesn't create buckets), then exits.
   bucket:
-    image: minio/mc:latest
+    # The -dev variant has a shell for the wait loop below.
+    image: cgr.dev/chainguard/minio-client:latest-dev
+    user: "0:0"
     entrypoint: ["sh", "-c"]
     command:
       - >-
