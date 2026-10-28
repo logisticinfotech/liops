@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/logisticinfotech/liops/app/engines/dumps"
+	"github.com/logisticinfotech/liops/app/engines/mysql"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/notify"
@@ -256,6 +257,19 @@ func runUninstall(args []string, in io.Reader, out io.Writer) error {
 	}
 
 	fmt.Fprintln(out, "\nliops is removed.")
+	if cfg != nil && cfg.IsMySQL() && cfg.MySQL.BackupName != "" {
+		fmt.Fprintf(out, `
+Still in place, on purpose:
+  - liops's MySQL account %s. To remove it:
+      sudo mysql -e "DROP USER IF EXISTS %s"
+  - The dumps in folder %q of bucket %q. Delete that folder in your storage
+    provider's console when you no longer need them.
+`, mysql.Account(setup.MySQLUser, "localhost"), mysql.Account(setup.MySQLUser, "localhost"), storage.Folder(cfg), cfg.Storage.S3.Bucket)
+		if !*purge {
+			fmt.Fprintf(out, "  - Its login in %s (deleted with --purge).\n", cfg.MySQL.DefaultsFile)
+		}
+		return nil
+	}
 	if cfg != nil && cfg.PgBackRest.Stanza != "" {
 		cluster := postgres.Cluster{Cfg: cfg.Postgres}
 		fmt.Fprintf(out, `

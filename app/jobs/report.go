@@ -33,7 +33,7 @@ type Health struct {
 // for every page view.
 func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	now := r.now()
-	h := Health{Summary: notify.Summary{Server: r.Server, Now: now, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}}
+	h := Health{Summary: notify.Summary{Server: r.Server, Now: now, PointInTime: r.Backrest != nil, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}}
 	s := &h.Summary
 	var output strings.Builder
 	problem := func(format string, args ...any) {
@@ -43,10 +43,12 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	}
 
 	if deep {
-		if out, err := r.Backrest.Check(ctx); err != nil {
-			r.logOutput(Report, out)
-			problem("pgBackRest check failed: %s", notify.LikelyReason(string(out)))
-			output.WriteString(command.LastLines(string(out), 30) + "\n")
+		if r.Backrest != nil {
+			if out, err := r.Backrest.Check(ctx); err != nil {
+				r.logOutput(Report, out)
+				problem("pgBackRest check failed: %s", notify.LikelyReason(string(out)))
+				output.WriteString(command.LastLines(string(out), 30) + "\n")
+			}
 		}
 		if err := r.Store.Probe(ctx); err != nil {
 			problem("storage test failed: %s", notify.LikelyReason(err.Error()))
@@ -54,28 +56,30 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 		}
 	}
 
-	if info, err := r.Backrest.Info(ctx); err != nil {
-		problem("couldn't read the backup list: %s", notify.LikelyReason(errOutput(err)))
-	} else {
-		h.Info = info
-		if last := info.Last(""); last != nil {
-			s.LastBackupType, s.LastBackupAt, s.LastBackupDuration = last.Type, last.Stop, last.Duration()
-			s.RestoreFrom = info.RestoreFrom()
-			if last.Error {
-				problem("the newest backup (%s) reported checksum errors: see pgbackrest info", last.Label)
+	if r.Backrest != nil {
+		if info, err := r.Backrest.Info(ctx); err != nil {
+			problem("couldn't read the backup list: %s", notify.LikelyReason(errOutput(err)))
+		} else {
+			h.Info = info
+			if last := info.Last(""); last != nil {
+				s.LastBackupType, s.LastBackupAt, s.LastBackupDuration = last.Type, last.Stop, last.Duration()
+				s.RestoreFrom = info.RestoreFrom()
+				if last.Error {
+					problem("the newest backup (%s) reported checksum errors: see pgbackrest info", last.Label)
+				}
+			}
+			if due := r.lastDueBackup(now); !due.IsZero() && (s.LastBackupAt.IsZero() || s.LastBackupAt.Before(due)) {
+				problem("the backup scheduled for %s didn't complete", notify.When(due, now))
 			}
 		}
-		if due := r.lastDueBackup(now); !due.IsZero() && (s.LastBackupAt.IsZero() || s.LastBackupAt.Before(due)) {
-			problem("the backup scheduled for %s didn't complete", notify.When(due, now))
-		}
-	}
 
-	if archived, failed, err := r.archiver(ctx); err != nil {
-		problem("couldn't ask PostgreSQL about WAL archiving: %s", notify.LikelyReason(errOutput(err)))
-	} else {
-		s.LastWAL = archived
-		if !failed.IsZero() && failed.After(archived) {
-			problem("WAL archiving is failing (last failure %s): changes since then aren't backed up yet", notify.When(failed, now))
+		if archived, failed, err := r.archiver(ctx); err != nil {
+			problem("couldn't ask PostgreSQL about WAL archiving: %s", notify.LikelyReason(errOutput(err)))
+		} else {
+			s.LastWAL = archived
+			if !failed.IsZero() && failed.After(archived) {
+				problem("WAL archiving is failing (last failure %s): changes since then aren't backed up yet", notify.When(failed, now))
+			}
 		}
 	}
 
@@ -91,14 +95,18 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 		}
 	}
 
-	if pct, err := diskUsedPct(r.Cfg.Postgres.DataDir); err == nil {
+	dataDir, fullSchedule := r.Cfg.Postgres.DataDir, r.Cfg.PgBackRest.FullSchedule
+	if r.Cfg.IsMySQL() {
+		dataDir, fullSchedule = r.Cfg.MySQL.DataDir, r.Cfg.MySQL.FullSchedule
+	}
+	if pct, err := diskUsedPct(dataDir); err == nil {
 		s.DiskUsedPct = pct
 		if pct >= 90 {
 			problem("the server disk is %d%% full", pct)
 		}
 	}
 
-	if sched, err := cron.ParseStandard(r.Cfg.PgBackRest.FullSchedule); err == nil {
+	if sched, err := cron.ParseStandard(fullSchedule); err == nil {
 		s.NextFull = sched.Next(now)
 	}
 	h.Output = output.String()

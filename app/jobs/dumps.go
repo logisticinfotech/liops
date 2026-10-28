@@ -74,10 +74,11 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 		}
 	}
 
-	r.bumpProgress(len(dbs), "Roles and tablespaces…")
+	globalsLabel, globalsDetail := r.globals()
+	r.bumpProgress(len(dbs), globalsLabel+"…")
 	var problems []error
 	if _, size, err := r.Dumps.DumpGlobals(ctx, r.now()); err != nil {
-		note("roles and tablespaces (pg_dumpall --globals-only): FAILED: %v", err)
+		note("%s: FAILED: %v", globalsDetail, err)
 		problems = append(problems, fmt.Errorf("globals: %w", err))
 	} else {
 		run.Size += size
@@ -229,6 +230,9 @@ func (r *Runner) dumpFailureEmail(ctx context.Context, trigger string, failed []
 	default:
 		headline = tonight(trigger) + "dump cleanup FAILED"
 		what = "storing roles or deleting old dumps (every database was dumped)"
+		if r.Cfg.IsMySQL() {
+			what = "storing users and grants or deleting old dumps (every database was dumped)"
+		}
 		safe = "all databases were dumped tonight"
 	}
 	details.WriteString(output)

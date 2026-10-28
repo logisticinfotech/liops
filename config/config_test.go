@@ -193,3 +193,42 @@ func TestClone(t *testing.T) {
 		t.Error("Clone must not share slices")
 	}
 }
+
+func TestMySQLEngine(t *testing.T) {
+	c := complete()
+	c.Engine = EngineMySQL
+	c.PgBackRest.Stanza = "" // PostgreSQL settings aren't checked for a MySQL server
+	c.Postgres.Version = 9
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "mysql.backup_name: required") {
+		t.Fatalf("want a missing mysql.backup_name, got %v", err)
+	}
+	if strings.Contains(err.Error(), "postgres.") || strings.Contains(err.Error(), "pgbackrest.") {
+		t.Errorf("PostgreSQL settings must not be validated for MySQL: %v", err)
+	}
+
+	c.MySQL.BackupName = "shop-db-1"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("complete MySQL config should be valid, got: %v", err)
+	}
+	if got := c.BackupName(); got != "shop-db-1" || !c.IsMySQL() {
+		t.Errorf("BackupName = %q, IsMySQL = %v", got, c.IsMySQL())
+	}
+
+	c.MySQL.Socket = "mysqld.sock"
+	c.MySQL.FullSchedule = "nightly"
+	err = c.Validate()
+	for _, want := range []string{"mysql.socket", "mysql.full_schedule"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want an error about %s, got %v", want, err)
+		}
+	}
+}
+
+func TestUnknownEngine(t *testing.T) {
+	c := complete()
+	c.Engine = "oracle"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `engine: "oracle"`) {
+		t.Errorf("want an engine error, got %v", err)
+	}
+}

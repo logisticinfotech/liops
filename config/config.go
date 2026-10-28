@@ -31,8 +31,12 @@ const DefaultPath = "/etc/liops/config.yaml"
 
 // Config is the whole configuration file.
 type Config struct {
+	// Engine is the database this server runs: EnginePostgres or EngineMySQL. Only that
+	// engine's sections (postgres + pgbackrest, or mysql) are used and validated.
+	Engine     string     `yaml:"engine"`
 	Server     Server     `yaml:"server"`
 	UI         UI         `yaml:"ui"`
+	MySQL      MySQL      `yaml:"mysql"`
 	Postgres   Postgres   `yaml:"postgres"`
 	PgBackRest PgBackRest `yaml:"pgbackrest"`
 	Dumps      Dumps      `yaml:"dumps"`
@@ -54,6 +58,29 @@ type Server struct {
 // through an SSH tunnel.
 type UI struct {
 	Listen string `yaml:"listen"`
+}
+
+// Database engines.
+const (
+	EnginePostgres = "postgres"
+	EngineMySQL    = "mysql"
+)
+
+// MySQL identifies the local MySQL server to back up (engine: mysql).
+type MySQL struct {
+	// BackupName is the server's folder in the bucket, like pgbackrest.stanza for PostgreSQL.
+	BackupName string `yaml:"backup_name"`
+	Socket     string `yaml:"socket"`
+	// DefaultsFile holds the login of liops's own MySQL user. `liops setup` writes it
+	// (root only, mode 0600), so the password never appears on a command line.
+	DefaultsFile string `yaml:"defaults_file"`
+	DataDir      string `yaml:"data_dir"`
+	// BinDir holds mysql and mysqldump. Empty means /usr/bin.
+	BinDir string `yaml:"bin_dir"`
+	// FullSchedule and DiffSchedule are the nightly backup times. Until point-in-time
+	// backups for MySQL are built (docs/PLAN-mysql.md, M2), the dumps run at these times.
+	FullSchedule string `yaml:"full_schedule"`
+	DiffSchedule string `yaml:"diff_schedule"`
 }
 
 // Postgres layouts: where a PostgreSQL install keeps its programs and settings, and
@@ -146,8 +173,16 @@ type Report struct {
 // Storage and email still have to be completed before liops can run.
 func Default() *Config {
 	return &Config{
+		Engine: EnginePostgres,
 		Server: Server{Timezone: "Asia/Kolkata"},
 		UI:     UI{Listen: "127.0.0.1:8899"},
+		MySQL: MySQL{
+			Socket:       "/var/run/mysqld/mysqld.sock",
+			DefaultsFile: "/etc/liops/mysql.cnf",
+			DataDir:      "/var/lib/mysql",
+			FullSchedule: "30 1 * * 0",   // Sunday 01:30
+			DiffSchedule: "30 1 * * 1-6", // Monday-Saturday 01:30
+		},
 		Postgres: Postgres{
 			Layout:  LayoutDebian,
 			Version: 18,
@@ -297,10 +332,18 @@ func (c *Config) Location() (*time.Location, error) {
 
 // BackupName is the server's backup name: its folder in the bucket. For PostgreSQL it
 // is also the pgBackRest stanza.
-func (c *Config) BackupName() string { return c.PgBackRest.Stanza }
+func (c *Config) BackupName() string {
+	if c.Engine == EngineMySQL {
+		return c.MySQL.BackupName
+	}
+	return c.PgBackRest.Stanza
+}
 
-// backupNameRe is what a backup name (pgbackrest.stanza) may look like. It is both the
-// pgBackRest stanza and the server's folder in the bucket.
+// IsMySQL reports whether this server runs MySQL rather than PostgreSQL.
+func (c *Config) IsMySQL() bool { return c.Engine == EngineMySQL }
+
+// backupNameRe is what a backup name (pgbackrest.stanza, mysql.backup_name) may look
+// like. It is the server's folder in the bucket, and for PostgreSQL the pgBackRest stanza.
 var backupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 // Validate reports every problem at once, joined with errors.Join.
@@ -316,41 +359,14 @@ func (c *Config) Validate() error {
 		add("ui.listen: %v", err)
 	}
 
-	if c.Postgres.Layout != LayoutDebian && c.Postgres.Layout != LayoutHomebrew {
-		add("postgres.layout: %q must be %q or %q", c.Postgres.Layout, LayoutDebian, LayoutHomebrew)
+	switch c.Engine {
+	case EnginePostgres:
+		c.validatePostgres(add, &errs)
+	case EngineMySQL:
+		c.validateMySQL(add, &errs)
+	default:
+		add("engine: %q must be %q or %q", c.Engine, EnginePostgres, EngineMySQL)
 	}
-	if c.Postgres.Version < 13 {
-		add("postgres.version: %d is not supported (need 13 or newer)", c.Postgres.Version)
-	}
-	if c.Postgres.Cluster == "" {
-		add("postgres.cluster: required")
-	}
-	if !filepath.IsAbs(c.Postgres.DataDir) {
-		add("postgres.data_dir: must be an absolute path")
-	}
-	if c.Postgres.Port < 1 || c.Postgres.Port > 65535 {
-		add("postgres.port: %d is not a valid port", c.Postgres.Port)
-	}
-	if c.Postgres.OSUser == "" {
-		add("postgres.os_user: required")
-	}
-	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
-		add("postgres.bin_dir: must be an absolute path (or empty for the layout's default)")
-	}
-
-	if c.PgBackRest.Stanza == "" {
-		add("pgbackrest.stanza: required: a backup name for this server, e.g. app-prod-1")
-	} else if !backupNameRe.MatchString(c.PgBackRest.Stanza) {
-		add("pgbackrest.stanza: %q can't be used as a backup name: use 1-63 letters, digits, '-', '_' or '.', starting with a letter or digit", c.PgBackRest.Stanza)
-	}
-	if t := time.Duration(c.PgBackRest.ArchiveTimeout); t < time.Minute || t > 24*time.Hour {
-		add("pgbackrest.archive_timeout: %s must be between 1m and 24h", t)
-	}
-	if c.PgBackRest.RetentionDays < 1 {
-		add("pgbackrest.retention_days: must be at least 1")
-	}
-	checkSchedule(&errs, "pgbackrest.full_schedule", c.PgBackRest.FullSchedule)
-	checkSchedule(&errs, "pgbackrest.diff_schedule", c.PgBackRest.DiffSchedule)
 
 	if c.Dumps.Enabled {
 		if c.Dumps.RetentionDays < 1 {
@@ -437,6 +453,69 @@ func validateLoopback(listen string) error {
 }
 
 var scheduleParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+
+// validatePostgres checks the postgres and pgbackrest sections.
+func (c *Config) validatePostgres(add func(string, ...any), errs *[]error) {
+	if c.Postgres.Layout != LayoutDebian && c.Postgres.Layout != LayoutHomebrew {
+		add("postgres.layout: %q must be %q or %q", c.Postgres.Layout, LayoutDebian, LayoutHomebrew)
+	}
+	if c.Postgres.Version < 13 {
+		add("postgres.version: %d is not supported (need 13 or newer)", c.Postgres.Version)
+	}
+	if c.Postgres.Cluster == "" {
+		add("postgres.cluster: required")
+	}
+	if !filepath.IsAbs(c.Postgres.DataDir) {
+		add("postgres.data_dir: must be an absolute path")
+	}
+	if c.Postgres.Port < 1 || c.Postgres.Port > 65535 {
+		add("postgres.port: %d is not a valid port", c.Postgres.Port)
+	}
+	if c.Postgres.OSUser == "" {
+		add("postgres.os_user: required")
+	}
+	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
+		add("postgres.bin_dir: must be an absolute path (or empty for the layout's default)")
+	}
+
+	if c.PgBackRest.Stanza == "" {
+		add("pgbackrest.stanza: required: a backup name for this server, e.g. app-prod-1")
+	} else if !backupNameRe.MatchString(c.PgBackRest.Stanza) {
+		add("pgbackrest.stanza: %q can't be used as a backup name: use 1-63 letters, digits, '-', '_' or '.', starting with a letter or digit", c.PgBackRest.Stanza)
+	}
+	if t := time.Duration(c.PgBackRest.ArchiveTimeout); t < time.Minute || t > 24*time.Hour {
+		add("pgbackrest.archive_timeout: %s must be between 1m and 24h", t)
+	}
+	if c.PgBackRest.RetentionDays < 1 {
+		add("pgbackrest.retention_days: must be at least 1")
+	}
+	checkSchedule(errs, "pgbackrest.full_schedule", c.PgBackRest.FullSchedule)
+	checkSchedule(errs, "pgbackrest.diff_schedule", c.PgBackRest.DiffSchedule)
+}
+
+// validateMySQL checks the mysql section.
+func (c *Config) validateMySQL(add func(string, ...any), errs *[]error) {
+	m := c.MySQL
+	if m.BackupName == "" {
+		add("mysql.backup_name: required: a backup name for this server, e.g. app-prod-1")
+	} else if !backupNameRe.MatchString(m.BackupName) {
+		add("mysql.backup_name: %q can't be used as a backup name: use 1-63 letters, digits, '-', '_' or '.', starting with a letter or digit", m.BackupName)
+	}
+	if !filepath.IsAbs(m.Socket) {
+		add("mysql.socket: must be an absolute path, e.g. /var/run/mysqld/mysqld.sock")
+	}
+	if !filepath.IsAbs(m.DefaultsFile) {
+		add("mysql.defaults_file: must be an absolute path")
+	}
+	if !filepath.IsAbs(m.DataDir) {
+		add("mysql.data_dir: must be an absolute path")
+	}
+	if m.BinDir != "" && !filepath.IsAbs(m.BinDir) {
+		add("mysql.bin_dir: must be an absolute path (or empty for /usr/bin)")
+	}
+	checkSchedule(errs, "mysql.full_schedule", m.FullSchedule)
+	checkSchedule(errs, "mysql.diff_schedule", m.DiffSchedule)
+}
 
 func checkSchedule(errs *[]error, field, spec string) {
 	if _, err := scheduleParser.Parse(spec); err != nil {

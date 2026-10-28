@@ -18,6 +18,9 @@ type Summary struct {
 	// Problems, in plain language. None means healthy.
 	Problems []string
 
+	// PointInTime is false for a server without point-in-time backups yet (MySQL,
+	// until they are built): the summary then leaves them out.
+	PointInTime        bool
 	LastBackupType     string // "full" or "diff"; empty if there is none
 	LastBackupAt       time.Time
 	LastBackupDuration time.Duration
@@ -52,19 +55,21 @@ func DailySummary(s Summary) (subject, body string) {
 	}
 
 	row := func(label, value string) { fmt.Fprintf(&b, "%-22s %s\n", label+":", value) }
-	if s.LastBackupType == "" {
-		row("Point-in-time backup", "none yet")
-	} else {
-		v := fmt.Sprintf("last %s %s (%s)", s.LastBackupType, When(s.LastBackupAt, s.Now), Duration(s.LastBackupDuration))
-		if !s.RestoreFrom.IsZero() {
-			v += " · can restore back to " + s.RestoreFrom.In(s.Now.Location()).Format("2 Jan")
+	if s.PointInTime {
+		if s.LastBackupType == "" {
+			row("Point-in-time backup", "none yet")
+		} else {
+			v := fmt.Sprintf("last %s %s (%s)", s.LastBackupType, When(s.LastBackupAt, s.Now), Duration(s.LastBackupDuration))
+			if !s.RestoreFrom.IsZero() {
+				v += " · can restore back to " + s.RestoreFrom.In(s.Now.Location()).Format("2 Jan")
+			}
+			row("Point-in-time backup", v)
 		}
-		row("Point-in-time backup", v)
-	}
-	if s.LastWAL.IsZero() {
-		row("Newest change saved", "unknown")
-	} else {
-		row("Newest change saved", When(s.LastWAL, s.Now))
+		if s.LastWAL.IsZero() {
+			row("Newest change saved", "unknown")
+		} else {
+			row("Newest change saved", When(s.LastWAL, s.Now))
+		}
 	}
 	if s.DumpsEnabled {
 		row("Database dumps", fmt.Sprintf("%d of %d databases dumped tonight (total %s)", s.DumpsOK, s.DumpsTotal, Bytes(s.DumpsSize)))
@@ -75,7 +80,7 @@ func DailySummary(s Summary) (subject, body string) {
 	if s.DiskUsedPct >= 0 {
 		row("Server disk", fmt.Sprintf("%d%% used", s.DiskUsedPct))
 	}
-	if !s.NextFull.IsZero() {
+	if s.PointInTime && !s.NextFull.IsZero() {
 		b.WriteString("\nNext full backup: " + s.NextFull.Format("Mon 2 Jan 15:04") + "\n")
 	}
 	return subject, b.String()

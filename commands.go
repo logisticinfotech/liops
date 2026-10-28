@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"github.com/logisticinfotech/liops/app/service"
 	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
 	"github.com/logisticinfotech/liops/config"
 )
 
@@ -238,6 +241,10 @@ func runStatus(args []string, out io.Writer) error {
 			fmt.Fprintf(out, "  %s since %s\n", db, since.In(loc).Format("2 Jan"))
 		}
 	}
+	if cfg.IsMySQL() {
+		fmt.Fprintf(out, "\nFull command output is in %s.\n", p.log)
+		return nil
+	}
 	fmt.Fprintf(out, "\nFull command output is in %s. For backup details: sudo -u %s pgbackrest --stanza=%s info\n",
 		p.log, cfg.Postgres.OSUser, cfg.PgBackRest.Stanza)
 	return nil
@@ -267,6 +274,7 @@ func runDetail(r *state.Run) string {
 func runSetup(args []string, out io.Writer) error {
 	flags, p := newFlags("setup")
 	skipPgBackRest := flags.Bool("skip-pgbackrest", false, "development only: mark setup complete without pgBackRest")
+	rootPasswordStdin := flags.Bool("mysql-root-password-stdin", false, "MySQL: read root's MySQL password from stdin, to create liops's own account (never stored)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -279,6 +287,9 @@ func runSetup(args []string, out io.Writer) error {
 	cfg, err := config.Load(p.config)
 	if err != nil {
 		return err
+	}
+	if cfg.IsMySQL() {
+		return runMySQLSetup(cfg, p, *rootPasswordStdin, os.Stdin, out)
 	}
 	if *skipPgBackRest {
 		return skipSetup(p, out)
@@ -316,6 +327,40 @@ func runSetup(args []string, out io.Writer) error {
 	} else {
 		fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
 	}
+	return nil
+}
+
+// runMySQLSetup gives liops its own MySQL account, checks the server and claims the
+// backup name. MySQL needs no restart and no settings changes for its dumps.
+func runMySQLSetup(cfg *config.Config, p *paths, rootPasswordStdin bool, in io.Reader, out io.Writer) error {
+	var rootPassword string
+	if rootPasswordStdin {
+		line, err := bufio.NewReader(in).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if rootPassword = strings.TrimRight(line, "\r\n"); rootPassword == "" {
+			return errors.New("--mysql-root-password-stdin: no password on stdin")
+		}
+	}
+	store, err := storage.Open(cfg)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signalContext()
+	defer stop()
+
+	version, err := setup.SetupMySQL(ctx, cfg, command.Exec{}, store, rootPassword)
+	if err != nil {
+		return err
+	}
+	if err := markSetupComplete(p); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "MySQL %s: liops logs in with its own account (%s, login in %s).\n", version, setup.MySQLUser, cfg.MySQL.DefaultsFile)
+	fmt.Fprintln(out, "\nSetup is complete. Next: take the first dumps, then start the service:")
+	fmt.Fprintln(out, "\n  sudo liops run dumps\n  sudo systemctl enable --now liops")
+	fmt.Fprintln(out, "\nPoint-in-time backups for MySQL come in a later version. Until then, the dumps run at the nightly backup times.")
 	return nil
 }
 

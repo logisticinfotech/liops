@@ -27,11 +27,20 @@ type Next struct {
 // commands (pgBackRest resumes an interrupted backup next time).
 func (r *Runner) StartScheduler(ctx context.Context) (*Scheduler, error) {
 	s := &Scheduler{c: cron.New(cron.WithLocation(r.location())), names: map[cron.EntryID]string{}}
-	for _, e := range []struct{ job, spec string }{
+	type entry struct{ job, spec string }
+	entries := []entry{
 		{Full, r.Cfg.PgBackRest.FullSchedule},
 		{Diff, r.Cfg.PgBackRest.DiffSchedule},
 		{Report, r.Cfg.Report.Schedule},
-	} {
+	}
+	if r.Cfg.IsMySQL() {
+		// Until MySQL's point-in-time backups are built, the dumps run at the backup times.
+		entries = []entry{{Report, r.Cfg.Report.Schedule}}
+		if r.Cfg.Dumps.Enabled {
+			entries = append(entries, entry{Dumps, r.Cfg.MySQL.FullSchedule}, entry{Dumps, r.Cfg.MySQL.DiffSchedule})
+		}
+	}
+	for _, e := range entries {
 		job := e.job
 		id, err := s.c.AddFunc(e.spec, func() {
 			if err := r.Run(ctx, job, Scheduled); err != nil && ctx.Err() == nil {

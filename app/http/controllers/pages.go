@@ -103,6 +103,10 @@ type backupsData struct {
 }
 
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
+	if s.Svc.Runner().Backrest == nil {
+		s.fail(w, r, errors.New("point-in-time backups for MySQL come in a later version; the nightly dumps are on the Databases page"))
+		return
+	}
 	info, err := s.Svc.Runner().Backrest.Info(r.Context())
 	if err != nil {
 		s.fail(w, r, errors.New("couldn't read the backup list from pgBackRest: "+err.Error()))

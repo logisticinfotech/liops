@@ -457,7 +457,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
   default `debian` layout and behave as before. `LIOPS_DEV=1` drops the root check and
   keeps files in `./dev/`. macOS is still not a deployment target. Not yet run end to end:
   `scripts/dev.sh` and a real `setup` against Homebrew pgBackRest.
-- **MySQL:** proposed in [PLAN-mysql.md](PLAN-mysql.md) (XtraBackup + binlog shipping +
-  `mysqldump`). Not started.
+- **MySQL:** [PLAN-mysql.md](PLAN-mysql.md). M0 (engine split) and M1 (nightly
+  `mysqldump` per database, users and grants, `setup`) are built on branch `mysql-support`;
+  its §10 says what is tested. Point-in-time backups (XtraBackup + binlogs) are M2.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

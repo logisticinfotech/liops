@@ -18,6 +18,7 @@ func TestDailySummaryHealthy(t *testing.T) {
 		LastBackupType:     "diff",
 		LastBackupAt:       time.Date(2026, 10, 5, 1, 30, 0, 0, ist),
 		LastBackupDuration: 36 * time.Second,
+		PointInTime:        true,
 		RestoreFrom:        time.Date(2026, 9, 5, 1, 31, 0, 0, ist),
 		LastWAL:            time.Date(2026, 10, 5, 7, 0, 0, 0, ist),
 		DumpsEnabled:       true, DumpsOK: 11, DumpsTotal: 11, DumpsSize: 412 << 20,
@@ -43,12 +44,22 @@ func TestDailySummaryHealthy(t *testing.T) {
 }
 
 func TestDailySummaryWithProblems(t *testing.T) {
-	subject, body := DailySummary(Summary{Server: "db-1", Now: time.Now(), Problems: []string{"no backup in 2 days"}, DiskUsedPct: -1})
+	subject, body := DailySummary(Summary{Server: "db-1", Now: time.Now(), PointInTime: true, Problems: []string{"no backup in 2 days"}, DiskUsedPct: -1})
 	if !strings.HasPrefix(subject, "⚠️ db-1 — backups need attention") {
 		t.Errorf("subject = %q", subject)
 	}
 	if !strings.Contains(body, "  - no backup in 2 days") || !strings.Contains(body, "none yet") || strings.Contains(body, "Server disk") {
 		t.Errorf("body:\n%s", body)
+	}
+}
+
+func TestDailySummaryWithoutPointInTime(t *testing.T) {
+	_, body := DailySummary(Summary{Server: "db-1", Now: time.Now(), DumpsEnabled: true, DiskUsedPct: -1,
+		NextFull: time.Now().Add(time.Hour)})
+	for _, unwanted := range []string{"Point-in-time", "Newest change saved", "Next full backup"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("a server without point-in-time backups mustn't mention %q:\n%s", unwanted, body)
+		}
 	}
 }
 

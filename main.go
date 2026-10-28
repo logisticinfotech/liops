@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command liops backs up a PostgreSQL server: point-in-time backups with pgBackRest
-// and a nightly pg_dump of every database, with a status UI and email alerts.
+// Command liops backs up a database server, with a status UI and email alerts.
+// PostgreSQL: point-in-time backups with pgBackRest and a nightly pg_dump of every
+// database. MySQL: a nightly mysqldump of every database (point-in-time to come).
 package main
 
 import (
@@ -17,13 +18,14 @@ import (
 	"github.com/logisticinfotech/liops/config"
 )
 
-const usage = `liops — PostgreSQL backups: pgBackRest point-in-time backups + per-database dumps
+const usage = `liops — database backups: PostgreSQL (pgBackRest point-in-time + per-database dumps) and MySQL (per-database dumps)
 
 Usage:
   liops version
   liops config init     [--config PATH] [--force]   write a config file with defaults
   liops config validate [--config PATH]             check a config file
-  liops setup           [flags]                     configure pgBackRest and WAL archiving (safe to re-run)
+  liops setup           [flags]                     set up backups for this server (safe to re-run)
+                        [--mysql-root-password-stdin]  MySQL: root's password on stdin, if root needs one
   liops run JOB         [flags]                     run a job now: full, diff, dumps or report
   liops status          [flags]                     show recent job runs
   liops serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
@@ -107,7 +109,7 @@ func runConfig(sub string, args []string, out io.Writer) error {
 		if err := config.Default().Save(*path); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Wrote %s (mode 0600).\nFill in pgbackrest.stanza, storage and email, then run: liops config validate --config %s\n", *path, *path)
+		fmt.Fprintf(out, "Wrote %s (mode 0600).\nFill in pgbackrest.stanza (for MySQL: engine: mysql and mysql.backup_name), storage and email, then run: liops config validate --config %s\n", *path, *path)
 		return nil
 	case "validate":
 		if _, err := config.Load(*path); err != nil {

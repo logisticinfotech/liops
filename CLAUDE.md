@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 liops is a single static Go binary that runs on a PostgreSQL server (as root, under systemd)
 and manages two backup layers to S3-compatible storage: pgBackRest point-in-time backups
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
-UI and SMTP emails. MySQL 8.4 support (`docs/PLAN-mysql.md`) and lightweight per-server
-monitoring are planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+UI and SMTP emails. MySQL 8.4 nightly dumps are built (`engine: mysql`, `docs/PLAN-mysql.md`);
+MySQL point-in-time backups and lightweight per-server monitoring are planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -82,6 +82,12 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **No login** in the UI, by decision (PLAN.md §5.2): the SSH tunnel is the access control.
   Keep the protections that cost the user nothing: CSRF tokens, the localhost Host check,
   security headers. Don't add accounts back without asking.
+- **Engines** (`engine: postgres | mysql`, default `postgres`): only the chosen engine's
+  config sections are validated, and `jobs.New` builds that engine's `Dumper`. A MySQL
+  server has no `Runner.Backrest` yet (point-in-time comes in PLAN-mysql.md M2), so check
+  `cfg.IsMySQL()` before anything pgBackRest- or WAL-specific; pages get `page.MySQL`.
+  MySQL programs log in with `--defaults-extra-file` (`mysql.Instance.Command`), never with
+  a password on the command line.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`

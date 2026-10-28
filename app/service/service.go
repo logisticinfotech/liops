@@ -167,7 +167,7 @@ func (s *Service) SaveSettings(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if s.setupComplete() {
+	if s.setupComplete() && !cfg.IsMySQL() {
 		archiving, err := s.WriteSettings(ctx, cfg)
 		if err != nil {
 			return err

@@ -19,6 +19,7 @@ import (
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/engines/dumps"
+	"github.com/logisticinfotech/liops/app/engines/mysqldump"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
@@ -94,12 +95,17 @@ func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 	}
 	fake := &command.Fake{Handle: fakeServer}
 	newRunner := func(cfg *config.Config) (*jobs.Runner, error) {
-		return &jobs.Runner{
+		r := &jobs.Runner{
 			Cfg: cfg, Server: "db-test", State: st, Store: h.store, Mail: &notify.Recorder{},
-			Backrest: pgbackrest.New(cfg, fake), Dumps: pgdump.New(cfg, fake, h.store),
-			Cluster: postgres.Cluster{Cfg: cfg.Postgres, Run: fake}, LockPath: filepath.Join(dir, "job.lock"),
-			Now: time.Now, Log: io.Discard,
-		}, nil
+			LockPath: filepath.Join(dir, "job.lock"), Now: time.Now, Log: io.Discard,
+		}
+		if cfg.IsMySQL() {
+			r.Dumps = mysqldump.New(cfg, fake, h.store)
+		} else {
+			r.Backrest, r.Dumps = pgbackrest.New(cfg, fake), pgdump.New(cfg, fake, h.store)
+			r.Cluster = postgres.Cluster{Cfg: cfg.Postgres, Run: fake}
+		}
+		return r, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -323,5 +329,30 @@ func TestWizardStartsWithoutLogin(t *testing.T) {
 	}
 	if _, loc, _ := h.get("/settings"); loc != "/setup" {
 		t.Errorf("pages wait for setup, got %q", loc)
+	}
+}
+
+func TestMySQLPages(t *testing.T) {
+	cfg := validConfig()
+	cfg.Engine = config.EngineMySQL
+	cfg.MySQL.BackupName = "shop-db-1"
+	h := newHarness(t, cfg, true)
+	h.store.Add(mysqldump.Key("app", time.Now().Add(-time.Hour)), []byte("gzipped SQL"), time.Now())
+
+	code, _, body := h.get("/")
+	if code != 200 || !strings.Contains(body, "Database dumps") {
+		t.Fatalf("dashboard: %d\n%s", code, body)
+	}
+	for _, unwanted := range []string{"Last full backup", "Point-in-time backups", "pgBackRest"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("the MySQL dashboard mustn't show %q", unwanted)
+		}
+	}
+	_, _, body = h.get("/databases/app")
+	if !strings.Contains(body, "gunzip -c /tmp/liops-restore.sql.gz | sudo mysql") || strings.Contains(body, "pg_restore") {
+		t.Errorf("database page should show MySQL restore commands:\n%s", body)
+	}
+	if _, _, body := h.get("/backups"); !strings.Contains(body, "later version") {
+		t.Errorf("backups page on MySQL:\n%s", body)
 	}
 }

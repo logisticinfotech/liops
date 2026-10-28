@@ -45,7 +45,7 @@ restoring from the UI (same rule as PLAN.md §2).
         ▼ (streamed, no local copy)
    S3-compatible bucket
      <backup name>/
-       xtrabackup/owner.json                     ← server_uuid, to refuse a name another server uses
+       owners/mysql-<server_uuid>                ← marker: which server uses this backup name (M1)
        xtrabackup/base/<UTC time>-full/
          backup.xbstream                         ← xtrabackup --stream, zstd-compressed
          backup.json                             ← manifest, written LAST (no manifest = incomplete)
@@ -154,23 +154,24 @@ once and never stored (§9).
 ```yaml
 engine: mysql
 mysql:
+  backup_name: shop-db-1                   # folder in the bucket (pgbackrest.stanza's counterpart)
   socket: /var/run/mysqld/mysqld.sock
+  defaults_file: /etc/liops/mysql.cnf      # written by setup, root only, 0600
   data_dir: /var/lib/mysql
-  defaults_file: /etc/liops/mysql.cnf   # written by setup, 0600
   bin_dir: ""                              # empty: /usr/bin
-xtrabackup:
-  name: shop-db-1                          # backup name = folder in the bucket
-  retention_days: 30
-  full_schedule: "30 1 * * 0"
+  full_schedule: "30 1 * * 0"              # nightly backup times; until M2 the dumps run then
   diff_schedule: "30 1 * * 1-6"
-  binlog_interval: 5m
-dumps: …          # unchanged; default exclude is empty for mysql
+  # M2 adds: retention_days, binlog_interval
+dumps: …          # unchanged; MySQL's own schemas are always skipped
 ```
 
-- `postgres:` / `pgbackrest:` are only validated when `engine: postgres`, and `mysql:` /
-  `xtrabackup:` only when `engine: mysql` (like `dumps` is only validated when enabled).
-- A `cfg.BackupName()` method returns `pgbackrest.stanza` or `xtrabackup.name`.
-  `storage.Folder` and everything else use it. PostgreSQL config files don't change.
+- Everything for MySQL is in one `mysql:` section (decided in M1, October 2026): liops is
+  the MySQL backup tool itself, so a separate `xtrabackup:` section, as first planned, would
+  only split one thing in two.
+- `postgres:` / `pgbackrest:` are only validated when `engine: postgres`, and `mysql:` only
+  when `engine: mysql`. `engine` defaults to `postgres`, so existing config files keep working.
+- `cfg.BackupName()` returns `pgbackrest.stanza` or `mysql.backup_name`. `storage.Folder` and
+  everything else use it.
 
 ## 6. Code changes
 
@@ -212,7 +213,7 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
 | Phase | Deliverable | Done when | Estimate |
 |-------|-------------|-----------|----------|
 | **M0. Engine split** | `cfg.BackupName()`, `jobs.Dumper`, shared `app/engines/dumps` (keys, streaming, retention). **Done** (October 2026). The `engine` setting moves to M1 and the layer-1 interface to M2, where a second implementation shapes them. | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
-| **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment | Dumps run, expire, and restore in the Docker test | 1 week |
+| **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment. **Built** (October 2026) except the Docker test; see §10. | Dumps run, expire, and restore in the Docker test | 1 week |
 | **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md` | §7 passes in CI | 2 weeks |
 | **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |
 
@@ -236,3 +237,33 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
   --raw --stop-never` (a continuous stream), at the cost of a long-running child process to
   supervise. Not in the first version.
 - **Encryption at rest** (`--encrypt`) stays out, as for PostgreSQL (PLAN.md §1).
+
+## 10. Status
+
+**M1 (October 2026):** built on branch `mysql-support`. `engine: mysql` gives a server:
+
+- `liops setup`: creates the `liops@localhost` MySQL account with a random password in
+  `mysql.defaults_file`, logging in as root through the socket, or with
+  `--mysql-root-password-stdin`. Re-running it is a no-op once the account works. Refuses
+  MySQL older than 8.4, and a backup name another server uses (an `owners/` marker, or
+  pgBackRest backups under that name).
+- Nightly dumps (`mysqldump --single-transaction`, gzipped in Go, streamed) at the
+  `mysql.full_schedule` / `diff_schedule` times, plus a users-and-grants file in
+  `globals/`. Retention, deleted databases and labels are the shared PostgreSQL code.
+- `run full|diff` explain that point-in-time backups come later. The daily summary, the
+  dashboard, the Databases pages (MySQL restore commands) and `uninstall` know about MySQL.
+
+Tested for real against Homebrew MySQL 8.4.13 + MinIO on a Mac: setup (socket root,
+root with a password containing `#`, `"` and a space, wrong password, name owned by
+another server), dumps of three databases (one named `shop-2`; a view, a trigger, a
+procedure, blobs, Unicode), and restores. Every table checksum matched, both next to
+the original and on a fresh server. That test found one bug, now fixed: `SHOW CREATE USER`
+names the default role, which may not exist yet on a fresh server, so default roles are
+now set after all accounts and grants (`SET DEFAULT ROLE`).
+
+Not done yet:
+- **The Docker test** for CI (`test/`): MySQL 8.4 + MinIO, the same steps as above. Docker
+  wasn't available on the machine M1 was built on.
+- **Retention** has only been tested with unit tests (it's the shared PostgreSQL code).
+- **The settings page and wizard** still show PostgreSQL fields; MySQL is configured by
+  editing `config.yaml` (M3).

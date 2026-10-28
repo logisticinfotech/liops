@@ -61,13 +61,19 @@ func GlobalsKey(t time.Time) string {
 // Stream runs cmd and uploads its stdout to key. Nothing is written to local disk.
 // If the command or the upload fails, no object is left behind.
 func Stream(ctx context.Context, run command.Runner, cmd command.Cmd, store storage.Store, key string) (int64, error) {
+	return Upload(ctx, store, key, func(ctx context.Context, w io.Writer) error { return run.Stream(ctx, cmd, w) })
+}
+
+// Upload uploads what write writes to key, as it is written. If write or the upload
+// fails, no object is left behind. write must stop when ctx is cancelled.
+func Upload(ctx context.Context, store storage.Store, key string, write func(ctx context.Context, w io.Writer) error) (int64, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pr, pw := io.Pipe()
 	dumped := make(chan error, 1)
 	go func() {
-		err := run.Stream(ctx, cmd, pw)
+		err := write(ctx, pw)
 		// A failed dump fails the upload's read, so the partial upload is aborted.
 		pw.CloseWithError(err)
 		dumped <- err
