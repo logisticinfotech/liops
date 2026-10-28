@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 liops is a single static Go binary that runs on a PostgreSQL server (as root, under systemd)
 and manages two backup layers to S3-compatible storage: pgBackRest point-in-time backups
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
-UI and SMTP emails. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+UI and SMTP emails. MySQL 8.4 support (`docs/PLAN-mysql.md`) and lightweight per-server
+monitoring are planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -61,13 +62,14 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **State** (`app/state`, bbolt) opens the file per transaction, because bbolt allows one
   process at a time and both the service and the CLI use it.
 - **Bucket layout**: everything a server stores is under its backup name
-  (`pgbackrest.stanza` + "/", `storage.Folder`). Get a store with `storage.Open(cfg)`, which
+  (`cfg.BackupName()` + "/", `storage.Folder`; for PostgreSQL that is `pgbackrest.stanza`). Get a store with `storage.Open(cfg)`, which
   adds the folder, so keys in code stay relative (`dumps/<db>/…`). pgBackRest's
   `repo1-path` is `/<name>/pgbackrest`. `setup.CheckOwner` refuses a name whose folder
   belongs to another cluster, before archiving is turned on.
 - **Dumps** stream `pg_dump` stdout through an `io.Pipe` into a multipart upload; there is no
-  local file, and a failed dump leaves no object behind. Retention rules are a pure function
-  (`pgdump.PlanRetention`) that the job applies. Database names are hex-encoded in discovery
+  local file, and a failed dump leaves no object behind. What is the same for every engine
+  (keys, `dumps.Stream`, the pure retention function `dumps.PlanRetention`) is in
+  `app/engines/dumps`; an engine (`pgdump`) only implements `jobs.Dumper`. Database names are hex-encoded in discovery
   and passed as `dbname='…'` (`postgres.Conn`), never bare.
 - **Service and UI** (`app/service`, `app/http/{controllers,middleware}`, `resources/`):
   `serve` runs `service.Service`, which holds the live config, runner and scheduler. Settings

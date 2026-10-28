@@ -54,6 +54,15 @@ const (
 // The log file has all of it.
 const outputLines = 200
 
+// Dumper is layer 2 for one database engine: it finds the databases and streams a
+// dump of each to storage (pgdump for PostgreSQL).
+type Dumper interface {
+	Discover(ctx context.Context) ([]string, error)
+	Labels(ctx context.Context) (map[string]string, error)
+	Dump(ctx context.Context, db string, at time.Time) (key string, size int64, err error)
+	DumpGlobals(ctx context.Context, at time.Time) (key string, size int64, err error)
+}
+
 // Runner runs jobs.
 type Runner struct {
 	Cfg      *config.Config
@@ -62,7 +71,7 @@ type Runner struct {
 	Store    storage.Store
 	Mail     notify.Mailer
 	Backrest *pgbackrest.Engine
-	Dumps    *pgdump.Engine
+	Dumps    Dumper
 	Cluster  postgres.Cluster
 	LockPath string
 	Now      func() time.Time

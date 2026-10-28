@@ -370,7 +370,13 @@ liops/
     version/               # build info (set by ldflags)
     jobs/                  # full, diff, dumps, report, retention
     engines/pgbackrest/    # write conf, run commands, parse info JSON
-    engines/pgdump/        # discovery, streamed dump, retention, deleted DBs
+    engines/postgres/      # one cluster: binary paths, psql queries, layouts
+    engines/dumps/         # engine-neutral layer 2: dump keys, streaming to storage, retention
+    engines/pgdump/        # PostgreSQL layer 2: discovery, pg_dump, labels
+    engines/mysql/         # planned (PLAN-mysql.md): one MySQL instance
+    engines/xtrabackup/    # planned: MySQL layer 1 (base backups + binlogs)
+    engines/mysqldump/     # planned: MySQL layer 2
+    monitor/               # planned: lightweight per-server monitoring, its own non-root service
     storage/               # Store interface + S3 implementation
     notify/                # email templates + error → "likely reason" mapping
     http/controllers/      # dashboard, backups, databases, jobs, settings, wizard

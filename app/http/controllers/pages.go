@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
-	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -117,7 +117,7 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 type dbRow struct {
 	Name         string
 	Label        string
-	Last         *pgdump.Dump
+	Last         *dumps.Dump
 	Count        int
 	Total        int64
 	LastError    string // from the newest dumps run
@@ -146,7 +146,7 @@ func (s *Server) dumpsInventory(r *http.Request) (databasesData, error) {
 	sort.Slice(globals, func(i, j int) bool { return globals[i].Key > globals[j].Key })
 	d.Globals = globals
 
-	grouped := pgdump.Group(objs)
+	grouped := dumps.Group(objs)
 	rows := map[string]*dbRow{}
 	row := func(db string) *dbRow {
 		if rows[db] == nil {
@@ -199,7 +199,7 @@ func (s *Server) databases(w http.ResponseWriter, r *http.Request) {
 
 type databaseData struct {
 	Row   dbRow
-	Dumps []pgdump.Dump // newest first
+	Dumps []dumps.Dump // newest first
 	Runs  []dbRun
 }
 
@@ -211,19 +211,19 @@ type dbRun struct {
 
 func (s *Server) database(w http.ResponseWriter, r *http.Request) {
 	db := r.PathValue("db")
-	objs, err := s.Svc.Runner().Store.List(r.Context(), pgdump.Prefix(db))
+	objs, err := s.Svc.Runner().Store.List(r.Context(), dumps.Prefix(db))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	dumps := pgdump.Group(objs)[db]
-	slices.Reverse(dumps)
+	list := dumps.Group(objs)[db]
+	slices.Reverse(list)
 	inv, err := s.dumpsInventory(r)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	d := databaseData{Dumps: dumps}
+	d := databaseData{Dumps: list}
 	for _, row := range inv.Rows {
 		if row.Name == db {
 			d.Row = row

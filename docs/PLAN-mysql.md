@@ -96,7 +96,7 @@ xtrabackup --defaults-extra-file=/etc/liops/mysql.cnf --backup \
 
 ### 3.3 Layer 1: retention
 
-- Pure function, like `pgdump.PlanRetention`: given manifests, binlogs and `retention_days`
+- Pure function, like `dumps.PlanRetention`: given manifests, binlogs and `retention_days`
   (default 30), keep every full newer than the window **plus the newest full older than it**,
   so the whole window can be restored. Diffs go with their full. Binlogs older than the oldest
   kept base backup's start position are deleted.
@@ -179,7 +179,7 @@ dumps: …          # unchanged; default exclude is empty for mysql
 | `app/jobs` | `Runner` holds a layer-1 interface (`Backup`, `Check`, `Info`) and a dumper interface (`Discover`, `Labels`, `Dump`, `DumpGlobals`) instead of `*pgbackrest.Engine` / `*pgdump.Engine`. New `binlogs` job. |
 | `app/engines/mysql/` | Instance: binary paths, `Command`, `Query` (`mysql -N -B` with `--defaults-extra-file`), `Setting`. The counterpart of `engines/postgres`. |
 | `app/engines/xtrabackup/` | Streamed backups, manifests, binlog shipping, gap check, `PlanRetention`, info for the UI. |
-| `app/engines/mysqldump/` | Discovery, dump, users and grants. Shares retention with `pgdump` (move `Group` / `PlanRetention` to a shared `app/engines/dumps` package). |
+| `app/engines/mysqldump/` | Discovery, dump, users and grants, implementing `jobs.Dumper`. Keys, streaming and retention come from `app/engines/dumps` (done in M0). |
 | `app/setup` | `mysql.go`: detect MySQL, create the user and `mysql.cnf`, check and enable settings, `CheckOwner` by `server_uuid`. |
 | Wizard, UI, emails | Step 1 picks the engine (auto-detected). Backups page shows base backups and "can restore to any moment from X to Y, last binlog shipped N minutes ago". Wording per engine ("binlogs" vs "WAL", "users and grants" vs "roles"). |
 | `notify.LikelyReason` | MySQL and XtraBackup errors: access denied, the server-newer-than-XtraBackup error, purged binlog, lock wait timeout. |
@@ -211,7 +211,7 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
 
 | Phase | Deliverable | Done when | Estimate |
 |-------|-------------|-----------|----------|
-| **M0. Engine split** | `engine` setting, `cfg.BackupName()`, job interfaces, shared dump retention | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
+| **M0. Engine split** | `cfg.BackupName()`, `jobs.Dumper`, shared `app/engines/dumps` (keys, streaming, retention). **Done** (October 2026). The `engine` setting moves to M1 and the layer-1 interface to M2, where a second implementation shapes them. | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
 | **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment | Dumps run, expire, and restore in the Docker test | 1 week |
 | **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md` | §7 passes in CI | 2 weeks |
 | **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |

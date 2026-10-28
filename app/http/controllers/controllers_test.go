@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
@@ -278,7 +279,7 @@ func TestProtections(t *testing.T) {
 func TestEveryPageRenders(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
 	h.store.Add(pgdump.Key("app", time.Now()), []byte("PGDMP"), time.Now())
-	h.store.Add(pgdump.GlobalsKey(time.Now()), []byte("CREATE ROLE"), time.Now())
+	h.store.Add(dumps.GlobalsKey(time.Now()), []byte("CREATE ROLE"), time.Now())
 	run := &state.Run{Job: "dumps", Start: time.Now(), Dumps: []state.DumpRun{{DB: "app", Size: 5}, {DB: "gone", Error: "boom"}}}
 	h.st.StartRun(run)
 	run.Status, run.End = state.StatusFailed, time.Now()

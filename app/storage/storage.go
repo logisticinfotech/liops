@@ -50,10 +50,10 @@ func TotalSize(objs []Object) int64 {
 }
 
 // Folder is the server's folder in the bucket, named after its backup name
-// (pgbackrest.stanza), e.g. "lmf-prod-1/". Everything the server stores is under it,
+// (cfg.BackupName), e.g. "lmf-prod-1/". Everything the server stores is under it,
 // so servers sharing a bucket, or a replacement server set up under a new name,
 // never touch each other's backups.
-func Folder(cfg *config.Config) string { return cfg.PgBackRest.Stanza + "/" }
+func Folder(cfg *config.Config) string { return cfg.BackupName() + "/" }
 
 // Open connects to the bucket and returns the server's folder in it. Keys passed to
 // the returned Store are relative to the folder ("dumps/app/….dump").

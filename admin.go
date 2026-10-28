@@ -16,8 +16,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
-	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/setup"
@@ -296,7 +296,7 @@ func runDumps(sub string, args []string, out io.Writer) error {
 	case "list":
 		prefix := storage.DumpsPrefix
 		if db := flags.Arg(0); db != "" {
-			prefix = pgdump.Prefix(db)
+			prefix = dumps.Prefix(db)
 		}
 		objs, err := store.List(ctx, prefix)
 		if err != nil {

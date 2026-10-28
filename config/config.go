@@ -295,6 +295,10 @@ func (c *Config) Location() (*time.Location, error) {
 	return time.LoadLocation(c.Server.Timezone)
 }
 
+// BackupName is the server's backup name: its folder in the bucket. For PostgreSQL it
+// is also the pgBackRest stanza.
+func (c *Config) BackupName() string { return c.PgBackRest.Stanza }
+
 // backupNameRe is what a backup name (pgbackrest.stanza) may look like. It is both the
 // pgBackRest stanza and the server's folder in the bucket.
 var backupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)

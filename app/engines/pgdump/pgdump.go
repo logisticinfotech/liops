@@ -8,20 +8,18 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/storage"
 	"github.com/logisticinfotech/liops/config"
 )
 
-// keyTime is the timestamp format in object keys. It sorts chronologically.
-const keyTime = "2006-01-02T150405Z"
+// Ext is the file extension of a pg_dump custom-format dump.
+const Ext = ".dump"
 
 // Engine dumps the databases of one cluster into a Store.
 type Engine struct {
@@ -35,41 +33,7 @@ func New(cfg *config.Config, run command.Runner, store storage.Store) *Engine {
 }
 
 // Key is the object key of a dump of db taken at t: dumps/<db>/<UTC time>.dump.
-// The name is path-escaped, so a "/" in a database name can't change the layout.
-func Key(db string, t time.Time) string {
-	return Prefix(db) + t.UTC().Format(keyTime) + ".dump"
-}
-
-// Prefix is where the dumps of db are stored: dumps/<db>/.
-func Prefix(db string) string {
-	return storage.DumpsPrefix + url.PathEscape(db) + "/"
-}
-
-// ParseKey returns the database and time encoded in a dump key.
-func ParseKey(key string) (db string, t time.Time, ok bool) {
-	rest, found := strings.CutPrefix(key, storage.DumpsPrefix)
-	if !found {
-		return "", time.Time{}, false
-	}
-	escaped, file, found := strings.Cut(rest, "/")
-	if !found || strings.Contains(file, "/") {
-		return "", time.Time{}, false
-	}
-	db, err := url.PathUnescape(escaped)
-	if err != nil {
-		return "", time.Time{}, false
-	}
-	t, err = time.Parse(keyTime, strings.TrimSuffix(file, ".dump"))
-	if err != nil {
-		return "", time.Time{}, false
-	}
-	return db, t, true
-}
-
-// GlobalsKey is the object key of the roles and tablespaces dump taken at t.
-func GlobalsKey(t time.Time) string {
-	return storage.GlobalsPrefix + t.UTC().Format(keyTime) + ".sql"
-}
+func Key(db string, t time.Time) string { return dumps.Key(db, t, Ext) }
 
 // Discover returns the databases to dump: every database that accepts connections
 // and isn't a template, minus the configured exclusions.
@@ -133,38 +97,11 @@ func (e *Engine) Dump(ctx context.Context, db string, at time.Time) (key string,
 // DumpGlobals streams `pg_dumpall --globals-only` (roles, tablespaces) to storage.
 // Restoring a single database dump on a fresh server needs its roles first.
 func (e *Engine) DumpGlobals(ctx context.Context, at time.Time) (key string, size int64, err error) {
-	key = GlobalsKey(at)
+	key = dumps.GlobalsKey(at)
 	size, err = e.stream(ctx, e.Cluster.Command("pg_dumpall", "--globals-only"), key)
 	return key, size, err
 }
 
 func (e *Engine) stream(ctx context.Context, cmd command.Cmd, key string) (int64, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	pr, pw := io.Pipe()
-	dumped := make(chan error, 1)
-	go func() {
-		err := e.Cluster.Run.Stream(ctx, cmd, pw)
-		// A failed dump fails the upload's read, so the partial upload is aborted.
-		pw.CloseWithError(err)
-		dumped <- err
-	}()
-
-	size, putErr := e.Store.Put(ctx, key, pr)
-	if putErr != nil {
-		cancel()                  // stop pg_dump
-		pr.CloseWithError(putErr) // unblock it if it is waiting to write
-	}
-	if dumpErr := <-dumped; dumpErr != nil {
-		if putErr == nil {
-			// Shouldn't happen, but never keep an object from a failed dump.
-			_ = e.Store.Delete(context.WithoutCancel(ctx), key)
-		}
-		return 0, dumpErr
-	}
-	if putErr != nil {
-		return 0, putErr
-	}
-	return size, nil
+	return dumps.Stream(ctx, e.Cluster.Run, cmd, e.Store, key)
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package pgdump
+package dumps
 
 import (
 	"slices"
@@ -14,12 +14,15 @@ var now = time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC)
 
 func days(n int) time.Duration { return time.Duration(n) * 24 * time.Hour }
 
+// key is the key of a pg_dump-style dump.
+func key(db string, t time.Time) string { return Key(db, t, ".dump") }
+
 // stored builds dumps of db taken the given number of days before now.
 func stored(db string, ages ...int) []Dump {
 	var d []Dump
 	for _, a := range ages {
 		t := now.Add(-days(a))
-		d = append(d, Dump{Key: Key(db, t), Taken: t})
+		d = append(d, Dump{Key: key(db, t), Taken: t})
 	}
 	return d
 }
@@ -30,7 +33,7 @@ func TestRetentionLiveDatabase(t *testing.T) {
 		Live:   []string{"app"},
 		Now:    now, Keep: days(7), KeepDeleted: days(14),
 	})
-	want := []string{Key("app", now.Add(-days(10))), Key("app", now.Add(-days(8)))}
+	want := []string{key("app", now.Add(-days(10))), key("app", now.Add(-days(8)))}
 	if !slices.Equal(plan.Delete, want) {
 		t.Errorf("Delete = %v, want %v", plan.Delete, want)
 	}
@@ -42,7 +45,7 @@ func TestRetentionKeepsNewestEvenIfOld(t *testing.T) {
 		Live:   []string{"app"},
 		Now:    now, Keep: days(7), KeepDeleted: days(14),
 	})
-	if !slices.Equal(plan.Delete, []string{Key("app", now.Add(-days(30)))}) {
+	if !slices.Equal(plan.Delete, []string{key("app", now.Add(-days(30)))}) {
 		t.Errorf("the newest dump must survive a run of failed nights: %v", plan.Delete)
 	}
 }
@@ -56,7 +59,7 @@ func TestRetentionNewlyDeletedDatabase(t *testing.T) {
 	if !slices.Equal(plan.NewlyDeleted, []string{"gone"}) {
 		t.Errorf("NewlyDeleted = %v", plan.NewlyDeleted)
 	}
-	if len(plan.Delete) != 2 || slices.Contains(plan.Delete, Key("gone", now.Add(-days(1)))) {
+	if len(plan.Delete) != 2 || slices.Contains(plan.Delete, key("gone", now.Add(-days(1)))) {
 		t.Errorf("only the newest dump of a gone database is kept: %v", plan.Delete)
 	}
 }
@@ -94,8 +97,8 @@ func TestRetentionReappearedAndOrphans(t *testing.T) {
 
 func TestGroupIgnoresForeignKeys(t *testing.T) {
 	objs := []storage.Object{
-		{Key: Key("app", now)},
-		{Key: Key("app", now.Add(-days(1)))},
+		{Key: key("app", now)},
+		{Key: key("app", now.Add(-days(1)))},
 		{Key: "dumps/readme.txt"},
 	}
 	g := Group(objs)

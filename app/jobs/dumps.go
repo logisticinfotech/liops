@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
-	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -56,7 +56,7 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 	if listErr != nil {
 		note("warning: %v (retention is skipped tonight)", listErr)
 	}
-	previous := pgdump.Group(before)
+	previous := dumps.Group(before)
 
 	total := len(dbs) + 1 // +1 for globals
 	r.setProgress(Progress{Kind: Dumps, Label: "Database dumps", Detail: "Starting…", Total: total})
@@ -156,8 +156,8 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 		return fmt.Errorf("state: %w", err)
 	}
 	now := r.now()
-	plan := pgdump.PlanRetention(pgdump.RetentionInput{
-		Stored:       pgdump.Group(objs),
+	plan := dumps.PlanRetention(dumps.RetentionInput{
+		Stored:       dumps.Group(objs),
 		Live:         live,
 		DeletedSince: deleted,
 		Now:          now,
@@ -170,7 +170,7 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 	if err != nil {
 		errs = append(errs, err)
 	}
-	toDelete := append(plan.Delete, pgdump.PlanGlobalsRetention(globals, now, days(r.Cfg.Dumps.RetentionDays))...)
+	toDelete := append(plan.Delete, dumps.PlanGlobalsRetention(globals, now, days(r.Cfg.Dumps.RetentionDays))...)
 	for _, key := range toDelete {
 		if err := r.Store.Delete(ctx, key); err != nil {
 			errs = append(errs, err)
@@ -205,7 +205,7 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 	return errors.Join(errs...)
 }
 
-func (r *Runner) dumpFailureEmail(ctx context.Context, trigger string, failed []state.DumpRun, problems []error, previous map[string][]pgdump.Dump, output string) {
+func (r *Runner) dumpFailureEmail(ctx context.Context, trigger string, failed []state.DumpRun, problems []error, previous map[string][]dumps.Dump, output string) {
 	var headline, what, safe string
 	var details strings.Builder
 	switch {
