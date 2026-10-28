@@ -6,9 +6,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/state"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/state"
 )
 
 // backup runs a pgBackRest full or differential backup (layer 1).
@@ -40,7 +40,7 @@ func (r *Runner) backup(ctx context.Context, typ, trigger string, run *state.Run
 			Headline: tonight(trigger) + backupName(typ) + " FAILED",
 			What:     "pgBackRest " + backupName(typ) + " (point-in-time backups)",
 			Safe:     safe,
-			ToDo:     "check the details below, then run: sudo pgtijori run " + typ,
+			ToDo:     "check the details below, then run: sudo liops run " + typ,
 			Output:   string(out),
 		})
 		r.send(ctx, typ, subject, body)

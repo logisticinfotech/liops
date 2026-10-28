@@ -16,7 +16,7 @@ import (
 )
 
 // CookieName is the session cookie.
-const CookieName = "pgtijori_session"
+const CookieName = "liops_session"
 
 // Session is one browser's session. It only carries the CSRF token and a one-time
 // message. Sessions live in memory.

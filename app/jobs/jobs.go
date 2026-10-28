@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package jobs runs pgtijori's jobs (full, diff, dumps, report), records each run in
+// Package jobs runs liops's jobs (full, diff, dumps, report), records each run in
 // the state file, and sends failure emails. Only one job runs at a time per server,
 // across the service and CLI commands: a job that would overlap waits its turn.
 package jobs
@@ -17,14 +17,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Job names.

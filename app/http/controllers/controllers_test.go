@@ -17,17 +17,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/jobs"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/service"
-	"github.com/logisticinfotech/pgtijori/app/setup"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/service"
+	"github.com/logisticinfotech/liops/app/setup"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/config"
 )
 
 type harness struct {
@@ -175,7 +175,7 @@ func TestDashboardAndDownload(t *testing.T) {
 	if code != 303 || !strings.HasPrefix(loc, "https://storage.example.com/dumps/app/") {
 		t.Fatalf("download: %d %q", code, loc)
 	}
-	if _, _, body := h.get("/databases/app"); !strings.Contains(body, "sudo pgtijori dumps url &#39;"+m[1]+"&#39;") ||
+	if _, _, body := h.get("/databases/app"); !strings.Contains(body, "sudo liops dumps url &#39;"+m[1]+"&#39;") ||
 		!strings.Contains(body, "createdb &#39;app_restored&#39;") || strings.Contains(body, `action="/restore`) {
 		t.Errorf("database page should show restore commands and no restore button:\n%s", body)
 	}

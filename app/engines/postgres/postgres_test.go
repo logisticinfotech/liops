@@ -5,7 +5,7 @@ package postgres
 import (
 	"testing"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 func TestBin(t *testing.T) {

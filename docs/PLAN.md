@@ -1,6 +1,6 @@
-# pgtijori — Design and build plan
+# liops — Design and build plan
 
-**pgtijori** (*tijori* is Hindi for "safe" or "vault") is a one-stop PostgreSQL backup tool
+**liops** (formerly pgtijori, renamed October 2026) is a one-stop PostgreSQL backup tool
 for a single database server. It packages a proven manual setup (pgBackRest point-in-time
 backups to S3-compatible storage, plus per-database dumps, alerts and a status page) as one Go
 binary with an install command, a setup wizard, a status UI with downloads, and
@@ -38,7 +38,8 @@ Nothing in this repository is specific to any particular deployment. Each server
 - **Browser access over the internet.** The UI is reached through an SSH tunnel only.
 - **Encryption of backups.** v1 relies on a private bucket and a bucket-scoped token. Client-side
   encryption may be added later as an option.
-- Backing up anything other than PostgreSQL (app files, server config).
+- Backing up anything other than PostgreSQL (app files, server config). MySQL 8.4 is planned
+  separately in [PLAN-mysql.md](PLAN-mysql.md) (proposed, October 2026).
 
 ---
 
@@ -46,9 +47,9 @@ Nothing in this repository is specific to any particular deployment. Each server
 
 | Topic | Decision |
 |-------|----------|
-| Name | **pgtijori**: binary `pgtijori`, service `pgtijori.service` |
+| Name | **liops**: binary `liops`, service `liops.service` |
 | Scope | Any PostgreSQL server: single-database apps and database-per-tenant apps alike |
-| Code and releases | Public repo [`logisticinfotech/pgtijori`](https://github.com/logisticinfotech/pgtijori), with GitHub Releases for the binary and `install.sh` (§7.1) |
+| Code and releases | Public repo [`logisticinfotech/liops`](https://github.com/logisticinfotech/liops), with GitHub Releases for the binary and `install.sh` (§7.1) |
 | License | **Apache-2.0** |
 | Users | Developers. Emails and UI are plain, but don't need to be non-technical. |
 | Restore from UI | **No.** Restores are manual, using the runbook. An in-place restore button was built and removed (October 2026): with no login (§5.2) any local process could replace a live database, and swapping a database is the moment a person has to stop the app. The UI shows filled-in commands instead. |
@@ -90,7 +91,7 @@ so it feels familiar to developers coming from those frameworks.
  │   app DB · tenant_abc · tenant_xyz · …                               │
  │      │ WAL (archive_command)              ▲ pg_dump (read-only)      │
  │      ▼                                    │                          │
- │   pgBackRest ◄────── runs ────────── pgtijori (systemd, Go)          │
+ │   pgBackRest ◄────── runs ────────── liops (systemd, Go)          │
  │      │                                    │  scheduler · jobs · state │
  │      │                                    │  UI on 127.0.0.1:8899     │
  │      │                                    │  SMTP                     │
@@ -114,8 +115,8 @@ so it feels familiar to developers coming from those frameworks.
   same moment, so they stay consistent. New databases are included automatically.
 - Weekly full, nightly differential, `archive_timeout = 1h` (configurable, 1m–24h), 30-day
   retention, zstd.
-- pgtijori writes `pgbackrest.conf` and the PostgreSQL `conf.d` file, and runs `backup`, `check`
-  and `info --output=json`. pgBackRest does the actual work. pgtijori doesn't reimplement
+- liops writes `pgbackrest.conf` and the PostgreSQL `conf.d` file, and runs `backup`, `check`
+  and `info --output=json`. pgBackRest does the actual work. liops doesn't reimplement
   backups.
 
 ### 4.2 Layer 2: per-database dumps (`pg_dump`)
@@ -128,9 +129,9 @@ so it feels familiar to developers coming from those frameworks.
   night.
 - **Order**: dumps run **after** the nightly backup, one database at a time (`concurrency`,
   default 1).
-- **Retention**: keep N days per database (default 7). pgtijori lists `dumps/<db>/` and deletes
+- **Retention**: keep N days per database (default 7). liops lists `dumps/<db>/` and deletes
   older objects.
-- **Deleted databases**: when a database disappears from discovery, pgtijori marks it
+- **Deleted databases**: when a database disappears from discovery, liops marks it
   `deleted since <date>`, sends an email, keeps its **newest** dump for N days (default 14),
   then deletes it. Note: layer 1 still contains the deleted database until its backups
   expire. Operators should reflect that in their privacy policy.
@@ -156,7 +157,7 @@ type Store interface {
 - **v1: S3-compatible** (`minio-go`): Cloudflare R2, AWS S3, Backblaze B2, Wasabi, MinIO.
 - **Later**: GCS. Google Drive for **dumps only**. Drive can't hold layer 1, because pgBackRest
   doesn't support it and Drive's request limits don't suit WAL.
-- Layer 1 storage is whatever pgBackRest supports (`s3`, `gcs`, `sftp`, `posix`). pgtijori only
+- Layer 1 storage is whatever pgBackRest supports (`s3`, `gcs`, `sftp`, `posix`). liops only
   writes the matching `repo1-*` settings.
 
 ### 4.4 Scheduler and jobs
@@ -181,11 +182,11 @@ schedules can be written in local time while the server clock stays on UTC.
 
 | Item | Value |
 |------|-------|
-| Service | systemd unit `pgtijori.service`, runs as **root**, runs DB commands as `postgres` (`runuser -u postgres --`) |
+| Service | systemd unit `liops.service`, runs as **root**, runs DB commands as `postgres` (`runuser -u postgres --`) |
 | Why root | The wizard has to write `/etc/pgbackrest`, write `/etc/postgresql/.../conf.d` and restart PostgreSQL. After setup it only needs `postgres`. Root keeps v1 simple; revisit later. |
-| Config | `/etc/pgtijori/config.yaml`, mode `0600`, holds secrets. Refused if group or others can read it. |
-| State | `/var/lib/pgtijori/state.db` (bbolt, pure Go): job history (90 days), audit log, deleted-DB tracking, UI users |
-| Logs | `/var/log/pgtijori/pgtijori.log` (+ logrotate) |
+| Config | `/etc/liops/config.yaml`, mode `0600`, holds secrets. Refused if group or others can read it. |
+| State | `/var/lib/liops/state.db` (bbolt, pure Go): job history (90 days), audit log, deleted-DB tracking, UI users |
+| Logs | `/var/log/liops/liops.log` (+ logrotate) |
 | UI | Listens on a **loopback address only** (default `127.0.0.1:8899`), never on a public port |
 
 ---
@@ -220,7 +221,7 @@ The trade-off, accepted on purpose: anything that can connect to `127.0.0.1:8899
 server** can use the UI, including downloading dumps and changing settings. That means every
 local user and process, for example a web app on the same server with an SSRF bug. If that
 becomes a concern, the planned fix is to listen on a Unix socket that only the `sudo` group
-can open (`ssh -L 8899:/run/pgtijori/ui.sock …`), which keeps the same convenience.
+can open (`ssh -L 8899:/run/liops/ui.sock …`), which keeps the same convenience.
 
 Still in place, because they cost the user nothing: CSRF tokens on every form and an Origin
 check, SameSite=Strict cookies, a strict Content-Security-Policy, and refusing requests whose
@@ -236,7 +237,7 @@ ssh -L 8899:127.0.0.1:8899 <user>@<server>
 ```
 
 For several servers at once, give each tunnel its own local port. No firewall port is ever
-opened for pgtijori. Config validation rejects any non-loopback `ui.listen`.
+opened for liops. Config validation rejects any non-loopback `ui.listen`.
 
 ---
 
@@ -290,11 +291,11 @@ unrecognised shows "unknown — see technical details".
 ### 7.1 One command
 
 ```bash
-curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/logisticinfotech/liops/releases/latest/download/install.sh | sudo bash
 ```
 
 **Releases:** a GitHub Actions workflow builds each tagged version (`v1.2.0`) and attaches
-`pgtijori-linux-amd64`, `install.sh` and `SHA256SUMS` to the GitHub Release. To pin a version,
+`liops-linux-amd64`, `install.sh` and `SHA256SUMS` to the GitHub Release. To pin a version,
 use `…/releases/download/v1.2.0/install.sh`.
 
 Because the repository is public:
@@ -311,12 +312,12 @@ Because the repository is public:
 
 1. Checks: Ubuntu, systemd, PostgreSQL installed (`pg_lsclusters`), root.
 2. Installs `pgbackrest` from PGDG (adds the repository if it's missing).
-3. Downloads the `pgtijori` binary (linux/amd64, static) and checks its SHA-256.
+3. Downloads the `liops` binary (linux/amd64, static) and checks its SHA-256.
 4. Creates the directories, systemd unit and logrotate file, then starts the service.
 5. Prints the SSH-tunnel command to open the wizard.
 
-Re-running it **upgrades** the binary and keeps the config. `pgtijori uninstall` removes
-pgtijori, but leaves the backups in storage untouched.
+Re-running it **upgrades** the binary and keeps the config. `liops uninstall` removes
+liops, but leaves the backups in storage untouched.
 
 ### 7.2 Wizard (in the browser)
 
@@ -340,7 +341,7 @@ safe to run again.
 
 ### 7.3 CLI (for SSH use)
 
-`pgtijori status | run <full|diff|dumps|report> | logs | version | config init|validate | uninstall`.
+`liops status | run <full|diff|dumps|report> | logs | version | config init|validate | uninstall`.
 Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 
 ---
@@ -363,7 +364,7 @@ Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 ### 8.2 Layout
 
 ```
-pgtijori/
+liops/
   main.go                  # small CLI: serve | status | run | config | ...
   app/
     version/               # build info (set by ldflags)
@@ -421,7 +422,7 @@ Rough estimates for one developer. Each phase ends with a usable result.
   - Retention always keeps a live database's newest dump, even past the retention period, so
     failed nights can't leave a database with no dump.
   - A database added to `dumps.exclude` is treated like a deleted one.
-  - The job lock is a file lock (`/var/lib/pgtijori/job.lock`), so `pgtijori run` over SSH
+  - The job lock is a file lock (`/var/lib/liops/job.lock`), so `liops run` over SSH
     queues behind a scheduled job instead of overlapping it.
   - `email.tls` is `starttls` or `tls`; plaintext SMTP isn't allowed.
   - pgBackRest runs with `repo1-bundle=y` and `process-max=4` (October 2026). A first full
@@ -438,7 +439,7 @@ Rough estimates for one developer. Each phase ends with a usable result.
   - Requests whose `Host` isn't localhost are refused (DNS rebinding), on top of
     loopback-only listening.
   - "Run now" is offered for `diff`, `dumps` and `report`. A full backup by hand is
-    `sudo pgtijori run full`.
+    `sudo liops run full`.
 - **Phase 3:** implemented on branch `phase-3-installer`: `scripts/install.sh`,
   `install-system`, the wizard, `uninstall`, `logs`, `dumps list|url`,
   and [restore.md](restore.md). Not yet done: the "done when" test, a fresh Ubuntu VM taken
@@ -447,8 +448,10 @@ Rough estimates for one developer. Each phase ends with a usable result.
   discovery, binary and settings paths, the pgBackRest config path, restarts), so the wizard,
   full/diff backups, WAL archiving and dumps all run on a Mac with Homebrew PostgreSQL,
   pgBackRest, MinIO and Mailpit ([development.md](development.md)). Servers keep the
-  default `debian` layout and behave as before. `PGTIJORI_DEV=1` drops the root check and
+  default `debian` layout and behave as before. `LIOPS_DEV=1` drops the root check and
   keeps files in `./dev/`. macOS is still not a deployment target. Not yet run end to end:
   `scripts/dev.sh` and a real `setup` against Homebrew pgBackRest.
+- **MySQL:** proposed in [PLAN-mysql.md](PLAN-mysql.md) (XtraBackup + binlog shipping +
+  `mysqldump`). Not started.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

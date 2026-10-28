@@ -16,30 +16,30 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/setup"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/app/version"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/setup"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/app/version"
+	"github.com/logisticinfotech/liops/config"
 )
 
-//go:embed deploy/pgtijori.service
+//go:embed deploy/liops.service
 var systemdUnit []byte
 
-//go:embed deploy/pgtijori.logrotate
+//go:embed deploy/liops.logrotate
 var logrotateConf []byte
 
 const (
-	binPath       = "/usr/local/bin/pgtijori"
-	unitPath      = "/etc/systemd/system/pgtijori.service"
-	logrotatePath = "/etc/logrotate.d/pgtijori"
-	configDir     = "/etc/pgtijori"
-	stateDir      = "/var/lib/pgtijori"
-	logDir        = "/var/log/pgtijori"
+	binPath       = "/usr/local/bin/liops"
+	unitPath      = "/etc/systemd/system/liops.service"
+	logrotatePath = "/etc/logrotate.d/liops"
+	configDir     = "/etc/liops"
+	stateDir      = "/var/lib/liops"
+	logDir        = "/var/log/liops"
 )
 
 // runLogs prints the end of the log, and with -f keeps printing as it grows.
@@ -141,7 +141,7 @@ func runInstallSystem(args []string, out io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if err := requireRoot("pgtijori install-system"); err != nil {
+	if err := requireRoot("liops install-system"); err != nil {
 		return err
 	}
 	for _, d := range []struct {
@@ -168,12 +168,12 @@ func runInstallSystem(args []string, out io.Writer) error {
 	// Left behind by early versions, which had a login and a setup token.
 	_ = os.Remove(stateDir + "/setup-token")
 
-	upgrade := exec.Command("systemctl", "is-active", "--quiet", "pgtijori").Run() == nil
+	upgrade := exec.Command("systemctl", "is-active", "--quiet", "liops").Run() == nil
 	if upgrade {
-		if err := systemctl("restart", "pgtijori"); err != nil {
+		if err := systemctl("restart", "liops"); err != nil {
 			return err
 		}
-	} else if err := systemctl("enable", "--now", "pgtijori"); err != nil {
+	} else if err := systemctl("enable", "--now", "liops"); err != nil {
 		return err
 	}
 
@@ -206,7 +206,7 @@ func portOf(listen string) string {
 	return listen
 }
 
-// runUninstall removes pgtijori. Backups in storage are never touched, and pgBackRest
+// runUninstall removes liops. Backups in storage are never touched, and pgBackRest
 // keeps archiving WAL until archiving is turned off, so it says how.
 func runUninstall(args []string, in io.Reader, out io.Writer) error {
 	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
@@ -215,12 +215,12 @@ func runUninstall(args []string, in io.Reader, out io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if err := requireRoot("pgtijori uninstall"); err != nil {
+	if err := requireRoot("liops uninstall"); err != nil {
 		return err
 	}
 	cfg, _ := config.LoadDraft(config.DefaultPath)
 
-	fmt.Fprintln(out, "This stops and removes the pgtijori service, its systemd and logrotate files and the binary.")
+	fmt.Fprintln(out, "This stops and removes the liops service, its systemd and logrotate files and the binary.")
 	if *purge {
 		fmt.Fprintf(out, "With --purge it also deletes %s (config with secrets), %s (users, job history) and %s.\n", configDir, stateDir, logDir)
 	} else {
@@ -235,7 +235,7 @@ func runUninstall(args []string, in io.Reader, out io.Writer) error {
 		}
 	}
 
-	_ = systemctl("disable", "--now", "pgtijori")
+	_ = systemctl("disable", "--now", "liops")
 	for _, f := range []string{unitPath, logrotatePath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
@@ -255,7 +255,7 @@ func runUninstall(args []string, in io.Reader, out io.Writer) error {
 		}
 	}
 
-	fmt.Fprintln(out, "\npgtijori is removed.")
+	fmt.Fprintln(out, "\nliops is removed.")
 	if cfg != nil && cfg.PgBackRest.Stanza != "" {
 		cluster := postgres.Cluster{Cfg: cfg.Postgres}
 		fmt.Fprintf(out, `
@@ -278,7 +278,7 @@ func runDumps(sub string, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRoot("pgtijori dumps"); err != nil {
+	if err := requireRoot("liops dumps"); err != nil {
 		return err
 	}
 	cfg, err := config.Load(p.config)
@@ -315,7 +315,7 @@ func runDumps(sub string, args []string, out io.Writer) error {
 	case "url":
 		key := flags.Arg(0)
 		if !strings.HasPrefix(key, storage.DumpsPrefix) && !strings.HasPrefix(key, storage.GlobalsPrefix) {
-			return errors.New("dumps url: give a key from `pgtijori dumps list`, e.g. dumps/app/2026-10-05T200102Z.dump")
+			return errors.New("dumps url: give a key from `liops dumps list`, e.g. dumps/app/2026-10-05T200102Z.dump")
 		}
 		url, err := store.DownloadURL(ctx, key, 10*time.Minute)
 		if err != nil {

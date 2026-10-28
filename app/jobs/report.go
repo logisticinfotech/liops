@@ -12,10 +12,10 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/state"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/state"
 )
 
 // backupGrace is how late a scheduled backup may finish before the report calls it missing.

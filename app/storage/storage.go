@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package storage is the object storage both backup layers go to. pgBackRest talks
-// to the bucket itself; pgtijori uses this package for the per-database dumps, the
+// to the bucket itself; liops uses this package for the per-database dumps, the
 // storage probe, usage totals and download links.
 package storage
 
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Object is one stored object.
@@ -37,7 +37,7 @@ const (
 	PgBackRestPrefix = "pgbackrest/"
 	DumpsPrefix      = "dumps/"
 	GlobalsPrefix    = "globals/"
-	probePrefix      = "pgtijori-probe/"
+	probePrefix      = "liops-probe/"
 )
 
 // TotalSize adds up the size of objects.

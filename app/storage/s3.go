@@ -16,7 +16,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // PartSize is the multipart upload part size for streamed uploads. It bounds memory
@@ -106,7 +106,7 @@ func (s *S3) DownloadURL(ctx context.Context, key string, ttl time.Duration) (st
 
 func (s *S3) Probe(ctx context.Context) error {
 	key := probePrefix + strconv.FormatInt(time.Now().UnixNano(), 36)
-	want := []byte("pgtijori storage probe\n")
+	want := []byte("liops storage probe\n")
 	if _, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(want), int64(len(want)), minio.PutObjectOptions{}); err != nil {
 		return fmt.Errorf("write test object: %w", err)
 	}

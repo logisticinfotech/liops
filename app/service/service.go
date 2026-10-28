@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package service is the long-running pgtijori process (`pgtijori serve`): it holds
+// Package service is the long-running liops process (`liops serve`): it holds
 // the current config, the job runner and the scheduler, and lets the UI change
 // settings and start jobs without a restart.
 //
@@ -16,22 +16,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/jobs"
-	"github.com/logisticinfotech/pgtijori/app/setup"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/setup"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // MetaSetupComplete is set in the state file once the stanza exists and WAL
-// archiving works (by `pgtijori setup` or the wizard).
+// archiving works (by `liops setup` or the wizard).
 const MetaSetupComplete = "setup_complete"
 
 // healthTTL is how long the dashboard reuses a health check.
 const healthTTL = time.Minute
 
-// Service is the running pgtijori.
+// Service is the running liops.
 type Service struct {
 	ConfigPath string
 	LockPath   string

@@ -8,7 +8,7 @@
   <form method="post" action="/jobs/run" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="job" value="{{.}}">
     <button class="small {{if has $.Data.Active .}}secondary{{end}}" {{if has $.Data.Active .}}disabled{{end}}>{{.}}{{if has $.Data.Active .}} ({{index $.Data.Active .}}){{end}}</button></form>
   {{end}}
-  <div class="hint">A job waits if another one is running. Full backups run on their schedule; for one now, use <code>sudo pgtijori run full</code>.</div>
+  <div class="hint">A job waits if another one is running. Full backups run on their schedule; for one now, use <code>sudo liops run full</code>.</div>
 </div>
 <p>Show: <a href="/jobs" {{if not .Job}}class="badge running"{{end}}>all</a>
 {{range .Names}} · <a href="/jobs?job={{.}}" {{if eq . $.Data.Job}}class="badge running"{{end}}>{{.}}</a>{{end}}</p>

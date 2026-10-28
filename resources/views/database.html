@@ -19,11 +19,11 @@
 </table></div>
 {{if .Dumps}}{{with $newest := index .Dumps 0}}
 <h2>Restore by hand</h2>
-<p class="muted">pgtijori never changes a database itself. Over SSH on this server, these commands restore the newest dump into a <strong>new</strong> database next to the original, so you can check it first. For an older dump, use its key from the table above. To swap it in place of the original, follow docs/restore.md §1.</p>
-<pre>sudo pgtijori dumps url {{shq $newest.Key}}    # prints a link, valid 10 minutes
-curl -fsSL -o /tmp/pgtijori-restore.dump '&lt;the link&gt;'
-sudo chown postgres: /tmp/pgtijori-restore.dump
+<p class="muted">liops never changes a database itself. Over SSH on this server, these commands restore the newest dump into a <strong>new</strong> database next to the original, so you can check it first. For an older dump, use its key from the table above. To swap it in place of the original, follow docs/restore.md §1.</p>
+<pre>sudo liops dumps url {{shq $newest.Key}}    # prints a link, valid 10 minutes
+curl -fsSL -o /tmp/liops-restore.dump '&lt;the link&gt;'
+sudo chown postgres: /tmp/liops-restore.dump
 sudo -u postgres createdb {{shq (printf "%s_restored" $.Data.Row.Name)}}
-sudo -u postgres pg_restore --exit-on-error -d {{shq (printf "%s_restored" $.Data.Row.Name)}} /tmp/pgtijori-restore.dump</pre>
+sudo -u postgres pg_restore --exit-on-error -d {{shq (printf "%s_restored" $.Data.Row.Name)}} /tmp/liops-restore.dump</pre>
 {{end}}{{end}}
 {{end}}{{end}}

@@ -44,7 +44,7 @@ func TestDefaultReportsMissingSettings(t *testing.T) {
 }
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pgtijori", "config.yaml")
+	path := filepath.Join(t.TempDir(), "liops", "config.yaml")
 	want := complete()
 	want.PgBackRest.ArchiveTimeout = Duration(15 * time.Minute)
 

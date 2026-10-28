@@ -1,4 +1,4 @@
-module github.com/logisticinfotech/pgtijori
+module github.com/logisticinfotech/liops
 
 go 1.26.9
 

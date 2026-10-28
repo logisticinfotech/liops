@@ -1,7 +1,7 @@
 # Build output
-/pgtijori
+/liops
 /dist/
-/test/.pgtijori-linux
+/test/.liops-linux
 
 # Go
 *.test

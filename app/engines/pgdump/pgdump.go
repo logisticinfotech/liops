@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // keyTime is the timestamp format in object keys. It sorts chronologically.

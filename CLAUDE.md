@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-pgtijori is a single static Go binary that runs on a PostgreSQL server (as root, under systemd)
+liops is a single static Go binary that runs on a PostgreSQL server (as root, under systemd)
 and manages two backup layers to S3-compatible storage: pgBackRest point-in-time backups
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
@@ -17,14 +17,14 @@ building a new feature. Phases 0–3 are implemented (engine, UI, installer, wiz
 ```bash
 make test           # go test -race -count=1 ./...
 make lint           # gofmt check + go vet (CI fails on unformatted files)
-make build          # local binary ./pgtijori
+make build          # local binary ./liops
 make build-linux    # CGO_ENABLED=0 static linux/amd64 into dist/
 make vuln           # govulncheck
 make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS), runs test/smoke.sh
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
 make testenv-down   # tear down and delete volumes
 make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
-make dev            # serve against it (PGTIJORI_DEV=1); see docs/development.md
+make dev            # serve against it (LIOPS_DEV=1); see docs/development.md
 
 go test -run TestUIMustListenOnLoopback ./config   # single test
 ```
@@ -55,7 +55,7 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   `postgres` OS user via `runuser`. Tests use `command.Fake`, `storage.Memory` and
   `notify.Recorder` instead of real programs, S3 and SMTP (see `app/jobs/jobs_test.go`).
 - **Jobs** (`app/jobs`): `Runner.Run` takes a file lock (`job.lock` next to the state file),
-  so jobs from `serve` and `pgtijori run` queue rather than overlap. Each job is recorded as
+  so jobs from `serve` and `liops run` queue rather than overlap. Each job is recorded as
   a `state.Run`. `full`/`diff` are followed by a separate `dumps` run. Failures email straight
   away, and a broken state file or a failed email never stops a backup.
 - **State** (`app/state`, bbolt) opens the file per transaction, because bbolt allows one
@@ -72,7 +72,7 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **Service and UI** (`app/service`, `app/http/{controllers,middleware}`, `resources/`):
   `serve` runs `service.Service`, which holds the live config, runner and scheduler. Settings
   saves and the wizard go through it; the scheduler only runs once the config is valid and
-  `state` meta `setup_complete` is set (by `pgtijori setup` or the wizard). Templates are
+  `state` meta `setup_complete` is set (by `liops setup` or the wizard). Templates are
   `resources/views/layout.html` + `partials/*.html` + one page each, embedded with `embed`.
   The strict CSP means no inline scripts or styles. Controller tests
   (`controllers_test.go`) drive the real handler through `httptest` with a cookie jar and
@@ -85,7 +85,7 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`
   and `setup.DetectClusters`. Never hard-code a Debian path elsewhere, and keep the
   `debian` output byte-for-byte unchanged when touching these.
-- **Development mode** (`PGTIJORI_DEV=1`, `dev.go`): no root check, paths default to
+- **Development mode** (`LIOPS_DEV=1`, `dev.go`): no root check, paths default to
   `./dev/`, and `setup --skip-pgbackrest` is allowed. It isn't a production feature: don't
   make server behaviour depend on it. See `docs/development.md`.
 - **Setup** steps (`app/setup`) are shared by the CLI and the wizard. Never restart

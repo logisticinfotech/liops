@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Cluster is the local PostgreSQL cluster.
@@ -47,7 +47,7 @@ func (c Cluster) Bin(name string) string {
 	return filepath.Join("/usr/lib/postgresql", strconv.Itoa(c.Cfg.Version), "bin", name)
 }
 
-// ConfDPath is where pgtijori's PostgreSQL settings go. Debian/Ubuntu clusters
+// ConfDPath is where liops's PostgreSQL settings go. Debian/Ubuntu clusters
 // include /etc/postgresql/<version>/<cluster>/conf.d/ by default. Homebrew keeps
 // postgresql.conf in the data directory, and setup adds an include_dir for conf.d/ there.
 func (c Cluster) ConfDPath() string {

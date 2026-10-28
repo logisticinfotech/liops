@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 func TestPrefixedKeepsToItsFolder(t *testing.T) {

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
-BINARY  := pgtijori
+BINARY  := liops
 VERSION ?= dev
-LDFLAGS := -s -w -X github.com/logisticinfotech/pgtijori/app/version.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/logisticinfotech/liops/app/version.Version=$(VERSION)
 
 .PHONY: build build-linux test lint vuln testenv integration testenv-down dev-up dev dev-down
 
@@ -36,7 +36,7 @@ dev-up:           ## Laptop dev environment without Docker: MinIO, Mailpit, dev/
 	./scripts/dev.sh up
 
 dev: build        ## Serve the UI and scheduler against the dev environment
-	PGTIJORI_DEV=1 ./$(BINARY) serve
+	LIOPS_DEV=1 ./$(BINARY) serve
 
 dev-down:         ## Stop MinIO and Mailpit (dev/ is kept)
 	./scripts/dev.sh down

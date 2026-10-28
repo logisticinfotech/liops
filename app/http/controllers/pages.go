@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/jobs"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/storage"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
 )
 
 // downloadTTL is how long a download link works. The browser downloads straight
-// from storage; pgtijori isn't in the path.
+// from storage; liops isn't in the path.
 const downloadTTL = 10 * time.Minute
 
 // Overall health on the dashboard.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
+	"github.com/logisticinfotech/liops/app/command"
 )
 
 // Summary is the content of the daily summary email.
@@ -119,7 +119,7 @@ func FailureEmail(f Failure) (subject, body string) {
 func NewDatabase(server, db, label string, size int64) (subject, body string) {
 	name := Name(db, label)
 	subject = fmt.Sprintf("🆕 %s — new database found: %s", server, name)
-	body = fmt.Sprintf("pgtijori found a new database, %s, and dumped it for the first time (%s).\n\n"+
+	body = fmt.Sprintf("liops found a new database, %s, and dumped it for the first time (%s).\n\n"+
 		"It's now included in the nightly dumps. It was already covered by the point-in-time\n"+
 		"backups from the moment it was created. No action needed.\n", name, Bytes(size))
 	return subject, body
@@ -195,9 +195,9 @@ func Bytes(n int64) string {
 
 // SetupFinished is sent when the setup wizard has taken the first backup.
 func SetupFinished(server string, backupOK bool, dumped, total int, nextFull time.Time) (subject, body string) {
-	subject = fmt.Sprintf("🎉 %s — pgtijori is set up", server)
+	subject = fmt.Sprintf("🎉 %s — liops is set up", server)
 	var b strings.Builder
-	b.WriteString("pgtijori finished setting up backups on " + server + ".\n\n")
+	b.WriteString("liops finished setting up backups on " + server + ".\n\n")
 	if backupOK {
 		b.WriteString("First full backup:  done\n")
 	} else {

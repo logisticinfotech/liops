@@ -5,13 +5,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
-<title>{{.Title}} · pgtijori · {{.Server}}</title>
+<title>{{.Title}} · liops · {{.Server}}</title>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/app.js" defer></script>
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">pgtijori</a>
+  <a class="brand" href="/">liops</a>
   <span class="server">{{.Server}}</span>
   {{if not .Wizard}}
   <nav>
@@ -29,6 +29,6 @@
   {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   {{template "content" .}}
 </main>
-<footer>pgtijori {{.Version}} · reached through your SSH tunnel</footer>
+<footer>liops {{.Version}} · reached through your SSH tunnel</footer>
 </body>
 </html>{{end}}

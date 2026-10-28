@@ -10,7 +10,7 @@ import (
 )
 
 // SecurityHeaders sets headers that stop framing, sniffing, referrer leaks, and any
-// script or style not served by pgtijori itself.
+// script or style not served by liops itself.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -31,7 +31,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 func LocalOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isLoopbackHost(r.Host) {
-			http.Error(w, "pgtijori only answers to localhost: open it through the SSH tunnel at http://localhost:<port>", http.StatusMisdirectedRequest)
+			http.Error(w, "liops only answers to localhost: open it through the SSH tunnel at http://localhost:<port>", http.StatusMisdirectedRequest)
 			return
 		}
 		next.ServeHTTP(w, r)

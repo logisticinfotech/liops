@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/http/middleware"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/service"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/version"
-	"github.com/logisticinfotech/pgtijori/config"
-	"github.com/logisticinfotech/pgtijori/resources"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/http/middleware"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/service"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/version"
+	"github.com/logisticinfotech/liops/config"
+	"github.com/logisticinfotech/liops/resources"
 )
 
 // Server is the UI.

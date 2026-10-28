@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package pgbackrest is layer 1: point-in-time backups. pgtijori writes pgBackRest's
+// Package pgbackrest is layer 1: point-in-time backups. liops writes pgBackRest's
 // config and runs it; pgBackRest does the actual backing up and WAL archiving.
 package pgbackrest
 
@@ -18,15 +18,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // ConfPath is pgBackRest's config file. On Debian/Ubuntu it is pgBackRest's default,
 // so plain `pgbackrest` commands typed over SSH (e.g. during a restore) use the same
-// settings. With Homebrew it is under the Homebrew prefix and pgtijori passes it with
+// settings. With Homebrew it is under the Homebrew prefix and liops passes it with
 // --config.
 func ConfPath(cfg *config.Config) string {
 	if cfg.Postgres.Layout == config.LayoutHomebrew {
@@ -51,7 +51,7 @@ func program(cfg *config.Config) (string, []string) {
 	return "pgbackrest", nil
 }
 
-const header = "# Written by pgtijori. Don't edit: changes are overwritten.\n# Change /etc/pgtijori/config.yaml and run `pgtijori setup` instead.\n"
+const header = "# Written by liops. Don't edit: changes are overwritten.\n# Change /etc/liops/config.yaml and run `liops setup` instead.\n"
 
 // Engine runs pgBackRest for one stanza.
 type Engine struct {
@@ -153,7 +153,7 @@ func RenderPostgresConf(cfg *config.Config) string {
 // WriteBackRestConf writes pgbackrest.conf (root:postgres 0640, it holds the storage
 // secret) in /etc/pgbackrest (root:postgres 0750) and reports whether it changed. The
 // postgres user must be able to read it: PostgreSQL runs pgBackRest as postgres for
-// every WAL segment. Files are owned by the user pgtijori runs as: root on a server,
+// every WAL segment. Files are owned by the user liops runs as: root on a server,
 // or you with Homebrew.
 func (e *Engine) WriteBackRestConf() (changed bool, err error) {
 	conf, err := RenderConfig(e.Cfg)
@@ -215,7 +215,7 @@ func includeConfD(path string) (bool, error) {
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		sep = "\n"
 	}
-	_, err = fmt.Fprintf(f, "%s\n# Added by pgtijori: loads conf.d/10-pgbackrest.conf (WAL archiving to pgBackRest).\n%s\n", sep, includeLine)
+	_, err = fmt.Fprintf(f, "%s\n# Added by liops: loads conf.d/10-pgbackrest.conf (WAL archiving to pgBackRest).\n%s\n", sep, includeLine)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -274,7 +274,7 @@ func writeIfChanged(path, content string, mode os.FileMode, uid, gid int) (bool,
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".pgtijori-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".liops-*")
 	if err != nil {
 		return false, err
 	}

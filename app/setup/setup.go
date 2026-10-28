@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package setup holds the steps that connect pgtijori to a cluster: find the cluster,
+// Package setup holds the steps that connect liops to a cluster: find the cluster,
 // write the pgBackRest and PostgreSQL settings, turn on WAL archiving and create the
-// stanza. `pgtijori setup` and the setup wizard both use it. Every step is safe to
+// stanza. `liops setup` and the setup wizard both use it. Every step is safe to
 // run again.
 package setup
 
@@ -20,11 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Cluster is a PostgreSQL cluster found on this machine.

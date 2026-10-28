@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package command runs the external programs pgtijori drives (pgbackrest, psql,
+// Package command runs the external programs liops drives (pgbackrest, psql,
 // pg_dump), optionally as another OS user, and keeps the end of their output for
 // logs and failure emails.
 package command

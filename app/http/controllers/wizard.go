@@ -15,13 +15,13 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/jobs"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/setup"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/setup"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // The wizard's steps, in order (PLAN.md §7.2).
@@ -127,7 +127,7 @@ func (s *Server) wizardPage(w http.ResponseWriter, r *http.Request, name string,
 	if d.Cfg == nil {
 		d.Cfg = s.Svc.Config()
 	}
-	s.render(w, r, name, page{Title: "Set up pgtijori", Wizard: true, Data: d})
+	s.render(w, r, name, page{Title: "Set up liops", Wizard: true, Data: d})
 }
 
 // setupStart goes to the first step, or the dashboard once setup is complete.
@@ -419,5 +419,5 @@ func (s *Server) setupProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Steps = wizardSteps
 	d.Cfg = s.Svc.Config()
-	s.render(w, r, "setup_apply", page{Title: "Set up pgtijori", Wizard: true, Refresh: refresh, Data: d})
+	s.render(w, r, "setup_apply", page{Title: "Set up liops", Wizard: true, Refresh: refresh, Data: d})
 }

@@ -1,12 +1,12 @@
-# Understanding pgtijori and pgBackRest: Working, Differences, and Usage
+# Understanding liops and pgBackRest: Working, Differences, and Usage
 
-This document explains the internal architecture, how **pgBackRest** and **pgtijori** work individually and together, and a complete usage guide for both tools.
+This document explains the internal architecture, how **pgBackRest** and **liops** work individually and together, and a complete usage guide for both tools.
 
 ---
 
 ## 1. Quick Summary: What is the Difference?
 
-| Characteristic | pgBackRest | pgtijori |
+| Characteristic | pgBackRest | liops |
 | :--- | :--- | :--- |
 | **Role** | Low-level **Physical Backup & Archiving Engine** | High-level **Backup Manager, Orchestrator & UI** |
 | **Backup Type** | Physical cluster files + WAL (Layer 1) | **Dual Layer**: Automates pgBackRest (Layer 1) + Per-DB `pg_dump` (Layer 2) |
@@ -18,7 +18,7 @@ This document explains the internal architecture, how **pgBackRest** and **pgtij
 
 > **Analogy:**  
 > **pgBackRest** is like a high-performance **car engine** (powerful, fast, raw).  
-> **pgtijori** is the **entire car** — complete with automated cruise control (scheduler), dashboard (Web UI), warning lights (email alerts), and an extra safety airbag (per-database logical dumps).
+> **liops** is the **entire car** — complete with automated cruise control (scheduler), dashboard (Web UI), warning lights (email alerts), and an extra safety airbag (per-database logical dumps).
 
 ---
 
@@ -48,11 +48,11 @@ This document explains the internal architecture, how **pgBackRest** and **pgtij
 
 ---
 
-## 3. Deep Dive: How pgtijori Works
+## 3. Deep Dive: How liops Works
 
-**pgtijori** is a single, static Go binary that runs as a system daemon (`systemd`) on the database server.
+**liops** is a single, static Go binary that runs as a system daemon (`systemd`) on the database server.
 
-### What pgtijori Adds on Top of pgBackRest:
+### What liops Adds on Top of pgBackRest:
 
 #### Layer 1 Automation (pgBackRest Management)
 - Automatically creates and configures `/etc/pgbackrest/pgbackrest.conf` and PostgreSQL's `archive_mode`.
@@ -71,7 +71,7 @@ This document explains the internal architecture, how **pgBackRest** and **pgtij
 - Displays backup status, repository health, storage consumption, and clickable download links for dumps.
 
 #### Embedded State Tracking & Monitoring
-- Uses an embedded **bbolt** database (`/var/lib/pgtijori/state.db`) to record backup timings, file sizes, and status history.
+- Uses an embedded **bbolt** database (`/var/lib/liops/state.db`) to record backup timings, file sizes, and status history.
 - If a backup fails, translates complex PostgreSQL error messages into human-readable English hints.
 - Sends instant email alerts on failure and a daily summary report via SMTP.
 
@@ -81,7 +81,7 @@ This document explains the internal architecture, how **pgBackRest** and **pgtij
 
 ```
                                   +---------------------------------------+
-                                  |            pgtijori daemon            |
+                                  |            liops daemon            |
                                   |   (Scheduler, State DB, Web UI :8899) |
                                   +-------------------+-------------------+
                                                       |
@@ -111,19 +111,19 @@ This document explains the internal architecture, how **pgBackRest** and **pgtij
 
 ## 5. Usage Guide: When to Use Which Command
 
-### When to use `pgtijori` commands:
-Use `pgtijori` for **daily operations, scheduling, monitoring, and database dumps**.
+### When to use `liops` commands:
+Use `liops` for **daily operations, scheduling, monitoring, and database dumps**.
 
 | Action | Command | What It Does |
 | :--- | :--- | :--- |
-| **Check overall status** | `sudo pgtijori status` | Shows recent job history, durations, and health. |
-| **Run Full Backup** | `sudo pgtijori run full` | Runs a pgBackRest Full backup followed by logical dumps. |
-| **Run Differential Backup** | `sudo pgtijori run diff` | Runs a pgBackRest Diff backup followed by logical dumps. |
-| **Run Dumps Only** | `sudo pgtijori run dumps` | Discovers all databases and streams `.sql.gz` to S3. |
-| **List Logical Dumps** | `sudo pgtijori dumps list` | Lists all available `.sql.gz` database dumps. |
-| **Download a Dump** | `sudo pgtijori dumps url <KEY>` | Generates a signed S3/R2 download URL for a database. |
-| **Test Email Summary** | `sudo pgtijori run report` | Sends the daily backup summary email to your inbox. |
-| **Follow Daemon Logs** | `sudo pgtijori logs -f` | Tails the live daemon log file. |
+| **Check overall status** | `sudo liops status` | Shows recent job history, durations, and health. |
+| **Run Full Backup** | `sudo liops run full` | Runs a pgBackRest Full backup followed by logical dumps. |
+| **Run Differential Backup** | `sudo liops run diff` | Runs a pgBackRest Diff backup followed by logical dumps. |
+| **Run Dumps Only** | `sudo liops run dumps` | Discovers all databases and streams `.sql.gz` to S3. |
+| **List Logical Dumps** | `sudo liops dumps list` | Lists all available `.sql.gz` database dumps. |
+| **Download a Dump** | `sudo liops dumps url <KEY>` | Generates a signed S3/R2 download URL for a database. |
+| **Test Email Summary** | `sudo liops run report` | Sends the daily backup summary email to your inbox. |
+| **Follow Daemon Logs** | `sudo liops logs -f` | Tails the live daemon log file. |
 
 ---
 
@@ -146,4 +146,4 @@ Use `pgbackrest` for **low-level cluster restores, Point-In-Time Recovery, and d
    👉 Use **pgBackRest PITR** (`pgbackrest restore --type=time ...`). It will restore the whole cluster to that exact second.
 
 2. **If you only need to restore or download 1 single database (e.g. `umang_backup`):**
-   👉 Use **pgtijori dumps** (`pgtijori dumps list` and `pg_restore` / `psql`). It will not touch or disrupt other databases on the server.
+   👉 Use **liops dumps** (`liops dumps list` and `pg_restore` / `psql`). It will not touch or disrupt other databases on the server.

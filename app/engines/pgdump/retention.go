@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/storage"
+	"github.com/logisticinfotech/liops/app/storage"
 )
 
 // Dump is one stored dump of a database.

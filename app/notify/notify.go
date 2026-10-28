@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package notify sends pgtijori's emails: the daily summary, failure alerts and
+// Package notify sends liops's emails: the daily summary, failure alerts and
 // notices about new or deleted databases. They are plain text, written to be
 // understood without knowing pgBackRest.
 package notify
@@ -12,7 +12,7 @@ import (
 
 	mail "github.com/wneessen/go-mail"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Mailer sends one email to the configured recipients.

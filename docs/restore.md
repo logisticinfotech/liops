@@ -1,10 +1,10 @@
-# Restoring from pgtijori backups
+# Restoring from liops backups
 
-pgtijori takes the backups. Restores are done by hand over SSH, with `pgbackrest` and
+liops takes the backups. Restores are done by hand over SSH, with `pgbackrest` and
 `pg_restore`, following this page. The UI never restores anything.
 
 Commands below use these placeholders. Replace them with your values from
-`/etc/pgtijori/config.yaml`:
+`/etc/liops/config.yaml`:
 
 | Placeholder | Meaning | Example |
 |---|---|---|
@@ -37,8 +37,8 @@ Dumps are pg_dump custom-format files, compressed with zstd from PostgreSQL 16. 
 **Get the dump.** Use the UI (Databases, then Download), or do it on the server:
 
 ```bash
-sudo pgtijori dumps list tenant_abc
-sudo pgtijori dumps url dumps/tenant_abc/2026-10-05T200102Z.dump    # prints a link, valid 10 minutes
+sudo liops dumps list tenant_abc
+sudo liops dumps url dumps/tenant_abc/2026-10-05T200102Z.dump    # prints a link, valid 10 minutes
 curl -fsSL -o /tmp/tenant_abc.dump '<the link>'
 sudo chown postgres: /tmp/tenant_abc.dump
 ```
@@ -62,12 +62,12 @@ ALTER DATABASE tenant_abc RENAME TO tenant_abc_old;
 ALTER DATABASE tenant_abc_restored RENAME TO tenant_abc;
 ```
 
-Drop `tenant_abc_old` once you're sure. pgtijori dumps the restored database under its
+Drop `tenant_abc_old` once you're sure. liops dumps the restored database under its
 name from the next night on.
 
 **On a server where the roles don't exist** (for example a laptop), restore the roles
 first, from the newest `globals/…sql` (Databases page → Roles and tablespaces, or
-`pgtijori dumps list`):
+`liops dumps list`):
 
 ```bash
 sudo -u postgres psql -f globals.sql        # errors for roles that already exist are fine
@@ -89,10 +89,10 @@ Changes made after that time are lost.
    The oldest backup's stop time is the earliest point. The dashboard shows it as
    "Can restore back to".
 
-2. Stop pgtijori, the apps, and PostgreSQL:
+2. Stop liops, the apps, and PostgreSQL:
 
    ```bash
-   sudo systemctl stop pgtijori
+   sudo systemctl stop liops
    sudo systemctl stop postgresql@18-main
    ```
 
@@ -117,11 +117,11 @@ Changes made after that time are lost.
    ```
 
 5. The restored cluster is on a new timeline. Take a fresh full backup, then start
-   pgtijori again:
+   liops again:
 
    ```bash
-   sudo pgtijori run full
-   sudo systemctl start pgtijori
+   sudo liops run full
+   sudo systemctl start liops
    ```
 
 ## 3. Restore onto a new server
@@ -136,7 +136,12 @@ Changes made after that time are lost.
 
 2. Write `/etc/pgbackrest/pgbackrest.conf` with the old server's storage settings and
    backup name (from your password manager). `repo1-path` is the old server's folder in the
-   bucket, and the section name is its backup name:
+   bucket, and the section name is its backup name. The Ubuntu/Debian package doesn't create
+   the folder, so make it first:
+
+   ```bash
+   sudo mkdir -p /etc/pgbackrest
+   ```
 
    ```ini
    [global]
@@ -165,7 +170,7 @@ Changes made after that time are lost.
    sudo systemctl start postgresql@18-main
    ```
 
-4. Install pgtijori on the new server and run the setup wizard with the same storage
+4. Install liops on the new server and run the setup wizard with the same storage
    settings and a **new backup name** (e.g. `app-prod-2`). New backups go to a new folder
    in the bucket, and the old server's folder is never touched again:
 
@@ -183,7 +188,7 @@ Changes made after that time are lost.
    wizard before restoring can't harm them.
 
    ```bash
-   curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
+   curl -fsSL https://github.com/logisticinfotech/liops/releases/latest/download/install.sh | sudo bash
    ```
 
 ## 4. Restore test
@@ -230,8 +235,8 @@ minutes:
 
 ```bash
 # on the server
-sudo pgtijori dumps list tenant_abc
-sudo pgtijori dumps url dumps/tenant_abc/2026-10-05T200102Z.dump
+sudo liops dumps list tenant_abc
+sudo liops dumps url dumps/tenant_abc/2026-10-05T200102Z.dump
 
 # on the laptop
 curl -fsSL -o ~/Downloads/tenant_abc.dump '<the link>'

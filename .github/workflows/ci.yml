@@ -32,7 +32,7 @@ jobs:
         run: go test -race -count=1 ./...
 
       - name: Build static linux/amd64 binary
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o pgtijori-linux-amd64 .
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o liops-linux-amd64 .
 
       - name: shellcheck
         run: shellcheck scripts/*.sh test/*.sh test/docker/pg/entrypoint.sh
@@ -60,7 +60,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f test/compose.yaml logs
-          docker compose -f test/compose.yaml exec -T pg sh -c 'cat /var/log/pgtijori/pgtijori.log /var/log/pgbackrest/*.log' || true
+          docker compose -f test/compose.yaml exec -T pg sh -c 'cat /var/log/liops/liops.log /var/log/pgbackrest/*.log' || true
 
       - name: Tear down
         if: always()

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/engines/postgres"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/config"
 )
 
 func testConfig() *config.Config {
@@ -238,7 +238,7 @@ func TestIncludeConfD(t *testing.T) {
 		t.Fatalf("second run must find the line: %v %v", changed, err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.HasPrefix(string(data), "port = 5432\n#include_dir = 'conf.d'\n\n# Added by pgtijori") ||
+	if !strings.HasPrefix(string(data), "port = 5432\n#include_dir = 'conf.d'\n\n# Added by liops") ||
 		!strings.HasSuffix(string(data), "\ninclude_dir = 'conf.d'\n") {
 		t.Errorf("postgresql.conf =\n%s", data)
 	}

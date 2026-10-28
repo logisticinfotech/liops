@@ -70,7 +70,7 @@ func (r *Runner) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	r.logf("serve", "pgtijori is running (schedules in %s)", r.location())
+	r.logf("serve", "liops is running (schedules in %s)", r.location())
 	<-ctx.Done()
 	r.logf("serve", "stopping")
 	<-s.Stop().Done()

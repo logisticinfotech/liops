@@ -6,7 +6,7 @@
 #   → restore one database from its dump → point-in-time restore of the whole cluster
 #   → a dropped database is noticed → the emails arrived.
 #
-# Builds pgtijori for the Docker host's architecture and copies it into the pg container.
+# Builds liops for the Docker host's architecture and copies it into the pg container.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -24,18 +24,18 @@ wait_pg() {
     fail "PostgreSQL did not come back"
 }
 
-step "Build pgtijori"
+step "Build liops"
 arch=$(docker version --format '{{.Server.Arch}}')
-(cd .. && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o test/.pgtijori-linux .)
+(cd .. && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o test/.liops-linux .)
 
 step "Start the test environment"
 compose up -d --build
 wait_pg
-compose cp .pgtijori-linux pg:/usr/local/bin/pgtijori
-pg chmod 755 /usr/local/bin/pgtijori
+compose cp .liops-linux pg:/usr/local/bin/liops
+pg chmod 755 /usr/local/bin/liops
 
 step "Write the config"
-pg sh -c 'install -d -m 700 /etc/pgtijori && umask 077 && cat > /etc/pgtijori/config.yaml' <<'YAML'
+pg sh -c 'install -d -m 700 /etc/liops && umask 077 && cat > /etc/liops/config.yaml' <<'YAML'
 server:
   name: test-db
   timezone: UTC
@@ -50,9 +50,9 @@ storage:
   s3:
     endpoint: minio:9000
     region: us-east-1
-    bucket: pgtijori-test
-    access_key_id: pgtijori-test
-    secret_access_key: pgtijori-test-secret
+    bucket: liops-test
+    access_key_id: liops-test
+    secret_access_key: liops-test-secret
     path_style: true
     verify_tls: true
 email:
@@ -61,10 +61,10 @@ email:
   tls: starttls
   username: test
   password: test
-  from: pgtijori@example.com
+  from: liops@example.com
   to: [dev@example.com]
 YAML
-pg pgtijori config validate
+pg liops config validate
 
 step "Create test databases"
 psql -c "CREATE DATABASE app" -c "CREATE DATABASE tenant_abc" -c "CREATE DATABASE tenant_xyz"
@@ -73,7 +73,7 @@ psql -d app -c "CREATE TABLE tenants (db_name text, label text)" \
 psql -d tenant_abc -c "CREATE TABLE orders AS SELECT g AS id, md5(g::text) AS note FROM generate_series(1, 50000) g"
 
 step "Setup, part 1: settings written, restart requested"
-out=$(pg pgtijori setup)
+out=$(pg liops setup)
 echo "$out"
 grep -q "must be restarted" <<<"$out" || fail "setup should ask for a restart"
 
@@ -81,24 +81,24 @@ compose restart pg
 wait_pg
 
 step "Setup, part 2: stanza created and checked"
-out=$(pg pgtijori setup)
+out=$(pg liops setup)
 echo "$out"
 grep -q "Setup is complete" <<<"$out" || fail "setup did not complete"
 
 step "Full backup + dumps"
-pg pgtijori run full
-pg pgtijori status
+pg liops run full
+pg liops status
 pg runuser -u postgres -- pgbackrest --stanza=main info
 
 step "Write a row after the backup, then archive it (the report runs pgbackrest check)"
 psql -d tenant_abc -c "CREATE TABLE marker AS SELECT 'after-backup'::text AS v"
-pg pgtijori run report
+pg liops run report
 
-step "Restore tenant_abc from its dump into a new database (fetched with pgtijori dumps url)"
-pg pgtijori dumps list tenant_abc
-key=$(pg pgtijori dumps list tenant_abc | awk '$1 ~ /^dumps\/tenant_abc\// {print $1}' | tail -1)
+step "Restore tenant_abc from its dump into a new database (fetched with liops dumps url)"
+pg liops dumps list tenant_abc
+key=$(pg liops dumps list tenant_abc | awk '$1 ~ /^dumps\/tenant_abc\// {print $1}' | tail -1)
 [ -n "$key" ] || fail "no dump of tenant_abc in storage"
-url=$(pg pgtijori dumps url "$key")
+url=$(pg liops dumps url "$key")
 pg curl -fsS -o /tmp/tenant_abc.dump "$url"
 psql -c "CREATE DATABASE tenant_abc_restored"
 pg runuser -u postgres -- pg_restore --no-owner -d tenant_abc_restored /tmp/tenant_abc.dump
@@ -125,13 +125,13 @@ pg runuser -u postgres -- /usr/lib/postgresql/18/bin/pg_ctl -D /tmp/pitr -m fast
 
 step "A dropped database is noticed"
 psql -c "DROP DATABASE tenant_xyz"
-pg pgtijori run dumps
-out=$(pg pgtijori status)
+pg liops run dumps
+out=$(pg liops status)
 echo "$out"
 grep -q "tenant_xyz since" <<<"$out" || fail "tenant_xyz should be listed as no longer found"
 
 step "UI: serve answers on loopback, with no login, and refuses foreign Host headers"
-pg sh -c 'nohup pgtijori serve >/tmp/serve.log 2>&1 &'
+pg sh -c 'nohup liops serve >/tmp/serve.log 2>&1 &'
 for _ in $(seq 1 30); do
     pg curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break
     sleep 1
@@ -140,7 +140,7 @@ done
 pg curl -fsS http://127.0.0.1:8899/ | grep -q "Can restore back to" || { pg cat /tmp/serve.log; fail "the dashboard didn't load"; }
 code=$(pg curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example.com' http://127.0.0.1:8899/)
 [ "$code" = 421 ] || fail "a foreign Host header should get 421, got $code"
-pg pkill -f "pgtijori serve" || true
+pg pkill -f "liops serve" || true
 
 step "Emails"
 subjects=$(pg curl -fsS http://mailpit:8025/api/v1/messages | grep -o '"Subject":"[^"]*"' || true)
@@ -148,6 +148,6 @@ echo "$subjects"
 grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
 grep -q "database no longer found: tenant_xyz" <<<"$subjects" || fail "no deleted-database email"
 
-rm -f .pgtijori-linux
+rm -f .liops-linux
 echo
 echo "Integration test passed."

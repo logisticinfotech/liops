@@ -12,7 +12,7 @@
 # default; set PG_VERSION=17 etc. for another one). With pgbackrest installed too, the
 # setup wizard and full/diff backups work as on a server (postgres.layout: homebrew).
 #
-# pgtijori always uses TLS for S3 and SMTP, so `up` makes a local certificate for
+# liops always uses TLS for S3 and SMTP, so `up` makes a local certificate for
 # localhost and, on macOS, asks you once to trust its CA in your login keychain. The
 # CA's private key is deleted straight after signing, and the CA is name-constrained to
 # localhost, so it can't be used to issue a certificate for anything else.
@@ -22,10 +22,10 @@ cd "$(dirname "$0")/.."
 DEV=dev
 CERTS=$DEV/certs
 PG_VERSION="${PG_VERSION:-18}"
-MINIO_USER=pgtijori-dev
-MINIO_SECRET=pgtijori-dev-secret
-BUCKET=pgtijori-dev
-CA_NAME="pgtijori dev CA (localhost only)"
+MINIO_USER=liops-dev
+MINIO_SECRET=liops-dev-secret
+BUCKET=liops-dev
+CA_NAME="liops dev CA (localhost only)"
 
 die() { echo "dev.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null || die "$1 not found. Install it: $2"; }
@@ -130,7 +130,7 @@ write_config() {
 			  smtp_port: 1025
 			  username: dev
 			  password: dev
-			  from: pgtijori@example.com
+			  from: liops@example.com
 			  to: [dev@example.com]
 		EOF
 	)
@@ -152,13 +152,13 @@ up() {
 		--smtp-require-starttls --smtp-auth-accept-any
 
 	wait_for https://localhost:9000/minio/health/live
-	# pgtijori doesn't create buckets; PUT one (already existing is fine).
+	# liops doesn't create buckets; PUT one (already existing is fine).
 	curl -sS --cacert "$CERTS/ca.crt" --aws-sigv4 "aws:amz:us-east-1:s3" --user "$MINIO_USER:$MINIO_SECRET" \
 		-X PUT -o /dev/null "https://localhost:9000/$BUCKET"
 
 	write_config
-	go build -o pgtijori .
-	PGTIJORI_DEV=1 ./pgtijori config validate
+	go build -o liops .
+	LIOPS_DEV=1 ./liops config validate
 
 	cat <<-EOF
 
@@ -170,20 +170,20 @@ up() {
 
 			Next, set up pgBackRest as on a server, either way:
 			  make dev                                  # then open http://127.0.0.1:8899 for the setup wizard
-			  PGTIJORI_DEV=1 ./pgtijori setup           # or the command line
+			  LIOPS_DEV=1 ./liops setup           # or the command line
 
 			This turns on WAL archiving in your Homebrew PostgreSQL (one restart). See
 			docs/development.md for turning it off again.
 		EOF
 	else
-		PGTIJORI_DEV=1 ./pgtijori setup --skip-pgbackrest
+		LIOPS_DEV=1 ./liops setup --skip-pgbackrest
 		cat <<-EOF
 
 			pgBackRest isn't installed, so only dumps, emails and the UI work.
-			For full and diff backups: brew install pgbackrest, then PGTIJORI_DEV=1 ./pgtijori setup
+			For full and diff backups: brew install pgbackrest, then LIOPS_DEV=1 ./liops setup
 
 			  make dev                                  # build and serve the UI on http://127.0.0.1:8899
-			  PGTIJORI_DEV=1 ./pgtijori run dumps       # dump every database now
+			  LIOPS_DEV=1 ./liops run dumps       # dump every database now
 		EOF
 	fi
 }

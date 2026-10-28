@@ -1,14 +1,14 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
 <h1>PostgreSQL</h1>
-<p>Which cluster should pgtijori back up? Every database in it is included.</p>
+<p>Which cluster should liops back up? Every database in it is included.</p>
 <form method="post" action="/setup/postgres" class="panel">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
 
   {{range $i, $c := .Data.Clusters}}
   <label class="cluster"><input type="radio" name="cluster" value="{{$i}}" {{if and (eq $c.Version $.Data.Cfg.Postgres.Version) (eq $c.Name $.Data.Cfg.Postgres.Cluster)}}checked{{end}}>
     <span><strong>PostgreSQL {{$c.Version}} / {{$c.Name}}</strong> — port {{$c.Port}}, {{$c.Status}}<br><span class="muted mono">{{$c.DataDir}}</span></span></label>
-  {{else}}<div class="error">No PostgreSQL cluster was found. pgtijori needs PostgreSQL 13 or newer from the PGDG repository (or from Homebrew on a Mac, for development).</div>{{end}}
+  {{else}}<div class="error">No PostgreSQL cluster was found. liops needs PostgreSQL 13 or newer from the PGDG repository (or from Homebrew on a Mac, for development).</div>{{end}}
   <div class="row">
     <div><label for="stanza">Backup name</label>
       <input type="text" id="stanza" name="stanza" value="{{.Data.Cfg.PgBackRest.Stanza}}" placeholder="app-prod-1" class="mono">

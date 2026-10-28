@@ -8,7 +8,7 @@
 #   ./test/smoke.sh                                    start and check
 #   ./test/integration.sh                              setup, backups, dumps, emails, restores
 #   docker compose -f test/compose.yaml down -v        stop and delete everything
-name: pgtijori-test
+name: liops-test
 
 services:
   certs:
@@ -35,8 +35,8 @@ services:
     user: "0:0"
     command: server /data --certs-dir /certs --console-address :9001
     environment:
-      MINIO_ROOT_USER: pgtijori-test
-      MINIO_ROOT_PASSWORD: pgtijori-test-secret
+      MINIO_ROOT_USER: liops-test
+      MINIO_ROOT_PASSWORD: liops-test-secret
     volumes:
       - certs:/certs:ro
     ports:
@@ -54,9 +54,9 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >-
-        until mc alias set t https://minio:9000 pgtijori-test pgtijori-test-secret --insecure >/dev/null 2>&1;
+        until mc alias set t https://minio:9000 liops-test liops-test-secret --insecure >/dev/null 2>&1;
         do sleep 1; done;
-        mc mb --ignore-existing --insecure t/pgtijori-test
+        mc mb --ignore-existing --insecure t/liops-test
     depends_on:
       - minio
 

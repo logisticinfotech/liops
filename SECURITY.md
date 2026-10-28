@@ -1,6 +1,6 @@
 # Security policy
 
-pgtijori runs as root on database servers and holds storage and email credentials, so we
+liops runs as root on database servers and holds storage and email credentials, so we
 take security reports seriously.
 
 ## Reporting a vulnerability

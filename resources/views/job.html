@@ -14,5 +14,5 @@
 {{end}}
 <h2>Output</h2>
 {{if .Output}}<pre>{{.Output}}</pre>{{else}}<p class="muted">{{if eq .Status "running"}}Output appears when the job finishes. This page refreshes.{{else}}No output.{{end}}</p>{{end}}
-<p class="muted">The full output is in /var/log/pgtijori/pgtijori.log (<code>sudo pgtijori logs</code>).</p>
+<p class="muted">The full output is in /var/log/liops/liops.log (<code>sudo liops logs</code>).</p>
 {{end}}{{end}}

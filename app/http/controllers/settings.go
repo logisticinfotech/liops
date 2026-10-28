@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/config"
 )
 
 type settingsData struct {

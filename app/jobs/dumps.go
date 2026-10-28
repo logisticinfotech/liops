@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/storage"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
 )
 
 func days(n int) time.Duration { return time.Duration(n) * 24 * time.Hour }
@@ -37,7 +37,7 @@ func (r *Runner) dumps(ctx context.Context, trigger string, run *state.Run) erro
 			Headline: tonight(trigger) + "database dumps FAILED",
 			What:     "finding the list of databases to dump",
 			Safe:     "point-in-time backups are not affected, and earlier dumps are kept",
-			ToDo:     "check the details below, then run: sudo pgtijori run dumps",
+			ToDo:     "check the details below, then run: sudo liops run dumps",
 			Output:   errOutput(err),
 		})
 		r.send(ctx, Dumps, subject, body)
@@ -240,7 +240,7 @@ func (r *Runner) dumpFailureEmail(ctx context.Context, trigger string, failed []
 		Headline: headline,
 		What:     what,
 		Safe:     safe,
-		ToDo:     "check the details below, then run: sudo pgtijori run dumps",
+		ToDo:     "check the details below, then run: sudo liops run dumps",
 		Output:   details.String(),
 	})
 	r.send(ctx, Dumps, subject, body)

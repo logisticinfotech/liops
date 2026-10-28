@@ -1,7 +1,7 @@
-# pgtijori
+# liops
 
-**pgtijori** (*tijori* is Hindi for "safe" or "vault") is a one-stop backup tool for a
-PostgreSQL server. You install one binary on the database server. It then runs two layers of
+**liops** is a one-stop backup tool for a PostgreSQL server (MySQL and lightweight
+monitoring are planned). You install one binary on the database server. It then runs two layers of
 backups, shows their status in a small web UI, and emails you a daily summary and any failures.
 
 > **Status: release candidate, not yet tested on a real server.** Every planned v1 feature
@@ -33,11 +33,11 @@ Also:
 On the database server (Ubuntu, PostgreSQL 13+ from PGDG):
 
 ```bash
-curl -fsSL https://github.com/logisticinfotech/pgtijori/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/logisticinfotech/liops/releases/latest/download/install.sh | sudo bash
 ```
 
 The installer installs pgBackRest if needed, checks the binary against `SHA256SUMS`, and
-starts the `pgtijori` service. Then, on your own computer:
+starts the `liops` service. Then, on your own computer:
 
 ```bash
 ssh -L 8899:127.0.0.1:8899 <you>@<server>
@@ -45,8 +45,8 @@ ssh -L 8899:127.0.0.1:8899 <you>@<server>
 ```
 
 The wizard asks before it restarts PostgreSQL. Turning on WAL archiving needs one restart,
-a few seconds of downtime. Running the installer again upgrades pgtijori and keeps the
-config. `sudo pgtijori uninstall` removes it and leaves the backups in storage.
+a few seconds of downtime. Running the installer again upgrades liops and keeps the
+config. `sudo liops uninstall` removes it and leaves the backups in storage.
 
 ## Design
 
@@ -60,19 +60,19 @@ The design, decisions and build phases are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Command line
 
-The wizard and the Settings page write `/etc/pgtijori/config.yaml`. The file holds secrets,
-so pgtijori refuses to load it unless only its owner can read it (`chmod 600`). Over SSH:
+The wizard and the Settings page write `/etc/liops/config.yaml`. The file holds secrets,
+so liops refuses to load it unless only its owner can read it (`chmod 600`). Over SSH:
 
 ```bash
-sudo pgtijori status                  # recent job runs
-sudo pgtijori run full                # run a job now: full, diff, dumps or report
-sudo pgtijori logs -f                 # follow the log
-sudo pgtijori dumps list [DB]         # stored dumps; `dumps url KEY` prints a download link
-sudo pgtijori config validate         # check the config after editing it by hand
-sudo pgtijori setup                   # redo the pgBackRest/PostgreSQL settings without the wizard
+sudo liops status                  # recent job runs
+sudo liops run full                # run a job now: full, diff, dumps or report
+sudo liops logs -f                 # follow the log
+sudo liops dumps list [DB]         # stored dumps; `dumps url KEY` prints a download link
+sudo liops config validate         # check the config after editing it by hand
+sudo liops setup                   # redo the pgBackRest/PostgreSQL settings without the wizard
 ```
 
-`pgtijori help` lists everything.
+`liops help` lists everything.
 
 ## Development
 

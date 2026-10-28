@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# pgtijori scheduler. Installed to /etc/systemd/system/pgtijori.service.
+# liops scheduler. Installed to /etc/systemd/system/liops.service.
 # It runs as root (it writes pgBackRest and PostgreSQL settings during setup) and runs
 # database commands as the postgres user.
 [Unit]
-Description=pgtijori PostgreSQL backups
-Documentation=https://github.com/logisticinfotech/pgtijori
+Description=liops PostgreSQL backups
+Documentation=https://github.com/logisticinfotech/liops
 Wants=network-online.target
 After=network-online.target postgresql.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/pgtijori serve
+ExecStart=/usr/local/bin/liops serve
 Restart=on-failure
 RestartSec=10s
 # On stop, running commands get SIGTERM; pgBackRest resumes an interrupted backup next time.

@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{template "wizard-steps" .Data}}{{template "errors" .Data.Errors}}{{template "result" .Data.Result}}
 <h1>Email</h1>
-<p>pgtijori emails a daily summary and, straight away, any failure.</p>
+<p>liops emails a daily summary and, straight away, any failure.</p>
 <form method="post" action="/setup/email" class="panel">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
 {{template "fields-email" .Data.Cfg}}

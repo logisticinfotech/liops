@@ -17,18 +17,18 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/command"
-	"github.com/logisticinfotech/pgtijori/app/engines/pgbackrest"
-	"github.com/logisticinfotech/pgtijori/app/http/controllers"
-	"github.com/logisticinfotech/pgtijori/app/jobs"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/service"
-	"github.com/logisticinfotech/pgtijori/app/setup"
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/http/controllers"
+	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/service"
+	"github.com/logisticinfotech/liops/app/setup"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/config"
 )
 
-const defaultLogPath = "/var/log/pgtijori/pgtijori.log"
+const defaultLogPath = "/var/log/liops/liops.log"
 
 // paths are the file locations shared by setup, run, status and serve.
 type paths struct {
@@ -104,7 +104,7 @@ func runJob(job string, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRoot("pgtijori run"); err != nil {
+	if err := requireRoot("liops run"); err != nil {
 		return err
 	}
 	r, closeLog, err := newRunner(p, out)
@@ -124,7 +124,7 @@ func runServe(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRoot("pgtijori serve"); err != nil {
+	if err := requireRoot("liops serve"); err != nil {
 		return err
 	}
 	st, err := state.Open(p.state)
@@ -273,7 +273,7 @@ func runSetup(args []string, out io.Writer) error {
 	if *skipPgBackRest && !devMode() {
 		return fmt.Errorf("--skip-pgbackrest is only for development (set %s=1); on a server, run setup without it", devEnv)
 	}
-	if err := requireRoot("pgtijori setup"); err != nil {
+	if err := requireRoot("liops setup"); err != nil {
 		return err
 	}
 	cfg, err := config.Load(p.config)
@@ -314,7 +314,7 @@ func runSetup(args []string, out io.Writer) error {
 	if engine.Cluster.Homebrew() {
 		fmt.Fprintf(out, "\n  %s run full\n  make dev\n", self())
 	} else {
-		fmt.Fprintln(out, "\n  sudo pgtijori run full\n  sudo systemctl enable --now pgtijori")
+		fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
 	}
 	return nil
 }
@@ -338,11 +338,11 @@ func skipSetup(p *paths, out io.Writer) error {
 	return nil
 }
 
-// self is how to type a pgtijori command in hints: with sudo on a server, with
-// PGTIJORI_DEV=1 in development mode.
+// self is how to type a liops command in hints: with sudo on a server, with
+// LIOPS_DEV=1 in development mode.
 func self() string {
 	if devMode() {
-		return devEnv + "=1 ./pgtijori"
+		return devEnv + "=1 ./liops"
 	}
-	return "sudo pgtijori"
+	return "sudo liops"
 }

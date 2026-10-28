@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Test-only image: Ubuntu 26.04 + PostgreSQL 18 + pgBackRest from the PGDG repository,
-# the same stack pgtijori is installed on in production.
+# the same stack liops is installed on in production.
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command pgtijori backs up a PostgreSQL server: point-in-time backups with pgBackRest
+// Command liops backs up a PostgreSQL server: point-in-time backups with pgBackRest
 // and a nightly pg_dump of every database, with a status UI and email alerts.
 package main
 
@@ -12,25 +12,25 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/logisticinfotech/pgtijori/app/state"
-	"github.com/logisticinfotech/pgtijori/app/version"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/version"
+	"github.com/logisticinfotech/liops/config"
 )
 
-const usage = `pgtijori — PostgreSQL backups: pgBackRest point-in-time backups + per-database dumps
+const usage = `liops — PostgreSQL backups: pgBackRest point-in-time backups + per-database dumps
 
 Usage:
-  pgtijori version
-  pgtijori config init     [--config PATH] [--force]   write a config file with defaults
-  pgtijori config validate [--config PATH]             check a config file
-  pgtijori setup           [flags]                     configure pgBackRest and WAL archiving (safe to re-run)
-  pgtijori run JOB         [flags]                     run a job now: full, diff, dumps or report
-  pgtijori status          [flags]                     show recent job runs
-  pgtijori serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
-  pgtijori logs            [-n LINES] [-f]             show the log
-  pgtijori dumps list [DB] | url KEY                   list stored dumps; print a 10-minute download link
-  pgtijori install-system                              install the systemd service (install.sh runs this)
-  pgtijori uninstall       [--purge] [--yes]           remove pgtijori; backups in storage are kept
+  liops version
+  liops config init     [--config PATH] [--force]   write a config file with defaults
+  liops config validate [--config PATH]             check a config file
+  liops setup           [flags]                     configure pgBackRest and WAL archiving (safe to re-run)
+  liops run JOB         [flags]                     run a job now: full, diff, dumps or report
+  liops status          [flags]                     show recent job runs
+  liops serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
+  liops logs            [-n LINES] [-f]             show the log
+  liops dumps list [DB] | url KEY                   list stored dumps; print a 10-minute download link
+  liops install-system                              install the systemd service (install.sh runs this)
+  liops uninstall       [--purge] [--yes]           remove liops; backups in storage are kept
 
 Flags for setup, run, status, serve and dumps:
   --config PATH   default ` + config.DefaultPath + `
@@ -40,7 +40,7 @@ Flags for setup, run, status, serve and dumps:
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "pgtijori:", err)
+		fmt.Fprintln(os.Stderr, "liops:", err)
 		os.Exit(1)
 	}
 }
@@ -85,7 +85,7 @@ func run(args []string, out io.Writer) error {
 	case "uninstall":
 		return runUninstall(args[1:], os.Stdin, out)
 	default:
-		return fmt.Errorf("unknown command %q (run 'pgtijori help')", args[0])
+		return fmt.Errorf("unknown command %q (run 'liops help')", args[0])
 	}
 }
 
@@ -107,7 +107,7 @@ func runConfig(sub string, args []string, out io.Writer) error {
 		if err := config.Default().Save(*path); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Wrote %s (mode 0600).\nFill in pgbackrest.stanza, storage and email, then run: pgtijori config validate --config %s\n", *path, *path)
+		fmt.Fprintf(out, "Wrote %s (mode 0600).\nFill in pgbackrest.stanza, storage and email, then run: liops config validate --config %s\n", *path, *path)
 		return nil
 	case "validate":
 		if _, err := config.Load(*path); err != nil {

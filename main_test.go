@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/logisticinfotech/pgtijori/app/service"
-	"github.com/logisticinfotech/pgtijori/app/state"
+	"github.com/logisticinfotech/liops/app/service"
+	"github.com/logisticinfotech/liops/app/state"
 )
 
 func TestVersion(t *testing.T) {
@@ -18,7 +18,7 @@ func TestVersion(t *testing.T) {
 	if err := run([]string{"version"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), "pgtijori ") {
+	if !strings.HasPrefix(out.String(), "liops ") {
 		t.Errorf("unexpected version output: %q", out.String())
 	}
 }
@@ -54,7 +54,7 @@ func asRoot(t *testing.T) {
 }
 
 func TestLogs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pgtijori.log")
+	path := filepath.Join(t.TempDir(), "liops.log")
 	os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o600)
 	var out bytes.Buffer
 	if err := run([]string{"logs", "-n", "2", "-log", path}, &out); err != nil {
@@ -67,11 +67,11 @@ func TestLogs(t *testing.T) {
 
 func TestDevModeDefaults(t *testing.T) {
 	t.Setenv(devEnv, "")
-	if p := defaultPaths(); p.config != "/etc/pgtijori/config.yaml" {
+	if p := defaultPaths(); p.config != "/etc/liops/config.yaml" {
 		t.Errorf("production config path = %q", p.config)
 	}
 	t.Setenv(devEnv, "1")
-	if p := defaultPaths(); p.config != "dev/config.yaml" || p.state != "dev/state.db" || p.log != "dev/pgtijori.log" {
+	if p := defaultPaths(); p.config != "dev/config.yaml" || p.state != "dev/state.db" || p.log != "dev/liops.log" {
 		t.Errorf("dev paths = %+v", p)
 	}
 	if err := requireRoot("test"); err != nil {

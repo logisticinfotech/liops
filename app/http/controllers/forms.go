@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/logisticinfotech/pgtijori/app/engines/pgdump"
-	"github.com/logisticinfotech/pgtijori/app/notify"
-	"github.com/logisticinfotech/pgtijori/app/storage"
-	"github.com/logisticinfotech/pgtijori/config"
+	"github.com/logisticinfotech/liops/app/engines/pgdump"
+	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/storage"
+	"github.com/logisticinfotech/liops/config"
 )
 
 // Settings sections. Each is one form, in Settings and in the wizard.
@@ -179,15 +179,15 @@ func (s *Server) runTest(ctx context.Context, cfg *config.Config, section string
 			res.Details = err.Error()
 			return res
 		}
-		res.OK, res.Message = true, "Storage works: pgtijori wrote, read back and deleted a test object."
+		res.OK, res.Message = true, "Storage works: liops wrote, read back and deleted a test object."
 	case sectionEmail:
 		if errs := sectionErrors(cfg, section); len(errs) > 0 {
 			res.Message = "Fill in the email settings first."
 			res.Details = strings.Join(errs, "\n")
 			return res
 		}
-		body := "This is a test email from pgtijori on " + s.serverName() + ".\n\nIf you're reading it, email alerts work. No action needed.\n"
-		if err := (notify.SMTP{Cfg: cfg.Email}).Send(ctx, "🧪 "+s.serverName()+" — pgtijori test email", body); err != nil {
+		body := "This is a test email from liops on " + s.serverName() + ".\n\nIf you're reading it, email alerts work. No action needed.\n"
+		if err := (notify.SMTP{Cfg: cfg.Email}).Send(ctx, "🧪 "+s.serverName()+" — liops test email", body); err != nil {
 			res.Message = "Sending failed."
 			res.Details = err.Error()
 			return res

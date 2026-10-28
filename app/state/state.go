@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package state is pgtijori's own small database (bbolt): job history and the
+// Package state is liops's own small database (bbolt): job history and the
 // databases known to be deleted. It works when PostgreSQL is down.
 //
 // bbolt allows one process to have the file open at a time, and both the service
-// and CLI commands (pgtijori run, status) need it, so every call opens the file,
+// and CLI commands (liops run, status) need it, so every call opens the file,
 // runs one transaction and closes it again. Writes are rare, so this costs nothing.
 package state
 
@@ -21,7 +21,7 @@ import (
 )
 
 // DefaultPath is where the state file lives on a server.
-const DefaultPath = "/var/lib/pgtijori/state.db"
+const DefaultPath = "/var/lib/liops/state.db"
 
 var (
 	bucketRuns    = []byte("runs")
@@ -35,7 +35,7 @@ const (
 	StatusRunning     = "running"
 	StatusOK          = "ok"
 	StatusFailed      = "failed"
-	StatusInterrupted = "interrupted" // pgtijori stopped while the job ran
+	StatusInterrupted = "interrupted" // liops stopped while the job ran
 )
 
 // Run is one execution of a job.
@@ -153,7 +153,7 @@ func (s *Store) MarkInterrupted(at time.Time) (int, error) {
 			if err := json.Unmarshal(v, &r); err != nil || r.Status != StatusRunning {
 				return nil
 			}
-			r.Status, r.End, r.Error = StatusInterrupted, at, "pgtijori stopped before the job finished"
+			r.Status, r.End, r.Error = StatusInterrupted, at, "liops stopped before the job finished"
 			n++
 			return putJSON(b, k, &r)
 		})

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config defines pgtijori's configuration file, its defaults, and how it is
+// Package config defines liops's configuration file, its defaults, and how it is
 // loaded, validated and saved.
 //
 // The file holds secrets (storage keys, SMTP password), so Load refuses a file that
@@ -26,8 +26,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultPath is where pgtijori looks for its config when --config is not given.
-const DefaultPath = "/etc/pgtijori/config.yaml"
+// DefaultPath is where liops looks for its config when --config is not given.
+const DefaultPath = "/etc/liops/config.yaml"
 
 // Config is the whole configuration file.
 type Config struct {
@@ -60,7 +60,7 @@ type UI struct {
 // how it is restarted.
 const (
 	// LayoutDebian is PostgreSQL from PGDG on Debian/Ubuntu (pg_lsclusters, systemd).
-	// It is what pgtijori is built for.
+	// It is what liops is built for.
 	LayoutDebian = "debian"
 	// LayoutHomebrew is Homebrew's postgresql@N on macOS, for development.
 	LayoutHomebrew = "homebrew"
@@ -143,7 +143,7 @@ type Report struct {
 }
 
 // Default returns a configuration with every non-secret setting filled in.
-// Storage and email still have to be completed before pgtijori can run.
+// Storage and email still have to be completed before liops can run.
 func Default() *Config {
 	return &Config{
 		Server: Server{Timezone: "Asia/Kolkata"},

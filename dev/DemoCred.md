@@ -10,20 +10,20 @@ MAIL_MAILER=log
 MAIL_HOST=smtp.gmail.com
 MAIL_PORT=587
 MAIL_USERNAME=vrajesh.logistic@gmail.com
-MAIL_PASSWORD="eydl zzpv quna bkpx"
+MAIL_PASSWORD="eydl zzpv quna bkpx sdfdsf"
 MAIL_FROM_ADDRESS=vrajesh.logistic@gmail.com
 MAIL_FROM_NAME="goravel e-commerce"
 
 # Run in Local Mac Machine
 mkdir -p dev/r2 && chmod 700 dev/r2
 make build
-PGTIJORI_DEV=1 ./pgtijori serve --config dev/r2/config.yaml --state dev/r2/state.db --log dev/r2/pgtijori.log
+LIOPS_DEV=1 ./liops serve --config dev/r2/config.yaml --state dev/r2/state.db --log dev/r2/liops.log
 
 # Check in Second Terminal
-P="--config dev/r2/config.yaml --state dev/r2/state.db --log dev/r2/pgtijori.log"
-PGTIJORI_DEV=1 ./pgtijori status $P
-PGTIJORI_DEV=1 ./pgtijori dumps list --config dev/r2/config.yaml --state dev/r2/state.db
-PGTIJORI_DEV=1 ./pgtijori run report $P          # the daily email, to your real inbox
+P="--config dev/r2/config.yaml --state dev/r2/state.db --log dev/r2/liops.log"
+LIOPS_DEV=1 ./liops status $P
+LIOPS_DEV=1 ./liops dumps list --config dev/r2/config.yaml --state dev/r2/state.db
+LIOPS_DEV=1 ./liops run report $P          # the daily email, to your real inbox
 pgbackrest --config=/opt/homebrew/etc/pgbackrest/pgbackrest.conf --stanza=mac-test info
 
 # Clean up when you're done
