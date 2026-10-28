@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# End-to-end test of MySQL support (docs/PLAN-mysql.md, M1) in the Docker test environment:
+#   setup (root through the socket) → dumps → report → restore every database from its
+#   dump and compare checksums → restore users and grants → a dropped database is noticed
+#   → the UI → the emails → setup again when root needs a password.
+#
+# Builds liops for the Docker host's architecture and copies it into the mysql container.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+compose() { docker compose -f compose.yaml --profile mysql "$@"; }
+my() { compose exec -T mysql "$@"; }
+sql() { my mysql -N -B "$@"; }
+step() { printf '\n== %s\n' "$*"; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+wait_mysql() {
+    for _ in $(seq 1 90); do
+        if my mysqladmin ping --silent 2>/dev/null; then return 0; fi
+        sleep 1
+    done
+    compose logs mysql >&2
+    fail "MySQL did not start"
+}
+
+step "Build liops"
+arch=$(docker version --format '{{.Server.Arch}}')
+(cd .. && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o test/.liops-linux .)
+
+step "Start the test environment"
+compose up -d --build mysql
+wait_mysql
+sql -e "SELECT VERSION()"
+compose cp .liops-linux mysql:/usr/local/bin/liops
+my chmod 755 /usr/local/bin/liops
+
+step "Write the config"
+my sh -c 'install -d -m 700 /etc/liops && umask 077 && cat > /etc/liops/config.yaml' <<'YAML'
+engine: mysql
+server:
+  name: test-mysql
+  timezone: UTC
+mysql:
+  backup_name: test-mysql
+dumps:
+  labels:
+    database: app
+    sql: SELECT db_name, label FROM tenants
+storage:
+  type: s3
+  s3:
+    endpoint: minio:9000
+    region: us-east-1
+    bucket: liops-test
+    access_key_id: liops-test
+    secret_access_key: liops-test-secret
+    path_style: true
+    verify_tls: true
+email:
+  smtp_host: mailpit
+  smtp_port: 1025
+  tls: starttls
+  username: test
+  password: test
+  from: liops@example.com
+  to: [dev@example.com]
+YAML
+my liops config validate
+
+step "Create test databases, a role and a user"
+sql <<'SQL'
+CREATE DATABASE app;
+CREATE DATABASE tenant_abc;
+CREATE DATABASE `shop-2`;
+CREATE TABLE app.tenants (db_name VARCHAR(64), label VARCHAR(64));
+INSERT INTO app.tenants VALUES ('tenant_abc', 'abc'), ('shop-2', 'shop two');
+CREATE TABLE app.orders (id INT PRIMARY KEY AUTO_INCREMENT, note VARCHAR(100), photo BLOB);
+CREATE TABLE app.audit (msg VARCHAR(100));
+CREATE TRIGGER app.orders_ai AFTER INSERT ON app.orders FOR EACH ROW INSERT INTO audit VALUES (CONCAT('order ', NEW.id));
+INSERT INTO app.orders (note, photo) VALUES ('first', 0x00FF10), ('naïve — ünïcode ✓', NULL), ('tab\there', 0xDEADBEEF);
+CREATE VIEW app.recent AS SELECT id, note FROM app.orders ORDER BY id DESC;
+CREATE PROCEDURE app.count_orders() SELECT COUNT(*) FROM app.orders;
+CREATE TABLE tenant_abc.items (id INT PRIMARY KEY, name VARCHAR(50));
+SET SESSION cte_max_recursion_depth = 100000;
+INSERT INTO tenant_abc.items
+  WITH RECURSIVE n (i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50000)
+  SELECT i, MD5(i) FROM n;
+CREATE TABLE `shop-2`.t (id INT PRIMARY KEY);
+INSERT INTO `shop-2`.t VALUES (42);
+CREATE ROLE app_reader;
+GRANT SELECT ON app.* TO app_reader;
+CREATE USER 'app'@'%' IDENTIFIED BY 'app-password-1' DEFAULT ROLE app_reader;
+GRANT app_reader TO 'app'@'%';
+GRANT INSERT, UPDATE ON app.* TO 'app'@'%';
+SQL
+checksums() { sql -e "CHECKSUM TABLE $1.orders, $1.audit, $1.tenants" | awk '{print $2}'; }
+app_sums=$(checksums app)
+abc_sum=$(sql -e "CHECKSUM TABLE tenant_abc.items" | awk '{print $2}')
+
+step "Setup: liops's own MySQL account, created through root's socket login"
+out=$(my liops setup)
+echo "$out"
+grep -q "Setup is complete" <<<"$out" || fail "setup did not complete"
+mode=$(my stat -c %a /etc/liops/mysql.cnf)
+[ "$mode" = 600 ] || fail "/etc/liops/mysql.cnf has mode $mode, expected 600"
+my liops setup | grep -q "Setup is complete" || fail "setup should be safe to run again"
+
+step "Dumps"
+my liops run dumps
+my liops status
+if my liops run full 2>/dev/null; then fail "run full should explain that MySQL has no point-in-time backups yet"; fi
+my liops run report
+
+step "Restore every database from its dump into a new database (fetched with liops dumps url)"
+fetch() { # db → /tmp/<db>.sql.gz in the container
+    local key url
+    key=$(my liops dumps list "$1" | awk -v p="dumps/$1/" 'index($1, p) == 1 {print $1}' | tail -1)
+    [ -n "$key" ] || fail "no dump of $1 in storage"
+    [[ "$key" == *.sql.gz ]] || fail "dump key $key should end in .sql.gz"
+    url=$(my liops dumps url "$key")
+    my curl -fsS -o "/tmp/$1.sql.gz" "$url"
+}
+for db in app tenant_abc shop-2; do
+    fetch "$db"
+    sql -e "CREATE DATABASE \`${db}_restored\`"
+    my sh -c "gunzip -c '/tmp/$db.sql.gz' | mysql '${db}_restored'"
+done
+[ "$(checksums app_restored)" = "$app_sums" ] || fail "app: restored checksums differ"
+[ "$(sql -e 'CHECKSUM TABLE tenant_abc_restored.items' | awk '{print $2}')" = "$abc_sum" ] || fail "tenant_abc: restored checksum differs"
+[ "$(sql -e "SELECT id FROM \`shop-2_restored\`.t")" = 42 ] || fail "shop-2 wasn't restored"
+[ "$(sql -e "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = 'app_restored'")" = 1 ] || fail "the trigger wasn't restored"
+[ "$(sql -e "SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = 'app_restored'")" = 1 ] || fail "the procedure wasn't restored"
+[ "$(sql -e 'SELECT COUNT(*) FROM app_restored.recent')" = 3 ] || fail "the view wasn't restored"
+echo "dump restores OK (checksums match)"
+for db in app tenant_abc shop-2; do sql -e "DROP DATABASE \`${db}_restored\`"; done
+
+step "Restore users and grants after the user and its role are gone"
+key=$(my liops dumps list | awk '$1 ~ /^globals\// {print $1}' | tail -1)
+[ -n "$key" ] || fail "no users and grants in storage"
+my curl -fsS -o /tmp/users.sql "$(my liops dumps url "$key")"
+sql -e "DROP USER 'app'@'%'; DROP ROLE app_reader"
+my sh -c 'mysql < /tmp/users.sql' || fail "the users file didn't apply"
+my sh -c 'mysql < /tmp/users.sql' || fail "the users file should be safe to apply twice"
+got=$(my mysql -N -B -u app -papp-password-1 -h 127.0.0.1 -e "SELECT REPLACE(CURRENT_ROLE(), CHAR(96), ''), (SELECT COUNT(*) FROM app.orders)" 2>/dev/null)
+[ "$got" = "$(printf 'app_reader@%%\t3')" ] || fail "app should log in with its old password and default role, got: $got"
+echo "users and grants restore OK"
+
+step "A dropped database is noticed"
+sql -e "DROP DATABASE \`shop-2\`"
+my liops run dumps
+out=$(my liops status)
+echo "$out"
+grep -q "shop-2 since" <<<"$out" || fail "shop-2 should be listed as no longer found"
+
+step "UI: the dashboard shows dumps and no point-in-time backups"
+my sh -c 'nohup liops serve >/tmp/serve.log 2>&1 &'
+for _ in $(seq 1 30); do
+    my curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break
+    sleep 1
+done
+page=$(my curl -fsS http://127.0.0.1:8899/) || { my cat /tmp/serve.log; fail "the dashboard didn't load"; }
+grep -q "Database dumps" <<<"$page" || fail "the dashboard should show the dumps"
+if grep -q "Can restore back to" <<<"$page"; then fail "the MySQL dashboard mustn't offer point-in-time restores yet"; fi
+page=$(my curl -fsS http://127.0.0.1:8899/databases/app) || fail "the database page didn't load"
+grep -q "sudo mysql" <<<"$page" || fail "the database page should show MySQL restore commands"
+my pkill -f "liops serve" || true
+
+step "Emails"
+subjects=$(my curl -fsS http://mailpit:8025/api/v1/messages | grep -o '"Subject":"[^"]*"' || true)
+echo "$subjects"
+grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
+grep -q "database no longer found: shop-2" <<<"$subjects" || fail "no deleted-database email"
+
+step "Setup when MySQL's root needs a password"
+sql -e "DROP USER 'liops'@'localhost'"
+my rm /etc/liops/mysql.cnf
+sql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'Root#pass \"w0rd'"
+if out=$(my liops setup 2>&1); then fail "setup should ask for root's password"; fi
+grep -q -- "--mysql-root-password-stdin" <<<"$out" || fail "setup should say how to pass root's password, got: $out"
+out=$(printf '%s\n' 'Root#pass "w0rd' | my liops setup --mysql-root-password-stdin)
+grep -q "Setup is complete" <<<"$out" || fail "setup with root's password did not complete"
+my liops run dumps
+
+rm -f .liops-linux
+echo
+echo "MySQL integration test passed."

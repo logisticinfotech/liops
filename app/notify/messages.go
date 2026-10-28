@@ -131,14 +131,18 @@ func NewDatabase(server, db, label string, size int64) (subject, body string) {
 }
 
 // DeletedDatabase is sent when a database that had dumps is no longer found.
-func DeletedDatabase(server, db, label string, keptUntil time.Time) (subject, body string) {
+func DeletedDatabase(server, db, label string, keptUntil time.Time, pointInTime bool) (subject, body string) {
 	name := Name(db, label)
 	subject = fmt.Sprintf("🗑️ %s — database no longer found: %s", server, name)
+	pitr := ""
+	if pointInTime {
+		pitr = "The point-in-time backups still contain it until they expire.\n"
+	}
 	body = fmt.Sprintf("The database %s was not found tonight: it was dropped, or added to dumps.exclude.\n\n"+
 		"Its newest dump is kept until %s, then deleted. Older dumps were deleted now.\n"+
-		"The point-in-time backups still contain it until they expire.\n\n"+
+		"%s\n"+
 		"If this wasn't expected, download the kept dump before %s.\n",
-		name, keptUntil.Format("Mon 2 Jan"), keptUntil.Format("2 Jan"))
+		name, keptUntil.Format("Mon 2 Jan"), pitr, keptUntil.Format("2 Jan"))
 	return subject, body
 }
 

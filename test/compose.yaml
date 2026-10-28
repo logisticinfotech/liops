@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Test environment: PostgreSQL 18 + pgBackRest, MinIO as an S3 stand-in for R2, and
-# Mailpit as an SMTP server that catches every email. Everything here is test-only:
+# Mailpit as an SMTP server that catches every email. MySQL 8.4 is in the "mysql"
+# profile, so the PostgreSQL tests don't start it. Everything here is test-only:
 # credentials are fixed, and the TLS certificate is self-signed and generated when the
 # environment starts. The pg container trusts it, so TLS verification stays on.
 #
 #   ./test/smoke.sh                                    start and check
 #   ./test/integration.sh                              setup, backups, dumps, emails, restores
-#   docker compose -f test/compose.yaml down -v        stop and delete everything
+#   ./test/integration-mysql.sh                        the same for MySQL (dumps, users, restores)
+#   docker compose -f test/compose.yaml --profile mysql down -v   stop and delete everything
 name: liops-test
 
 services:
@@ -84,6 +86,21 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+      bucket:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+
+  mysql:
+    build: docker/mysql
+    profiles: [mysql]
+    volumes:
+      - certs:/certs:ro
     depends_on:
       certs:
         condition: service_completed_successfully

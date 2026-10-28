@@ -35,7 +35,7 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o liops-linux-amd64 .
 
       - name: shellcheck
-        run: shellcheck scripts/*.sh test/*.sh test/docker/pg/entrypoint.sh
+        run: shellcheck scripts/*.sh test/*.sh test/docker/*/entrypoint.sh
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -65,3 +65,26 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f test/compose.yaml down -v
+
+  testenv-mysql:
+    name: Test environment (MySQL 8.4 + MinIO + Mailpit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Integration test
+        run: ./test/integration-mysql.sh
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker compose -f test/compose.yaml --profile mysql logs
+          docker compose -f test/compose.yaml --profile mysql exec -T mysql sh -c 'cat /var/log/liops/liops.log /tmp/serve.log /var/log/mysql/error.log' || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f test/compose.yaml --profile mysql down -v

@@ -23,6 +23,7 @@ make build-linux    # CGO_ENABLED=0 static linux/amd64 into dist/
 make vuln           # govulncheck
 make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS), runs test/smoke.sh
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
+make integration-mysql  # Docker end-to-end for MySQL 8.4: setup, dumps, users, restores, emails
 make testenv-down   # tear down and delete volumes
 make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
 make dev            # serve against it (LIOPS_DEV=1); see docs/development.md
@@ -31,7 +32,7 @@ go test -run TestUIMustListenOnLoopback ./config   # single test
 ```
 
 CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, the static build, shellcheck,
-govulncheck, the Docker smoke test and `test/integration.sh`. Releases are built only by `release.yml` on a `v*` tag; version and
+govulncheck, the Docker smoke test, `test/integration.sh` and `test/integration-mysql.sh`. Releases are built only by `release.yml` on a `v*` tag; version and
 commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 
 ## Architecture and conventions
