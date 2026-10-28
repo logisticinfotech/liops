@@ -151,6 +151,27 @@ echo "$base"
 grep -q -- '-full/backup.json$' <<<"$base" || fail "no complete full backup in storage"
 grep -q -- '-diff/backup.json$' <<<"$base" || fail "no complete diff backup in storage"
 grep -q -- '-diff/backup.xbstream$' <<<"$base" || fail "the diff has no stream"
+
+step "Binlog shipping: a change after the diff reaches storage"
+sql -e "INSERT INTO app.orders (note) VALUES ('shipped in a binlog')"  # after the dumps: not in them
+my liops run binlogs
+s3list() {
+    my curl -fsS --user liops-test:liops-test-secret --aws-sigv4 aws:amz:us-east-1:s3 \
+        "https://$s3/liops-test?list-type=2&prefix=test-mysql/$1" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g'
+}
+binlogs=$(s3list xtrabackup/binlog/)
+echo "$binlogs"
+[ -n "$binlogs" ] || fail "no binlogs were shipped"
+found=no
+for key in $binlogs; do
+    if my sh -c "curl -fsS --user liops-test:liops-test-secret --aws-sigv4 aws:amz:us-east-1:s3 'https://$s3/liops-test/$key' \
+        | gunzip | mysqlbinlog --base64-output=decode-rows -v - | grep -q 'shipped in a binlog'"; then found=yes; fi
+done
+[ "$found" = yes ] || fail "the change made after the diff isn't in any shipped binlog"
+echo "binlog shipping OK (the change is in a shipped binlog)"
+n=$(wc -w <<<"$binlogs")
+my liops run binlogs
+[ "$(s3list xtrabackup/binlog/ | wc -w)" = "$n" ] || fail "a run with nothing new written shouldn't ship anything"
 my liops run report
 
 step "Restore every database from its dump into a new database (fetched with liops dumps url)"
@@ -184,7 +205,7 @@ sql -e "DROP USER 'app'@'%'; DROP ROLE app_reader"
 my sh -c 'mysql < /tmp/users.sql' || fail "the users file didn't apply"
 my sh -c 'mysql < /tmp/users.sql' || fail "the users file should be safe to apply twice"
 got=$(my mysql -N -B -u app -papp-password-1 -h 127.0.0.1 -e "SELECT REPLACE(CURRENT_ROLE(), CHAR(96), ''), (SELECT COUNT(*) FROM app.orders)" 2>/dev/null)
-[ "$got" = "$(printf 'app_reader@%%\t4')" ] || fail "app should log in with its old password and default role, got: $got"
+[ "$got" = "$(printf 'app_reader@%%\t5')" ] || fail "app should log in with its old password and default role, got: $got"
 echo "users and grants restore OK"
 
 step "A dropped database is noticed"

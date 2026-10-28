@@ -35,6 +35,7 @@ func (r *Runner) StartScheduler(ctx context.Context) (*Scheduler, error) {
 	}
 	if r.Cfg.IsMySQL() {
 		entries[0].spec, entries[1].spec = r.Cfg.MySQL.FullSchedule, r.Cfg.MySQL.DiffSchedule
+		entries = append(entries, entry{Binlogs, "@every " + time.Duration(r.Cfg.MySQL.BinlogInterval).String()})
 	}
 	for _, e := range entries {
 		job := e.job

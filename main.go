@@ -27,7 +27,7 @@ Usage:
   liops setup           [flags]                     set up backups for this server (safe to re-run)
                         [--mysql-root-password-stdin]  MySQL: root's password on stdin, if root needs one
                         [--enable-gtid]             MySQL: make the GTID changes setup listed (online)
-  liops run JOB         [flags]                     run a job now: full, diff, dumps or report
+  liops run JOB         [flags]                     run a job now: full, diff, dumps or report (MySQL: also binlogs)
   liops status          [flags]                     show recent job runs
   liops serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
   liops logs            [-n LINES] [-f]             show the log

@@ -5,6 +5,7 @@ package jobs
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,8 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 	cfg.Server.Timezone = "UTC"
 	cfg.MySQL.BackupName = "shop-db-1"
 	cfg.MySQL.DataDir = t.TempDir()
+	w.binlogDir = t.TempDir()
+	w.addBinlog("binlog.000003")
 
 	st, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -55,6 +58,8 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 			return []byte(out.String()), nil
 		case program == "mysql" && strings.Contains(query, "FROM mysql.user"):
 			return []byte(hex.EncodeToString([]byte("app")) + "\t" + hex.EncodeToString([]byte("%")) + "\n"), nil
+		case program == "mysql" && strings.Contains(query, "BINARY LOG"), program == "mysql" && strings.Contains(query, "log_bin_basename"):
+			return w.binlogQuery(strings.TrimPrefix(query, "--execute="))
 		case program == "mysql" && strings.Contains(query, "SHOW CREATE USER"):
 			return []byte("CREATE USER `app`@`%` IDENTIFIED WITH 'caching_sha2_password' AS 0x24\nGRANT USAGE ON *.* TO `app`@`%`\n"), nil
 		}
@@ -73,6 +78,147 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 		Log:        &w.log,
 	}
 	return w
+}
+
+// addBinlog starts a new binlog file, as FLUSH BINARY LOGS does.
+func (w *world) addBinlog(name string) {
+	os.WriteFile(filepath.Join(w.binlogDir, name), []byte("events of "+name), 0o600)
+	w.binlogs = append(w.binlogs, name)
+	w.binlogPos = 158
+}
+
+// write makes MySQL write something to the current binlog.
+func (w *world) write() { w.binlogPos += 100 }
+
+func (w *world) binlogQuery(q string) ([]byte, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failBinlogs {
+		return nil, &command.Error{Cmd: "mysql", ExitCode: 1, Output: "ERROR 2002 (HY000): Can't connect to local MySQL server through socket", Err: errors.New("exit status 1")}
+	}
+	current := w.binlogs[len(w.binlogs)-1]
+	switch q {
+	case "SHOW BINARY LOG STATUS":
+		return fmt.Appendf(nil, "%s\t%d\t\t\ta102517a-d2e9-11f1-b24f-525400707196:1-9\n", current, w.binlogPos), nil
+	case "FLUSH BINARY LOGS":
+		var n int
+		fmt.Sscanf(current[len("binlog."):], "%d", &n)
+		w.addBinlog(fmt.Sprintf("binlog.%06d", n+1))
+		return nil, nil
+	case "SHOW BINARY LOGS":
+		var b strings.Builder
+		for _, name := range w.binlogs {
+			if data, err := os.ReadFile(filepath.Join(w.binlogDir, name)); err == nil {
+				fmt.Fprintf(&b, "%s\t%d\tNo\n", name, len(data))
+			}
+		}
+		return []byte(b.String()), nil
+	case "SELECT @@log_bin_basename":
+		return []byte(filepath.Join(w.binlogDir, "binlog") + "\n"), nil
+	}
+	return nil, fmt.Errorf("unexpected binlog query %q", q)
+}
+
+func TestMySQLBinlogs(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+
+	// No backup yet: nothing to replay binlogs onto, so nothing is closed or shipped.
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.binlogs) != 1 || len(w.keys(xtrabackup.BinlogPrefix)) != 0 {
+		t.Errorf("before any backup: binlogs %q, stored %q", w.binlogs, w.keys(xtrabackup.BinlogPrefix))
+	}
+
+	// The full backup is consistent with binlog.000003; after writes, shipping closes it.
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("binlogs: %v\n%s", err, w.log.String())
+	}
+	if got := w.keys(xtrabackup.BinlogPrefix); !slices.Equal(got, []string{"xtrabackup/binlog/binlog.000003.gz"}) {
+		t.Errorf("stored binlogs = %q", got)
+	}
+	if v, _ := w.runner.State.GetMeta(MetaBinlogShippedAt); v == "" {
+		t.Error("a run that worked should be recorded in the state meta")
+	}
+
+	// Nothing written since: MySQL isn't asked to close a binlog every few minutes.
+	before := len(w.binlogs)
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil || len(w.binlogs) != before {
+		t.Errorf("a quiet server was rotated: %v, %q", err, w.binlogs)
+	}
+	runs, _ := w.runner.State.Runs(Binlogs, 10)
+	if len(runs) != 0 {
+		t.Errorf("binlog runs mustn't fill the job history: %d", len(runs))
+	}
+}
+
+func TestMySQLBinlogFailuresEmailOnce(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	w.failBinlogs = true
+	for range 3 {
+		if err := w.runner.Run(ctx, Binlogs, Scheduled); err == nil {
+			t.Fatal("want an error")
+		}
+	}
+	if subjects := w.subjects(); len(subjects) != 1 || !strings.Contains(subjects[0], "binlog shipping FAILED") {
+		t.Errorf("three failed runs should send one email: %q", subjects)
+	}
+	w.failBinlogs = false
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.log.String(), "shipping works again") {
+		t.Errorf("recovery should be logged:\n%s", w.log.String())
+	}
+	w.failBinlogs = true
+	w.runner.Run(ctx, Binlogs, Scheduled)
+	if len(w.subjects()) != 2 {
+		t.Errorf("a new failure after a recovery should email again: %q", w.subjects())
+	}
+}
+
+func TestMySQLBinlogGapTakesAFullBackup(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	// binlog.000003 is purged from the server before it is shipped.
+	w.write()
+	w.binlogQuery("FLUSH BINARY LOGS")
+	os.Remove(filepath.Join(w.binlogDir, "binlog.000003"))
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("binlogs: %v\n%s", err, w.log.String())
+	}
+	if subjects := w.subjects(); len(subjects) != 1 || !strings.Contains(subjects[0], "binlogs missing") {
+		t.Errorf("emails = %q", subjects)
+	}
+	runs, _ := w.runner.State.Runs(Full, 10)
+	if len(runs) != 2 || runs[0].Trigger != Automatic {
+		t.Errorf("a gap should start a full backup: %+v", runs)
+	}
+	// The same gap isn't reported twice.
+	w.runner.Run(ctx, Binlogs, Scheduled)
+	if len(w.subjects()) != 1 {
+		t.Errorf("emails = %q", w.subjects())
+	}
+}
+
+func TestBinlogsOnlyOnMySQL(t *testing.T) {
+	w := newWorld(t, "app")
+	if err := w.runner.Run(context.Background(), Binlogs, Manual); err == nil || !strings.Contains(err.Error(), "only shipped for MySQL") {
+		t.Errorf("got %v", err)
+	}
 }
 
 func TestMySQLDumps(t *testing.T) {
@@ -166,7 +312,7 @@ func TestMySQLSchedule(t *testing.T) {
 		jobs = append(jobs, n.Job)
 	}
 	slices.Sort(jobs)
-	if !slices.Equal(jobs, []string{Diff, Full, Report}) {
-		t.Errorf("scheduled jobs = %q, want full, diff and the report", jobs)
+	if !slices.Equal(jobs, []string{Binlogs, Diff, Full, Report}) {
+		t.Errorf("scheduled jobs = %q, want binlogs, full, diff and the report", jobs)
 	}
 }

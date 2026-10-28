@@ -33,6 +33,12 @@ type world struct {
 	failBack  bool
 	now       time.Time
 
+	// MySQL's binlogs: files in binlogDir, the last one being written up to binlogPos.
+	binlogDir   string
+	binlogs     []string
+	binlogPos   int
+	failBinlogs bool
+
 	runner *Runner
 	store  *storage.Memory
 	mail   *notify.Recorder

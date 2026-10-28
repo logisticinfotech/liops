@@ -297,6 +297,17 @@ or becomes a full if there is none. Dumps follow each backup, as on PostgreSQL. 
 gained `Read`. In the VM test: a full (4.7 MB, 4 s) and a diff (170 KB) of the test data,
 with XtraBackup reading liops's login from the defaults file's `[client]` group.
 
+**M2 step 3, binlog shipping (October 2026):** the `binlogs` job (`liops run binlogs`, and
+every `mysql.binlog_interval` from the scheduler) runs under its own `binlog.lock`. If MySQL
+wrote anything since the last run it does `FLUSH BINARY LOGS`, then uploads, gzipped, every
+closed binlog from the oldest backup's binlog file on that isn't in storage yet
+(`xtrabackup/binlog/<file>.gz`), reading it from the binlog directory and checking its size
+against `SHOW BINARY LOGS`. Nothing is shipped before the first backup. A needed binlog
+that is neither stored nor on the server is a gap: one email per gap, then a full backup
+(trigger `automatic`). Failures email once until a run works again. Runs aren't kept in the
+job history; the last good run is state meta `binlog_shipped_at`. In the VM test, a row
+written after the diff was found, with `mysqlbinlog`, in the shipped binlogs.
+
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
   a checksum-checked restore of every database, users and grants restored after the user

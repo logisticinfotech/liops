@@ -35,6 +35,9 @@ const (
 	Diff   = "diff"
 	Dumps  = "dumps"
 	Report = "report"
+	// Binlogs ships MySQL's binlogs. It runs every few minutes, under its own lock, and
+	// isn't recorded in the job history (see binlogs.go).
+	Binlogs = "binlogs"
 )
 
 // Names lists the jobs that can be run by hand.
@@ -133,6 +136,8 @@ func (r *Runner) now() time.Time { return r.Now().In(r.location()) }
 func (r *Runner) Run(ctx context.Context, job, trigger string) error {
 	switch job {
 	case Full, Diff, Dumps, Report:
+	case Binlogs:
+		return r.binlogs(ctx, trigger)
 	default:
 		return fmt.Errorf("unknown job %q (expected one of: %s)", job, strings.Join(Names, ", "))
 	}
@@ -199,10 +204,15 @@ func (r *Runner) record(ctx context.Context, job, trigger string, fn func(*state
 
 // lock takes the server-wide job lock, waiting while another job holds it.
 func (r *Runner) lock(ctx context.Context) (unlock func(), err error) {
-	if err := os.MkdirAll(filepath.Dir(r.LockPath), 0o700); err != nil {
+	return lockFile(ctx, r.LockPath)
+}
+
+// lockFile takes an exclusive lock on path, waiting while another process holds it.
+func lockFile(ctx context.Context, path string) (unlock func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(r.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +223,7 @@ func (r *Runner) lock(ctx context.Context) (unlock func(), err error) {
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			f.Close()
-			return nil, fmt.Errorf("job lock %s: %w", r.LockPath, err)
+			return nil, fmt.Errorf("job lock %s: %w", path, err)
 		}
 		select {
 		case <-ctx.Done():
