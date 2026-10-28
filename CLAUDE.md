@@ -85,9 +85,11 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   Keep the protections that cost the user nothing: CSRF tokens, the localhost Host check,
   security headers. Don't add accounts back without asking.
 - **Engines** (`engine: postgres | mysql`, default `postgres`): only the chosen engine's
-  config sections are validated, and `jobs.New` builds that engine's `Dumper`. A MySQL
-  server has no `Runner.Backrest` yet (point-in-time comes in PLAN-mysql.md M2), so check
-  `cfg.IsMySQL()` before anything pgBackRest- or WAL-specific; pages get `page.MySQL`.
+  config sections are validated, and `jobs.New` builds that engine's `Dumper` and layer 1:
+  `Runner.Backrest` (pgBackRest) or `Runner.XtraBackup`, never both. Check `cfg.IsMySQL()`
+  before anything pgBackRest- or WAL-specific; pages get `page.MySQL`. MySQL base backups
+  are folders under `xtrabackup/base/` whose `backup.json` is written last (no manifest =
+  failed attempt). MySQL point-in-time is still being built (PLAN-mysql.md §10).
   MySQL programs log in with `--defaults-extra-file` (`mysql.Instance.Command`), never with
   a password on the command line.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac

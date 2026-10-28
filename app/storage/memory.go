@@ -3,8 +3,10 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -60,6 +62,14 @@ func (m *Memory) Get(key string) ([]byte, bool) {
 	defer m.mu.Unlock()
 	o, ok := m.objects[key]
 	return o.data, ok
+}
+
+func (m *Memory) Read(ctx context.Context, key string) (io.ReadCloser, error) {
+	data, ok := m.Get(key)
+	if !ok {
+		return nil, fmt.Errorf("read %s: The specified key does not exist.", key)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 func (m *Memory) List(ctx context.Context, prefix string) ([]Object, error) {

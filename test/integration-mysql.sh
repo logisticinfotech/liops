@@ -139,10 +139,18 @@ mode=$(my stat -c %a /etc/liops/mysql.cnf)
 [ "$mode" = 600 ] || fail "/etc/liops/mysql.cnf has mode $mode, expected 600"
 my liops setup | grep -q "Setup is complete" || fail "setup should be safe to run again"
 
-step "Dumps"
-my liops run dumps
+step "Full backup + dumps, then a diff + dumps (XtraBackup, streamed)"
+my liops run full
+sql -e "INSERT INTO app.orders (note) VALUES ('after the full backup')"
+app_sums=$(checksums app)
+my liops run diff
 my liops status
-if my liops run full 2>/dev/null; then fail "run full should explain that MySQL has no point-in-time backups yet"; fi
+base=$(my curl -fsS --user liops-test:liops-test-secret --aws-sigv4 aws:amz:us-east-1:s3 \
+    "https://$s3/liops-test?list-type=2&prefix=test-mysql/xtrabackup/base/" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g')
+echo "$base"
+grep -q -- '-full/backup.json$' <<<"$base" || fail "no complete full backup in storage"
+grep -q -- '-diff/backup.json$' <<<"$base" || fail "no complete diff backup in storage"
+grep -q -- '-diff/backup.xbstream$' <<<"$base" || fail "the diff has no stream"
 my liops run report
 
 step "Restore every database from its dump into a new database (fetched with liops dumps url)"
@@ -164,7 +172,7 @@ done
 [ "$(sql -e "SELECT id FROM \`shop-2_restored\`.t")" = 42 ] || fail "shop-2 wasn't restored"
 [ "$(sql -e "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = 'app_restored'")" = 1 ] || fail "the trigger wasn't restored"
 [ "$(sql -e "SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = 'app_restored'")" = 1 ] || fail "the procedure wasn't restored"
-[ "$(sql -e 'SELECT COUNT(*) FROM app_restored.recent')" = 3 ] || fail "the view wasn't restored"
+[ "$(sql -e 'SELECT COUNT(*) FROM app_restored.recent')" = 4 ] || fail "the view wasn't restored"
 echo "dump restores OK (checksums match)"
 for db in app tenant_abc shop-2; do sql -e "DROP DATABASE \`${db}_restored\`"; done
 
@@ -176,7 +184,7 @@ sql -e "DROP USER 'app'@'%'; DROP ROLE app_reader"
 my sh -c 'mysql < /tmp/users.sql' || fail "the users file didn't apply"
 my sh -c 'mysql < /tmp/users.sql' || fail "the users file should be safe to apply twice"
 got=$(my mysql -N -B -u app -papp-password-1 -h 127.0.0.1 -e "SELECT REPLACE(CURRENT_ROLE(), CHAR(96), ''), (SELECT COUNT(*) FROM app.orders)" 2>/dev/null)
-[ "$got" = "$(printf 'app_reader@%%\t3')" ] || fail "app should log in with its old password and default role, got: $got"
+[ "$got" = "$(printf 'app_reader@%%\t4')" ] || fail "app should log in with its old password and default role, got: $got"
 echo "users and grants restore OK"
 
 step "A dropped database is noticed"

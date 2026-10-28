@@ -289,6 +289,14 @@ values, steps `gtid_mode` up online, and writes `mysql.conf_file`
 right. New settings: `mysql.conf_file`, `mysql.retention_days` (30), `mysql.binlog_interval`
 (5m). The Docker image and the VM test install XtraBackup; `make vm-test-mysql` passed.
 
+**M2 step 2, full and diff (October 2026):** `liops run full|diff` and the nightly schedule
+run XtraBackup (`app/engines/xtrabackup`), streamed to `xtrabackup/base/<UTC time>-<type>/`
+as `backup.xbstream`, then `backup.json` (LSNs, binlog file and position, GTIDs, versions,
+size) written last. A diff is taken against the newest complete full (`--incremental-lsn`),
+or becomes a full if there is none. Dumps follow each backup, as on PostgreSQL. Storage
+gained `Read`. In the VM test: a full (4.7 MB, 4 s) and a diff (170 KB) of the test data,
+with XtraBackup reading liops's login from the defaults file's `[client]` group.
+
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
   a checksum-checked restore of every database, users and grants restored after the user

@@ -188,7 +188,7 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 		}
 		keptUntil := now.Add(days(r.Cfg.Dumps.DeletedRetentionDays))
 		note("%s is no longer found; its newest dump is kept until %s", db, keptUntil.Format("2 Jan"))
-		subject, body := notify.DeletedDatabase(r.Server, db, labels[db], keptUntil, r.Backrest != nil)
+		subject, body := notify.DeletedDatabase(r.Server, db, labels[db], keptUntil, r.Backrest != nil || r.XtraBackup != nil)
 		r.send(ctx, Dumps, subject, body)
 	}
 	for _, db := range plan.Reappeared {

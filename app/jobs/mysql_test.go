@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/engines/mysqldump"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -41,6 +43,8 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 	w.fake = &command.Fake{Handle: func(program string, c command.Cmd) ([]byte, error) {
 		query := c.Args[len(c.Args)-1]
 		switch {
+		case program == "xtrabackup":
+			return fakeXtraBackup(c)
 		case program == "mysqldump":
 			return []byte("-- MySQL dump of " + query + "\n"), nil
 		case program == "mysql" && strings.Contains(query, "information_schema.SCHEMATA"):
@@ -57,15 +61,16 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 		return nil, fmt.Errorf("unexpected command %s %q", program, c.Args)
 	}}
 	w.runner = &Runner{
-		Cfg:      cfg,
-		Server:   "mysql-test",
-		State:    st,
-		Store:    w.store,
-		Mail:     w.mail,
-		Dumps:    mysqldump.New(cfg, w.fake, w.store),
-		LockPath: filepath.Join(t.TempDir(), "job.lock"),
-		Now:      w.clock,
-		Log:      &w.log,
+		Cfg:        cfg,
+		Server:     "mysql-test",
+		State:      st,
+		Store:      w.store,
+		Mail:       w.mail,
+		XtraBackup: xtrabackup.New(cfg, w.fake, w.store, t.TempDir()),
+		Dumps:      mysqldump.New(cfg, w.fake, w.store),
+		LockPath:   filepath.Join(t.TempDir(), "job.lock"),
+		Now:        w.clock,
+		Log:        &w.log,
 	}
 	return w
 }
@@ -91,11 +96,42 @@ func TestMySQLDumps(t *testing.T) {
 	}
 }
 
-func TestMySQLHasNoPointInTimeBackupsYet(t *testing.T) {
+// fakeXtraBackup writes XtraBackup's stream, and its metadata into --extra-lsndir.
+func fakeXtraBackup(c command.Cmd) ([]byte, error) {
+	for _, a := range c.Args {
+		if dir, ok := strings.CutPrefix(a, "--extra-lsndir="); ok {
+			os.WriteFile(filepath.Join(dir, "xtrabackup_checkpoints"), []byte("from_lsn = 0\nto_lsn = 5000\n"), 0o600)
+			os.WriteFile(filepath.Join(dir, "xtrabackup_info"), []byte("server_version = 8.4.11\ntool_version = 8.4.0-7\n"+
+				"binlog_pos = filename 'binlog.000003', position '158', GTID of the last change 'a102517a-d2e9-11f1-b24f-525400707196:1-9'\n"), 0o600)
+		}
+	}
+	return []byte("XBSTREAM"), nil
+}
+
+func TestMySQLFullThenDiff(t *testing.T) {
 	w := newMySQLWorld(t, "app")
-	err := w.runner.Run(context.Background(), Full, Manual)
-	if err == nil || !strings.Contains(err.Error(), "liops run dumps") {
-		t.Errorf("full on MySQL should explain what to do instead, got %v", err)
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatalf("full: %v\n%s", err, w.log.String())
+	}
+	if err := w.runner.Run(ctx, Diff, Manual); err != nil {
+		t.Fatalf("diff: %v\n%s", err, w.log.String())
+	}
+	list, err := w.runner.XtraBackup.Backups(ctx)
+	if err != nil || len(list) != 2 || list[0].Type != xtrabackup.Full || list[1].Base != list[0].Label {
+		t.Fatalf("backups = %+v, %v", list, err)
+	}
+	// Each backup is followed by the dumps, as on PostgreSQL.
+	runs, _ := w.runner.State.Runs("", 10)
+	var jobs []string
+	for _, r := range runs {
+		jobs = append(jobs, r.Job)
+	}
+	if !slices.Equal(jobs, []string{Dumps, Diff, Dumps, Full}) {
+		t.Errorf("runs, newest first = %q", jobs)
+	}
+	if programs := w.fake.Programs(); slices.Contains(programs, "pgbackrest") || slices.Contains(programs, "psql") {
+		t.Errorf("a MySQL server must not run PostgreSQL programs: %q", programs)
 	}
 }
 
@@ -130,7 +166,7 @@ func TestMySQLSchedule(t *testing.T) {
 		jobs = append(jobs, n.Job)
 	}
 	slices.Sort(jobs)
-	if !slices.Equal(jobs, []string{Dumps, Dumps, Report}) {
-		t.Errorf("scheduled jobs = %q, want dumps at the full and diff times, and the report", jobs)
+	if !slices.Equal(jobs, []string{Diff, Full, Report}) {
+		t.Errorf("scheduled jobs = %q, want full, diff and the report", jobs)
 	}
 }

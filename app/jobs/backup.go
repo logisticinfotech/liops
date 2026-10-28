@@ -4,15 +4,20 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/state"
 )
 
 // backup runs a pgBackRest full or differential backup (layer 1).
 func (r *Runner) backup(ctx context.Context, typ, trigger string, run *state.Run) error {
+	if r.XtraBackup != nil {
+		return r.mysqlBackup(ctx, typ, trigger, run)
+	}
 	r.setProgress(Progress{Kind: typ, Label: backupName(typ), Detail: "Running pgBackRest…"})
 	defer r.clearProgress()
 
@@ -80,4 +85,45 @@ func (r *Runner) watchBackup(ctx context.Context, typ string) {
 			Detail: notify.Bytes(info.SizeDone) + " of " + notify.Bytes(info.Size) + " copied",
 		})
 	}
+}
+
+// mysqlBackup runs an XtraBackup full or differential backup (MySQL's layer 1).
+func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *state.Run) error {
+	r.setProgress(Progress{Kind: typ, Label: backupName(typ), Detail: "Running XtraBackup…"})
+	defer r.clearProgress()
+
+	m, err := r.XtraBackup.Backup(ctx, typ)
+	if err != nil {
+		out := errOutput(err)
+		r.logOutput(typ, []byte(out))
+		run.Output = command.LastLines(out, outputLines)
+		safe := "binlogs are shipped separately and are not affected by this failure"
+		if list, lerr := r.XtraBackup.Backups(ctx); lerr == nil {
+			if last := xtrabackup.Last(list, ""); last != nil {
+				safe = "earlier backups are fine; the newest good one is the " + last.Type + " from " +
+					notify.When(last.Stop, r.now()) + ", and binlogs are shipped separately"
+			}
+		}
+		subject, body := notify.FailureEmail(notify.Failure{
+			Server:   r.Server,
+			Headline: tonight(trigger) + backupName(typ) + " FAILED",
+			What:     "XtraBackup " + backupName(typ) + " (point-in-time backups)",
+			Safe:     safe,
+			ToDo:     "check the details below, then run: sudo liops run " + typ,
+			Output:   out,
+		})
+		r.send(ctx, typ, subject, body)
+		return err
+	}
+
+	run.Size = m.Size
+	note := fmt.Sprintf("%s %s: %s in %s, consistent with %s:%d", m.Type, m.Label, notify.Bytes(m.Size), notify.Duration(m.Duration()), m.BinlogFile, m.BinlogPos)
+	if m.Type != typ {
+		note = "no full backup yet, so this one is a full backup\n" + note
+	} else if m.Base != "" {
+		note += " (against full " + m.Base + ")"
+	}
+	r.logf(typ, "%s", note)
+	run.Output = note
+	return nil
 }

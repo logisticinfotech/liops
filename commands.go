@@ -367,9 +367,8 @@ func runMySQLSetup(cfg *config.Config, p *paths, f setupFlags, in io.Reader, out
 		return err
 	}
 	fmt.Fprintf(out, "GTIDs and binary logging are ready for point-in-time backups (settings kept in %s).\n", cfg.MySQL.ConfFile)
-	fmt.Fprintln(out, "\nSetup is complete. Next: take the first dumps, then start the service:")
-	fmt.Fprintln(out, "\n  sudo liops run dumps\n  sudo systemctl enable --now liops")
-	fmt.Fprintln(out, "\nPoint-in-time backups for MySQL come in a later version. Until then, the dumps run at the nightly backup times.")
+	fmt.Fprintln(out, "\nSetup is complete. Next: take the first full backup and dumps, then start the service:")
+	fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
 	return nil
 }
 

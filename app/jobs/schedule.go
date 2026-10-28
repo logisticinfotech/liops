@@ -34,11 +34,7 @@ func (r *Runner) StartScheduler(ctx context.Context) (*Scheduler, error) {
 		{Report, r.Cfg.Report.Schedule},
 	}
 	if r.Cfg.IsMySQL() {
-		// Until MySQL's point-in-time backups are built, the dumps run at the backup times.
-		entries = []entry{{Report, r.Cfg.Report.Schedule}}
-		if r.Cfg.Dumps.Enabled {
-			entries = append(entries, entry{Dumps, r.Cfg.MySQL.FullSchedule}, entry{Dumps, r.Cfg.MySQL.DiffSchedule})
-		}
+		entries[0].spec, entries[1].spec = r.Cfg.MySQL.FullSchedule, r.Cfg.MySQL.DiffSchedule
 	}
 	for _, e := range entries {
 		job := e.job

@@ -25,6 +25,8 @@ type Object struct {
 // or on disk.
 type Store interface {
 	Put(ctx context.Context, key string, r io.Reader) (size int64, err error)
+	// Read streams an object's content. The caller closes it.
+	Read(ctx context.Context, key string) (io.ReadCloser, error)
 	List(ctx context.Context, prefix string) ([]Object, error)
 	Delete(ctx context.Context, key string) error
 	DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, error)
@@ -73,6 +75,10 @@ type Prefixed struct {
 
 func (p Prefixed) Put(ctx context.Context, key string, r io.Reader) (int64, error) {
 	return p.Store.Put(ctx, p.Prefix+key, r)
+}
+
+func (p Prefixed) Read(ctx context.Context, key string) (io.ReadCloser, error) {
+	return p.Store.Read(ctx, p.Prefix+key)
 }
 
 // List returns keys relative to Prefix.

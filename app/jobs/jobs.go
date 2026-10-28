@@ -22,6 +22,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -66,16 +67,18 @@ type Dumper interface {
 
 // Runner runs jobs.
 type Runner struct {
-	Cfg      *config.Config
-	Server   string // name in emails
-	State    *state.Store
-	Store    storage.Store
-	Mail     notify.Mailer
-	Backrest *pgbackrest.Engine // nil for MySQL, until its point-in-time backups are built
-	Dumps    Dumper
-	Cluster  postgres.Cluster
-	LockPath string
-	Now      func() time.Time
+	Cfg    *config.Config
+	Server string // name in emails
+	State  *state.Store
+	Store  storage.Store
+	Mail   notify.Mailer
+	// Layer 1: pgBackRest for PostgreSQL, XtraBackup for MySQL. The other one is nil.
+	Backrest   *pgbackrest.Engine
+	XtraBackup *xtrabackup.Engine
+	Dumps      Dumper
+	Cluster    postgres.Cluster
+	LockPath   string
+	Now        func() time.Time
 
 	logMu      sync.Mutex
 	Log        io.Writer
@@ -105,7 +108,7 @@ func New(cfg *config.Config, st *state.Store, lockPath string, log io.Writer) (*
 		Log:      log,
 	}
 	if cfg.IsMySQL() {
-		// Point-in-time backups for MySQL come later (docs/PLAN-mysql.md, M2): no Backrest.
+		r.XtraBackup = xtrabackup.New(cfg, run, store, filepath.Join(filepath.Dir(lockPath), "xtrabackup"))
 		r.Dumps = mysqldump.New(cfg, run, store)
 	} else {
 		r.Backrest = pgbackrest.New(cfg, run)
@@ -135,9 +138,6 @@ func (r *Runner) Run(ctx context.Context, job, trigger string) error {
 	}
 	if job == Dumps && !r.Cfg.Dumps.Enabled {
 		return errors.New("database dumps are turned off (dumps.enabled: false)")
-	}
-	if (job == Full || job == Diff) && r.Cfg.IsMySQL() {
-		return errors.New("point-in-time backups for MySQL aren't available in this version yet; the nightly dumps run at the backup times instead (run them now with: liops run dumps)")
 	}
 
 	r.logf(job, "waiting for any running job to finish")
