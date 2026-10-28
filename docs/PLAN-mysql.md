@@ -267,7 +267,8 @@ Not done yet:
   and role were dropped, a dropped database noticed, the UI, the emails, and setup again
   once root has a password. **It passed** with `--local` in an Ubuntu 26.04 Multipass VM
   on Ubuntu's own `mysql-server` (8.4.11, root by `auth_socket`) — the way the servers
-  install it — with MinIO and Mailpit on the Mac (October 2026). Its default Docker mode
+  install it — with MinIO and Mailpit on the Mac (October 2026). `make vm-test-mysql`
+  does all of that in one command, from a fresh VM to cleanup. Its default Docker mode
   (`make integration-mysql`, CI job `testenv-mysql`) waits for its first CI run.
 - **Retention** has only been tested with unit tests (it's the shared PostgreSQL code).
 - **The settings page and wizard** still show PostgreSQL fields; MySQL is configured by

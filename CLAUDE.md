@@ -24,6 +24,7 @@ make vuln           # govulncheck
 make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS), runs test/smoke.sh
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
 make integration-mysql  # Docker end-to-end for MySQL 8.4: setup, dumps, users, restores, emails
+make vm-test-mysql  # the same test in a fresh Ubuntu 26.04 Multipass VM, no Docker (Mac)
 make testenv-down   # tear down and delete volumes
 make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
 make dev            # serve against it (LIOPS_DEV=1); see docs/development.md

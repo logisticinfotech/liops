@@ -4,7 +4,7 @@ BINARY  := liops
 VERSION ?= dev
 LDFLAGS := -s -w -X github.com/logisticinfotech/liops/app/version.Version=$(VERSION)
 
-.PHONY: build build-linux test lint vuln testenv integration integration-mysql testenv-down dev-up dev dev-down
+.PHONY: build build-linux test lint vuln testenv integration integration-mysql vm-test-mysql testenv-down dev-up dev dev-down
 
 build:            ## Build for this machine
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -31,6 +31,9 @@ integration:      ## Setup, backups, dumps, emails and restores in the Docker te
 
 integration-mysql: ## The same for MySQL 8.4: setup, dumps, users and grants, restores, emails
 	./test/integration-mysql.sh
+
+vm-test-mysql:    ## The MySQL integration test in a fresh Ubuntu VM (Multipass), no Docker
+	./scripts/vm-test-mysql.sh
 
 testenv-down:     ## Stop the test environment and delete its data
 	docker compose -f test/compose.yaml --profile mysql down -v

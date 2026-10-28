@@ -115,3 +115,22 @@ The `include_dir = 'conf.d'` line in `postgresql.conf` is harmless with an empty
 
 See [restore.md §5](restore.md#5-check-a-dump-on-your-laptop). It works the same with a
 dump from production as with one from your Mac.
+
+## Testing MySQL in an Ubuntu VM
+
+```bash
+brew install --cask multipass     # once; minio and mailpit are already needed above
+make vm-test-mysql                # about 3 minutes
+```
+
+`scripts/vm-test-mysql.sh` creates a fresh Ubuntu 26.04 VM with Multipass and installs
+Ubuntu's own `mysql-server` (MySQL 8.4, root by `auth_socket`), the way the servers do.
+It then runs `test/integration-mysql.sh --local` inside it: setup, dumps, restores with
+checksums, users and grants, a dropped database, the UI, emails, and setup with a root
+password. MinIO and Mailpit run on the Mac, listening only on its address on the VM network
+(usually `192.168.252.1`), with a throwaway certificate that only the VM trusts. Afterwards
+the VM, MinIO and Mailpit are removed. Add `--keep` (`scripts/vm-test-mysql.sh --keep`) to
+keep the VM and look around with `multipass shell liops-vmtest`.
+
+The same test runs in Docker in CI (`make integration-mysql`). Use the VM when you don't
+have Docker, or want a real systemd Ubuntu rather than a container.
