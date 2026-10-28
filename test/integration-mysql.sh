@@ -122,10 +122,19 @@ checksums() { sql -e "CHECKSUM TABLE $1.orders, $1.audit, $1.tenants" | awk '{pr
 app_sums=$(checksums app)
 abc_sum=$(sql -e "CHECKSUM TABLE tenant_abc.items" | awk '{print $2}')
 
-step "Setup: liops's own MySQL account, created through root's socket login"
+step "Setup, part 1: liops's own MySQL account (root by socket); the GTID changes are listed, not made"
 out=$(my liops setup)
 echo "$out"
+grep -q -- "--enable-gtid" <<<"$out" || fail "setup should list the GTID changes and how to approve them"
+if grep -q "Setup is complete" <<<"$out"; then fail "setup can't be complete before GTIDs are on"; fi
+[ "$(sql -e 'SELECT @@gtid_mode')" = OFF ] || fail "setup changed gtid_mode without being asked"
+
+step "Setup, part 2: --enable-gtid turns GTIDs on online and keeps them in mysql.conf.d"
+out=$(my liops setup --enable-gtid)
+echo "$out"
 grep -q "Setup is complete" <<<"$out" || fail "setup did not complete"
+[ "$(sql -e 'SELECT @@gtid_mode, @@enforce_gtid_consistency')" = "$(printf 'ON\tON')" ] || fail "GTIDs aren't on"
+my grep -q "^gtid_mode = ON" /etc/mysql/mysql.conf.d/zz-liops.cnf || fail "the GTID settings weren't written to mysql.conf.d"
 mode=$(my stat -c %a /etc/liops/mysql.cnf)
 [ "$mode" = 600 ] || fail "/etc/liops/mysql.cnf has mode $mode, expected 600"
 my liops setup | grep -q "Setup is complete" || fail "setup should be safe to run again"

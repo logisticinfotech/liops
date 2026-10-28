@@ -126,6 +126,16 @@ func CheckVersion(version string) error {
 	return nil
 }
 
+// Series returns a version's release series, e.g. "8.4" for "8.4.11-0ubuntu0.26.04.1",
+// or "" if it can't be read.
+func Series(version string) string {
+	major, minor, ok := parseVersion(version)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d", major, minor)
+}
+
 // parseVersion reads the major and minor version from e.g. "8.4.3-0ubuntu0.24.04.1".
 func parseVersion(v string) (major, minor int, ok bool) {
 	parts := strings.SplitN(v, ".", 3)

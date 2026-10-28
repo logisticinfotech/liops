@@ -274,7 +274,8 @@ func runDetail(r *state.Run) string {
 func runSetup(args []string, out io.Writer) error {
 	flags, p := newFlags("setup")
 	skipPgBackRest := flags.Bool("skip-pgbackrest", false, "development only: mark setup complete without pgBackRest")
-	rootPasswordStdin := flags.Bool("mysql-root-password-stdin", false, "MySQL: read root's MySQL password from stdin, to create liops's own account (never stored)")
+	rootPasswordStdin := flags.Bool("mysql-root-password-stdin", false, "MySQL: read root's MySQL password from stdin, if root needs one (never stored)")
+	enableGTID := flags.Bool("enable-gtid", false, "MySQL: make the setting changes point-in-time backups need (GTIDs), online; setup lists them first")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -289,7 +290,7 @@ func runSetup(args []string, out io.Writer) error {
 		return err
 	}
 	if cfg.IsMySQL() {
-		return runMySQLSetup(cfg, p, *rootPasswordStdin, os.Stdin, out)
+		return runMySQLSetup(cfg, p, setupFlags{rootPasswordStdin: *rootPasswordStdin, enableGTID: *enableGTID}, os.Stdin, out)
 	}
 	if *skipPgBackRest {
 		return skipSetup(p, out)
@@ -330,11 +331,14 @@ func runSetup(args []string, out io.Writer) error {
 	return nil
 }
 
+// setupFlags are the MySQL choices on the setup command line.
+type setupFlags struct{ rootPasswordStdin, enableGTID bool }
+
 // runMySQLSetup gives liops its own MySQL account, checks the server and claims the
 // backup name. MySQL needs no restart and no settings changes for its dumps.
-func runMySQLSetup(cfg *config.Config, p *paths, rootPasswordStdin bool, in io.Reader, out io.Writer) error {
+func runMySQLSetup(cfg *config.Config, p *paths, f setupFlags, in io.Reader, out io.Writer) error {
 	var rootPassword string
-	if rootPasswordStdin {
+	if f.rootPasswordStdin {
 		line, err := bufio.NewReader(in).ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
@@ -350,18 +354,45 @@ func runMySQLSetup(cfg *config.Config, p *paths, rootPasswordStdin bool, in io.R
 	ctx, stop := signalContext()
 	defer stop()
 
-	version, err := setup.SetupMySQL(ctx, cfg, command.Exec{}, store, rootPassword)
+	res, err := setup.SetupMySQL(ctx, cfg, command.Exec{}, store, setup.MySQLOptions{RootPassword: rootPassword, ApplySettings: f.enableGTID})
 	if err != nil {
 		return err
+	}
+	fmt.Fprintf(out, "MySQL %s: liops logs in with its own account (%s, login in %s).\n", res.Version, setup.MySQLUser, cfg.MySQL.DefaultsFile)
+	if len(res.Pending) > 0 {
+		printPendingMySQL(out, cfg, res, f.rootPasswordStdin)
+		return nil
 	}
 	if err := markSetupComplete(p); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "MySQL %s: liops logs in with its own account (%s, login in %s).\n", version, setup.MySQLUser, cfg.MySQL.DefaultsFile)
+	fmt.Fprintf(out, "GTIDs and binary logging are ready for point-in-time backups (settings kept in %s).\n", cfg.MySQL.ConfFile)
 	fmt.Fprintln(out, "\nSetup is complete. Next: take the first dumps, then start the service:")
 	fmt.Fprintln(out, "\n  sudo liops run dumps\n  sudo systemctl enable --now liops")
 	fmt.Fprintln(out, "\nPoint-in-time backups for MySQL come in a later version. Until then, the dumps run at the nightly backup times.")
 	return nil
+}
+
+// printPendingMySQL explains the MySQL setting changes setup is waiting to make, and
+// how to approve them.
+func printPendingMySQL(out io.Writer, cfg *config.Config, res setup.MySQLResult, rootPasswordStdin bool) {
+	fmt.Fprintln(out, "\nPoint-in-time backups need these MySQL settings changed:")
+	for _, c := range res.Pending {
+		fmt.Fprintln(out, "  "+c.String())
+	}
+	fmt.Fprintf(out, "\nsetup --enable-gtid changes them in the running server (no restart, no downtime) and keeps\n"+
+		"them in %s. Nothing has been changed yet.\n", cfg.MySQL.ConfFile)
+	fmt.Fprintln(out, "\nWith enforce_gtid_consistency = ON, MySQL refuses the few statements that GTIDs can't log\n"+
+		"safely: mostly writing to a MyISAM table and an InnoDB table in one transaction, and\n"+
+		"CREATE TABLE ... SELECT into a MyISAM table. Apps that only use InnoDB aren't affected.")
+	if res.NonInnoDBTables > 0 {
+		fmt.Fprintf(out, "This server has %d table(s) that aren't InnoDB: check how your app writes to them first.\n", res.NonInnoDBTables)
+	}
+	cmd := "sudo liops setup --enable-gtid"
+	if rootPasswordStdin {
+		cmd = "read -rs PW && printf '%s\\n' \"$PW\" | sudo liops setup --enable-gtid --mysql-root-password-stdin"
+	}
+	fmt.Fprintf(out, "\nWhen you're ready, run:\n\n  %s\n", cmd)
 }
 
 func markSetupComplete(p *paths) error {

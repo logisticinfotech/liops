@@ -75,12 +75,21 @@ type MySQL struct {
 	// (root only, mode 0600), so the password never appears on a command line.
 	DefaultsFile string `yaml:"defaults_file"`
 	DataDir      string `yaml:"data_dir"`
-	// BinDir holds mysql and mysqldump. Empty means /usr/bin.
+	// BinDir holds mysql, mysqldump, mysqlbinlog and xtrabackup. Empty means /usr/bin.
 	BinDir string `yaml:"bin_dir"`
+	// ConfFile is where setup writes the server settings point-in-time backups need
+	// (GTIDs, binlog expiry), so they survive a restart and a restore. MySQL must read it
+	// at startup.
+	ConfFile string `yaml:"conf_file"`
 	// FullSchedule and DiffSchedule are the nightly backup times. Until point-in-time
 	// backups for MySQL are built (docs/PLAN-mysql.md, M2), the dumps run at these times.
 	FullSchedule string `yaml:"full_schedule"`
 	DiffSchedule string `yaml:"diff_schedule"`
+	// RetentionDays is how far back a point-in-time restore can go.
+	RetentionDays int `yaml:"retention_days"`
+	// BinlogInterval is how often binlogs are shipped to storage: the most a total loss
+	// of the server can lose.
+	BinlogInterval Duration `yaml:"binlog_interval"`
 }
 
 // Postgres layouts: where a PostgreSQL install keeps its programs and settings, and
@@ -177,11 +186,14 @@ func Default() *Config {
 		Server: Server{Timezone: "Asia/Kolkata"},
 		UI:     UI{Listen: "127.0.0.1:8899"},
 		MySQL: MySQL{
-			Socket:       "/var/run/mysqld/mysqld.sock",
-			DefaultsFile: "/etc/liops/mysql.cnf",
-			DataDir:      "/var/lib/mysql",
-			FullSchedule: "30 1 * * 0",   // Sunday 01:30
-			DiffSchedule: "30 1 * * 1-6", // Monday-Saturday 01:30
+			Socket:         "/var/run/mysqld/mysqld.sock",
+			DefaultsFile:   "/etc/liops/mysql.cnf",
+			DataDir:        "/var/lib/mysql",
+			ConfFile:       "/etc/mysql/mysql.conf.d/zz-liops.cnf",
+			FullSchedule:   "30 1 * * 0",   // Sunday 01:30
+			DiffSchedule:   "30 1 * * 1-6", // Monday-Saturday 01:30
+			RetentionDays:  30,
+			BinlogInterval: Duration(5 * time.Minute),
 		},
 		Postgres: Postgres{
 			Layout:  LayoutDebian,
@@ -512,6 +524,15 @@ func (c *Config) validateMySQL(add func(string, ...any), errs *[]error) {
 	}
 	if m.BinDir != "" && !filepath.IsAbs(m.BinDir) {
 		add("mysql.bin_dir: must be an absolute path (or empty for /usr/bin)")
+	}
+	if !filepath.IsAbs(m.ConfFile) {
+		add("mysql.conf_file: must be an absolute path, e.g. /etc/mysql/mysql.conf.d/zz-liops.cnf")
+	}
+	if m.RetentionDays < 1 {
+		add("mysql.retention_days: must be at least 1")
+	}
+	if t := time.Duration(m.BinlogInterval); t < time.Minute || t > time.Hour {
+		add("mysql.binlog_interval: %s must be between 1m and 1h", t)
 	}
 	checkSchedule(errs, "mysql.full_schedule", m.FullSchedule)
 	checkSchedule(errs, "mysql.diff_schedule", m.DiffSchedule)

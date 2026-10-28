@@ -280,6 +280,15 @@ any M2 code:
 - Two findings now in this plan: GTID settings must go in a `mysql.conf.d` file, not only
   `SET PERSIST` (§4), and restores on Ubuntu go in place because of AppArmor (§3.5).
 
+**M2 step 1, setup (October 2026):** `liops setup` on MySQL now also checks XtraBackup (installed,
+same series as the server), binary logging (on, ROW), GTIDs and binlog expiry (≥ 7 days).
+Changes it can make are listed and nothing is changed until `liops setup --enable-gtid`,
+which logs in as MySQL's root, refuses a server that replicates, clears any `SET PERSIST`
+values, steps `gtid_mode` up online, and writes `mysql.conf_file`
+(`/etc/mysql/mysql.conf.d/zz-liops.cnf`). Setup isn't complete until the settings are
+right. New settings: `mysql.conf_file`, `mysql.retention_days` (30), `mysql.binlog_interval`
+(5m). The Docker image and the VM test install XtraBackup; `make vm-test-mysql` passed.
+
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
   a checksum-checked restore of every database, users and grants restored after the user

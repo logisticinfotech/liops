@@ -63,13 +63,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "Create the VM (Ubuntu $UBUNTU) and install mysql-server"
+step "Create the VM (Ubuntu $UBUNTU) and install mysql-server and XtraBackup"
 multipass launch "$UBUNTU" --name "$VM" --cpus 2 --memory 4G --disk 16G >/dev/null
 vm sudo bash -s <<-'EOF'
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
-	apt-get install -y -qq mysql-server >/dev/null
+	apt-get install -y -qq mysql-server curl gnupg lsb-release >/dev/null
+	curl -fsSLO --output-dir /tmp https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+	apt-get install -y -qq /tmp/percona-release_latest.generic_all.deb >/dev/null
+	percona-release enable pxb-84-lts release >/dev/null 2>&1
+	apt-get install -y -qq percona-xtrabackup-84 >/dev/null
 	mysqld --version
+	xtrabackup --version 2>&1 | tail -1
 EOF
 
 host=$(vm ip route | awk '/^default/ {print $3; exit}')

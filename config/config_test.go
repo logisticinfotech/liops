@@ -217,8 +217,11 @@ func TestMySQLEngine(t *testing.T) {
 
 	c.MySQL.Socket = "mysqld.sock"
 	c.MySQL.FullSchedule = "nightly"
+	c.MySQL.ConfFile = "zz-liops.cnf"
+	c.MySQL.RetentionDays = 0
+	c.MySQL.BinlogInterval = Duration(10 * time.Second)
 	err = c.Validate()
-	for _, want := range []string{"mysql.socket", "mysql.full_schedule"} {
+	for _, want := range []string{"mysql.socket", "mysql.full_schedule", "mysql.conf_file", "mysql.retention_days", "mysql.binlog_interval"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want an error about %s, got %v", want, err)
 		}

@@ -71,3 +71,11 @@ func TestQuote(t *testing.T) {
 		t.Errorf("Quote = %s", got)
 	}
 }
+
+func TestSeries(t *testing.T) {
+	for v, want := range map[string]string{"8.4.11-0ubuntu0.26.04.1": "8.4", "8.4.0-7": "8.4", "9.1.0": "9.1", "x": ""} {
+		if got := Series(v); got != want {
+			t.Errorf("Series(%q) = %q, want %q", v, got, want)
+		}
+	}
+}
