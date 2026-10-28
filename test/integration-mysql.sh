@@ -137,7 +137,8 @@ grep -q "Setup is complete" <<<"$out" || fail "setup did not complete"
 my grep -q "^gtid_mode = ON" /etc/mysql/mysql.conf.d/zz-liops.cnf || fail "the GTID settings weren't written to mysql.conf.d"
 perms=$(my stat -c %a /etc/liops/mysql.cnf)
 [ "$perms" = 600 ] || fail "/etc/liops/mysql.cnf has mode $perms, expected 600"
-my liops setup | grep -q "Setup is complete" || fail "setup should be safe to run again"
+out=$(my liops setup)
+grep -q "Setup is complete" <<<"$out" || fail "setup should be safe to run again"
 
 step "Full backup + dumps, then a diff + dumps (XtraBackup, streamed)"
 my liops run full
@@ -258,7 +259,8 @@ if [ "$mode" = local ]; then
         esac
     done <<<"$cmds"
     [ "$(sql -e "CHECKSUM TABLE app.orders" | awk '{print $2}')" = "$want" ] || fail "app.orders isn't as it was at $moment"
-    sql -e "SELECT note FROM app.orders" | grep -q "the last row before the moment" || fail "the last row before the moment is missing"
+    notes=$(sql -e "SELECT note FROM app.orders")
+    grep -q "the last row before the moment" <<<"$notes" || fail "the last row before the moment is missing"
     [ "$(sql -e 'SELECT @@gtid_mode')" = ON ] || fail "GTIDs should still be on after the restore (zz-liops.cnf)"
     [ -d /var/lib/mysql.before-restore ] || fail "the old data should be kept aside"
     echo "point-in-time restore OK (app.orders is back, exactly as at $moment)"
@@ -268,7 +270,8 @@ if [ "$mode" = local ]; then
     if out=$(my liops setup 2>&1); then fail "setup should refuse the old backup name after a restore"; fi
     grep -q "already used" <<<"$out" || fail "setup should explain why it refuses the old name, got: $out"
     my sed -i 's/^  backup_name: test-mysql$/  backup_name: test-mysql-r2/' /etc/liops/config.yaml
-    my liops setup | grep -q "Setup is complete" || fail "setup under the new backup name did not complete"
+    out=$(my liops setup)
+    grep -q "Setup is complete" <<<"$out" || fail "setup under the new backup name did not complete"
     my liops run full
     echo "after the restore, backups continue under the new name test-mysql-r2"
 else

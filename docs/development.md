@@ -120,14 +120,16 @@ dump from production as with one from your Mac.
 
 ```bash
 brew install --cask multipass     # once; minio and mailpit are already needed above
-make vm-test-mysql                # about 3 minutes
+make vm-test-mysql                # about 5 minutes
 ```
 
 `scripts/vm-test-mysql.sh` creates a fresh Ubuntu 26.04 VM with Multipass and installs
-Ubuntu's own `mysql-server` (MySQL 8.4, root by `auth_socket`), the way the servers do.
-It then runs `test/integration-mysql.sh --local` inside it: setup, dumps, restores with
+Ubuntu's own `mysql-server` (MySQL 8.4, root by `auth_socket`), the way the servers do, then
+liops with the real `scripts/install.sh` (which installs XtraBackup and the service), and
+checks the wizard answers. It then runs `test/integration-mysql.sh --local` inside it: setup, dumps, restores with
 checksums, users and grants, a dropped database, the UI, emails, and setup with a root
-password. MinIO and Mailpit run on the Mac, listening only on its address on the VM network
+password; then `test/wizard-mysql.sh`, which drives the setup wizard over HTTP, from a new
+config to the first full backup. MinIO and Mailpit run on the Mac, listening only on its address on the VM network
 (usually `192.168.252.1`), with a throwaway certificate that only the VM trusts. Afterwards
 the VM, MinIO and Mailpit are removed. Add `--keep` (`scripts/vm-test-mysql.sh --keep`) to
 keep the VM and look around with `multipass shell liops-vmtest`.

@@ -63,17 +63,9 @@ type MySQLResult struct {
 func SetupMySQL(ctx context.Context, cfg *config.Config, run command.Runner, store storage.Store, opts MySQLOptions) (MySQLResult, error) {
 	var res MySQLResult
 	inst := mysql.Instance{Cfg: cfg.MySQL, Run: run}
-	if _, err := inst.Version(ctx); err != nil {
-		if err := createMySQLUser(ctx, inst, opts.RootPassword); err != nil {
-			return res, err
-		}
-	}
-	version, err := inst.Version(ctx)
-	if err != nil {
-		return res, fmt.Errorf("liops can't log in to MySQL with %s: %w", cfg.MySQL.DefaultsFile, err)
-	}
+	version, err := EnsureMySQLAccount(ctx, inst, opts.RootPassword)
 	res.Version = version
-	if err := mysql.CheckVersion(version); err != nil {
+	if err != nil {
 		return res, err
 	}
 	if err := CheckMySQLOwner(ctx, cfg, inst, store); err != nil {
@@ -102,6 +94,22 @@ func SetupMySQL(ctx context.Context, cfg *config.Config, run command.Runner, sto
 	}
 	// The settings are live; keep them over a restart or a restore.
 	return res, writeMySQLConf(inst.Cfg.ConfFile, current)
+}
+
+// EnsureMySQLAccount makes sure liops can log in to MySQL with its own account,
+// creating it (and its defaults file) as MySQL's root if needed, and that the server
+// is new enough. It returns the server version.
+func EnsureMySQLAccount(ctx context.Context, inst mysql.Instance, rootPassword string) (string, error) {
+	if _, err := inst.Version(ctx); err != nil {
+		if err := createMySQLUser(ctx, inst, rootPassword); err != nil {
+			return "", err
+		}
+	}
+	version, err := inst.Version(ctx)
+	if err != nil {
+		return "", fmt.Errorf("liops can't log in to MySQL with %s: %w", inst.Cfg.DefaultsFile, err)
+	}
+	return version, mysql.CheckVersion(version)
 }
 
 // rootLogin returns the instance logged in as MySQL's root: through the socket, or with

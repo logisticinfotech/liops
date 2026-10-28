@@ -3,18 +3,31 @@
 <h1>Review and apply</h1>
 {{if .Problems}}<div class="error">These settings are still missing or wrong:<pre>{{lines .Problems}}</pre></div>{{end}}
 <div class="panel">
+  {{if .Cfg.IsMySQL}}
+  <p><strong>MySQL</strong> through <code>{{.Cfg.MySQL.Socket}}</code>, backup name <code>{{.Cfg.MySQL.BackupName}}</code> (folder <code>{{.Cfg.MySQL.BackupName}}/</code> in the bucket)</p>
+  {{else}}
   <p><strong>PostgreSQL {{.Cfg.Postgres.Version}} / {{.Cfg.Postgres.Cluster}}</strong> on port {{.Cfg.Postgres.Port}}, backup name <code>{{.Cfg.PgBackRest.Stanza}}</code> (folder <code>{{.Cfg.PgBackRest.Stanza}}/</code> in the bucket)</p>
+  {{end}}
   <p><strong>Storage:</strong> bucket <code>{{.Cfg.Storage.S3.Bucket}}</code> at <code>{{.Cfg.Storage.S3.Endpoint}}</code></p>
   <p><strong>Email:</strong> {{join .Cfg.Email.To ", "}} via {{.Cfg.Email.SMTPHost}}</p>
+  {{if .Cfg.IsMySQL}}
+  <p><strong>Backups:</strong> full {{with cronDesc .Cfg.MySQL.FullSchedule}}{{.}}{{else}}<code>{{.Cfg.MySQL.FullSchedule}}</code>{{end}}, differential {{with cronDesc .Cfg.MySQL.DiffSchedule}}{{.}}{{else}}<code>{{.Cfg.MySQL.DiffSchedule}}</code>{{end}} ({{.Cfg.Server.Timezone}}), kept {{.Cfg.MySQL.RetentionDays}} days, binlogs shipped every {{.Cfg.MySQL.BinlogInterval}}</p>
+  {{else}}
   <p><strong>Backups:</strong> full {{with cronDesc .Cfg.PgBackRest.FullSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.FullSchedule}}</code>{{end}}, differential {{with cronDesc .Cfg.PgBackRest.DiffSchedule}}{{.}}{{else}}<code>{{.Cfg.PgBackRest.DiffSchedule}}</code>{{end}} ({{.Cfg.Server.Timezone}}), kept {{.Cfg.PgBackRest.RetentionDays}} days, WAL at least every {{.Cfg.PgBackRest.ArchiveTimeout}}</p>
+  {{end}}
   <p><strong>Dumps:</strong> {{if .Cfg.Dumps.Enabled}}every night, kept {{.Cfg.Dumps.RetentionDays}} days{{if .Cfg.Dumps.Exclude}}, except {{join .Cfg.Dumps.Exclude ", "}}{{end}}{{else}}off{{end}}</p>
 </div>
 <div class="panel">
   <p>Applying will:</p>
   <ol>
+    {{if .Cfg.IsMySQL}}
+    <li>check MySQL, XtraBackup and binary logging, and that the backup name is free;</li>
+    <li><strong>ask you before turning on GTIDs</strong>, if they're off (online: no restart, no downtime);</li>
+    {{else}}
     <li>write <code>/etc/pgbackrest/pgbackrest.conf</code> and a <code>conf.d</code> file that turns on WAL archiving;</li>
     <li><strong>ask you before restarting PostgreSQL</strong> (a few seconds of downtime, needed once to turn on archiving);</li>
     <li>create the pgBackRest stanza and check that WAL archiving works;</li>
+    {{end}}
     <li>take the first full backup and dump every database;</li>
     <li>send the “setup finished” email.</li>
   </ol>

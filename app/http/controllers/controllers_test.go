@@ -11,8 +11,10 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -55,11 +57,51 @@ func validConfig() *config.Config {
 	return c
 }
 
-// fakeServer answers like a PostgreSQL 18 server with pgBackRest and one database.
+// fakeGTIDMode is the fake MySQL server's gtid_mode: setup's SET GLOBAL steps change it.
+var fakeGTIDMode = "OFF"
+
+// fakeServer answers like a PostgreSQL 18 server with pgBackRest and one database, or
+// like a MySQL 8.4 server with XtraBackup and one database.
 func fakeServer(program string, c command.Cmd) ([]byte, error) {
 	args := strings.Join(c.Args, " ")
 	now := time.Now().Unix()
 	switch program {
+	case "mysql":
+		q := strings.TrimPrefix(c.Args[len(c.Args)-1], "--execute=")
+		switch {
+		case strings.Contains(q, "VERSION()"):
+			return []byte("8.4.11-0ubuntu0.26.04.1\n"), nil
+		case strings.Contains(q, "@@server_uuid"):
+			return []byte("3e11fa47-71ca-11e1-9e33-c80aa9429562\n"), nil
+		case strings.Contains(q, "@@log_bin,"):
+			enforce := "OFF"
+			if fakeGTIDMode != "OFF" {
+				enforce = "ON"
+			}
+			return []byte("1\tROW\t" + fakeGTIDMode + "\t" + enforce + "\t2592000\n"), nil
+		case strings.HasPrefix(q, "SET GLOBAL gtid_mode = "):
+			fakeGTIDMode = strings.TrimPrefix(q, "SET GLOBAL gtid_mode = ")
+		case strings.Contains(q, "Ongoing_anonymous_transaction_count"):
+			return []byte("Ongoing_anonymous_transaction_count\t0\n"), nil
+		case strings.Contains(q, "information_schema.TABLES"):
+			return []byte("0\n"), nil
+		case strings.Contains(q, "information_schema.SCHEMATA"):
+			return []byte(strings.ToUpper(hex.EncodeToString([]byte("app"))) + "\n"), nil
+		}
+		return nil, nil
+	case "xtrabackup":
+		if strings.Contains(args, "--version") {
+			return []byte("xtrabackup version 8.4.0-7 based on MySQL server 8.4.0 Linux (x86_64)\n"), nil
+		}
+		for _, a := range c.Args {
+			if dir, ok := strings.CutPrefix(a, "--extra-lsndir="); ok {
+				os.WriteFile(filepath.Join(dir, "xtrabackup_checkpoints"), []byte("from_lsn = 0\nto_lsn = 5000\n"), 0o600)
+				os.WriteFile(filepath.Join(dir, "xtrabackup_info"), []byte("binlog_pos = filename 'binlog.000003', position '158'\n"), 0o600)
+			}
+		}
+		return []byte("XBSTREAM"), nil
+	case "mysqldump":
+		return []byte("-- MySQL dump\n"), nil
 	case "pg_lsclusters":
 		return []byte("18  main    5432 online postgres /var/lib/postgresql/18/main /var/log/postgresql/postgresql-18-main.log\n"), nil
 	case "pgbackrest":
@@ -364,5 +406,93 @@ func TestMySQLPages(t *testing.T) {
 	code, _, body = h.get("/backups")
 	if code != 200 || !strings.Contains(body, "2026-10-25T013000Z-full") || !strings.Contains(body, "binlog.000006:158") {
 		t.Errorf("backups page on MySQL: %d\n%s", code, body)
+	}
+}
+
+// mysqlWizardConfig is a complete MySQL config, as the wizard leaves it before apply.
+func mysqlWizardConfig(t *testing.T) *config.Config {
+	cfg := validConfig()
+	cfg.Engine = config.EngineMySQL
+	cfg.MySQL.BackupName = "shop-db-1"
+	cfg.MySQL.DefaultsFile = filepath.Join(t.TempDir(), "mysql.cnf")
+	cfg.MySQL.ConfFile = filepath.Join(t.TempDir(), "zz-liops.cnf")
+	return cfg
+}
+
+// waitTask waits for the wizard's apply task to stop running.
+func (h *harness) waitTask() *applyTask {
+	h.t.Helper()
+	for range 200 {
+		if task := h.ui.setup.snapshot(); task != nil && !task.Running {
+			return task
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	h.t.Fatal("the apply task didn't finish")
+	return nil
+}
+
+func TestMySQLWizard(t *testing.T) {
+	fakeGTIDMode = "OFF"
+	h := newHarness(t, mysqlWizardConfig(t), false)
+	if _, loc, _ := h.get("/setup"); loc != "/setup/mysql" {
+		t.Fatalf("a MySQL server's wizard starts at the MySQL step, got %q", loc)
+	}
+	if _, _, body := h.get("/setup/mysql"); !strings.Contains(body, "MySQL root password") || strings.Contains(body, "PostgreSQL") {
+		t.Errorf("MySQL step:\n%s", body)
+	}
+	code, loc, body := h.post("/setup/mysql", "/setup/mysql", url.Values{"backup_name": {"shop-db-2"}, "name": {"db-test"}})
+	if code != 303 || loc != "/setup/storage" {
+		t.Fatalf("mysql step: %d %q\n%s", code, loc, body)
+	}
+	if _, _, body := h.get("/setup/review"); !strings.Contains(body, "ask you before turning on GTIDs") || !strings.Contains(body, "shop-db-2") {
+		t.Errorf("review:\n%s", body)
+	}
+
+	// Apply stops and asks before turning GTIDs on.
+	h.post("/setup/review", "/setup/apply/start", url.Values{})
+	task := h.waitTask()
+	if task.Steps[0].Status != stepWaiting || !slices.Contains(task.GTID, "gtid_mode: OFF → ON") || fakeGTIDMode != "OFF" {
+		t.Fatalf("apply should wait for approval with nothing changed: %+v (gtid_mode %s)", task, fakeGTIDMode)
+	}
+	if _, _, body := h.get("/setup/apply/progress"); !strings.Contains(body, "Turn on GTIDs now") {
+		t.Errorf("progress page should offer the GTID button:\n%s", body)
+	}
+
+	// Approved: GTIDs on, setup complete, first backup and the email.
+	h.post("/setup/apply/progress", "/setup/apply/gtid", url.Values{})
+	task = h.waitTask()
+	for i, st := range task.Steps {
+		if st.Status != stepDone {
+			t.Errorf("step %d %q: %s %s", i, st.Title, st.Status, st.Detail)
+		}
+	}
+	if fakeGTIDMode != "ON" || !h.svc.SetupComplete() {
+		t.Errorf("gtid_mode %s, setup complete %v", fakeGTIDMode, h.svc.SetupComplete())
+	}
+	if objs, _ := h.store.List(context.Background(), xtrabackup.Prefix); len(objs) != 2 {
+		t.Errorf("the first full backup should be stored: %v", objs)
+	}
+}
+
+func TestMySQLScheduleSettings(t *testing.T) {
+	h := newHarness(t, mysqlWizardConfig(t), true)
+	_, _, body := h.get("/settings")
+	if !strings.Contains(body, `name="binlog_interval"`) || strings.Contains(body, `name="archive_timeout"`) {
+		t.Fatalf("a MySQL server's schedules form has the binlog interval, not WAL:\n%s", body)
+	}
+	code, _, body := h.post("/settings", "/settings/schedules", url.Values{
+		"full_days": {"0"}, "full_time": {"02:15"}, "diff_days": {"1-6"}, "diff_time": {"02:15"},
+		"report_time": {"07:30"}, "report_days": {"*"}, "retention_days": {"14"}, "binlog_interval": {"15m"},
+	})
+	if code != 303 {
+		t.Fatalf("save: %d\n%s", code, body)
+	}
+	cfg, _ := config.LoadDraft(h.configPath)
+	if cfg.MySQL.FullSchedule != "15 2 * * 0" || cfg.MySQL.RetentionDays != 14 || cfg.MySQL.BinlogInterval.String() != "15m" {
+		t.Errorf("saved: full %q, retention %d, binlog interval %s", cfg.MySQL.FullSchedule, cfg.MySQL.RetentionDays, cfg.MySQL.BinlogInterval)
+	}
+	if cfg.PgBackRest.RetentionDays != 30 {
+		t.Errorf("PostgreSQL settings must be left alone: %+v", cfg.PgBackRest)
 	}
 }

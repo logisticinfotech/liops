@@ -1,7 +1,7 @@
 # liops
 
-**liops** is a one-stop backup tool for a PostgreSQL server (MySQL and lightweight
-monitoring are planned). You install one binary on the database server. It then runs two layers of
+**liops** is a one-stop backup tool for a PostgreSQL or MySQL 8.4 server (lightweight
+monitoring is planned). You install one binary on the database server. It then runs two layers of
 backups, shows their status in a small web UI, and emails you a daily summary and any failures.
 
 > **Status: release candidate, not yet tested on a real server.** Every planned v1 feature
@@ -10,10 +10,12 @@ backups, shows their status in a small web UI, and emails you a daily summary an
 
 ## What it does
 
-| Layer | How | What you get |
-|-------|-----|--------------|
-| **Point-in-time backups** | [pgBackRest](https://pgbackrest.org): weekly full, nightly differential, WAL archived at least hourly | Restore the whole cluster to any moment in the retention window (default 30 days) |
-| **Per-database dumps** | A nightly `pg_dump` of every database, found automatically and streamed to storage | Downloadable files to restore or export a single database (default 7 days) |
+| Layer | PostgreSQL | MySQL 8.4 | What you get |
+|-------|-----------|-----------|--------------|
+| **Point-in-time backups** | [pgBackRest](https://pgbackrest.org): weekly full, nightly differential, WAL archived at least hourly | [Percona XtraBackup](https://www.percona.com/mysql/software/percona-xtrabackup): weekly full, nightly differential, binlogs shipped every 5 minutes | Restore the whole server to any moment in the retention window (default 30 days) |
+| **Per-database dumps** | A nightly `pg_dump` of every database | A nightly `mysqldump` of every database, plus users and grants | Downloadable files to restore or export a single database (default 7 days) |
+
+Everything is streamed straight to storage, with no copy on the server's disk.
 
 Both layers go to S3-compatible object storage, e.g. Cloudflare R2, AWS S3, Backblaze B2
 or MinIO.
@@ -25,27 +27,29 @@ Also:
   storage use, per-database dump downloads, settings, and an audit log. There's no login:
   the SSH tunnel is the access control.
 - **Email**: a daily summary and immediate failure alerts, in plain language
-- Restores stay manual and use pgBackRest and `pg_restore` directly, following
-  [docs/restore.md](docs/restore.md). The UI doesn't restore anything.
+- Restores stay manual, following [docs/restore.md](docs/restore.md) (PostgreSQL) or
+  [docs/restore-mysql.md](docs/restore-mysql.md) (MySQL; `liops restore-files` prepares the
+  files and prints the commands). The UI doesn't restore anything.
 
 ## Install
 
-On the database server (Ubuntu, PostgreSQL 13+ from PGDG):
+On the database server (Ubuntu, with PostgreSQL 13+ from PGDG, or MySQL 8.4):
 
 ```bash
 curl -fsSL https://github.com/logisticinfotech/liops/releases/latest/download/install.sh | sudo bash
 ```
 
-The installer installs pgBackRest if needed, checks the binary against `SHA256SUMS`, and
-starts the `liops` service. Then, on your own computer:
+The installer finds the database, installs pgBackRest (PostgreSQL) or Percona XtraBackup
+(MySQL) if needed, checks the binary against `SHA256SUMS`, and starts the `liops` service. Then, on your own computer:
 
 ```bash
 ssh -L 8899:127.0.0.1:8899 <you>@<server>
 # open http://localhost:8899 and follow the setup wizard
 ```
 
-The wizard asks before it restarts PostgreSQL. Turning on WAL archiving needs one restart,
-a few seconds of downtime. Running the installer again upgrades liops and keeps the
+The wizard asks before it changes your database server. PostgreSQL needs one restart to turn
+on WAL archiving (a few seconds of downtime). MySQL needs GTIDs on, which liops turns on
+online, without a restart, once you approve it. Running the installer again upgrades liops and keeps the
 config. `sudo liops uninstall` removes it and leaves the backups in storage.
 
 ## Design
@@ -55,7 +59,8 @@ The design, decisions and build phases are in [docs/PLAN.md](docs/PLAN.md).
 ## Requirements
 
 - Ubuntu with systemd (developed on Ubuntu 26.04)
-- PostgreSQL 13 or newer from the [PGDG repository](https://www.postgresql.org/download/linux/ubuntu/)
+- PostgreSQL 13 or newer from the [PGDG repository](https://www.postgresql.org/download/linux/ubuntu/),
+  or MySQL 8.4 (`apt install mysql-server`; not replicating, or with GTIDs already on)
 - An S3-compatible bucket and an SMTP account
 
 ## Command line

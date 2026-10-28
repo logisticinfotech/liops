@@ -16,6 +16,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/logisticinfotech/liops/app/command"
+	"github.com/logisticinfotech/liops/app/engines/mysql"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/notify"
@@ -24,14 +25,24 @@ import (
 	"github.com/logisticinfotech/liops/config"
 )
 
-// The wizard's steps, in order (PLAN.md §7.2).
-var wizardSteps = []struct{ ID, Title string }{
-	{"postgres", "PostgreSQL"},
-	{"storage", "Storage"},
-	{"email", "Email"},
-	{"schedules", "Schedules and retention"},
-	{"labels", "Labels (optional)"},
-	{"review", "Review and apply"},
+// wizardStep is one step of the setup wizard.
+type wizardStep = struct{ ID, Title string }
+
+// wizardSteps are the wizard's steps for the server's engine, in order (PLAN.md §7.2).
+// Only the first differs: PostgreSQL picks a cluster, MySQL creates liops's account.
+func wizardSteps(cfg *config.Config) []wizardStep {
+	first := wizardStep{"postgres", "PostgreSQL"}
+	if cfg.IsMySQL() {
+		first = wizardStep{"mysql", "MySQL"}
+	}
+	return []wizardStep{
+		first,
+		{"storage", "Storage"},
+		{"email", "Email"},
+		{"schedules", "Schedules and retention"},
+		{"labels", "Labels (optional)"},
+		{"review", "Review and apply"},
+	}
 }
 
 // Apply task step statuses.
@@ -56,6 +67,9 @@ type applyTask struct {
 	Running bool
 	Done    bool
 	Restart string // the command to restart PostgreSQL, while waiting for it
+	// GTID lists the MySQL setting changes waiting for the user's approval.
+	GTID      []string
+	NonInnoDB int // user tables that aren't InnoDB, which the GTID change can affect
 }
 
 type wizard struct {
@@ -90,6 +104,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup/apply/progress", s.setupProgress)
 	mux.Handle("POST /setup/apply/start", step(s.setupApply))
 	mux.Handle("POST /setup/apply/restart", step(s.setupRestart))
+	mux.Handle("POST /setup/apply/gtid", step(s.setupGTID))
 }
 
 // beforeSetupDone sends users to the dashboard once setup is complete, except to
@@ -105,7 +120,7 @@ func (s *Server) beforeSetupDone(h http.HandlerFunc) http.HandlerFunc {
 }
 
 type wizardData struct {
-	Steps    []struct{ ID, Title string }
+	Steps    []wizardStep
 	Step     string
 	Prev     string
 	Cfg      *config.Config
@@ -118,14 +133,14 @@ type wizardData struct {
 }
 
 func (s *Server) wizardPage(w http.ResponseWriter, r *http.Request, name string, d wizardData) {
-	d.Steps = wizardSteps
-	for i, st := range wizardSteps {
-		if st.ID == d.Step && i > 0 {
-			d.Prev = wizardSteps[i-1].ID
-		}
-	}
 	if d.Cfg == nil {
 		d.Cfg = s.Svc.Config()
+	}
+	d.Steps = wizardSteps(d.Cfg)
+	for i, st := range d.Steps {
+		if st.ID == d.Step && i > 0 {
+			d.Prev = d.Steps[i-1].ID
+		}
 	}
 	s.render(w, r, name, page{Title: "Set up liops", Wizard: true, Data: d})
 }
@@ -136,16 +151,16 @@ func (s *Server) setupStart(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/setup/"+wizardSteps[0].ID, http.StatusSeeOther)
+	http.Redirect(w, r, "/setup/"+wizardSteps(s.Svc.Config())[0].ID, http.StatusSeeOther)
 }
 
-func validStep(id string) bool {
-	return slices.ContainsFunc(wizardSteps, func(s struct{ ID, Title string }) bool { return s.ID == id })
+func validStep(cfg *config.Config, id string) bool {
+	return slices.ContainsFunc(wizardSteps(cfg), func(s wizardStep) bool { return s.ID == id })
 }
 
 func (s *Server) setupStep(w http.ResponseWriter, r *http.Request) {
 	step := r.PathValue("step")
-	if !validStep(step) {
+	if !validStep(s.Svc.Config(), step) {
 		http.NotFound(w, r)
 		return
 	}
@@ -169,11 +184,11 @@ func (s *Server) setupStep(w http.ResponseWriter, r *http.Request) {
 // The storage step only moves on once its test passes.
 func (s *Server) setupSave(w http.ResponseWriter, r *http.Request) {
 	step := r.PathValue("step")
-	if !validStep(step) || step == "review" {
+	cfg := s.Svc.Config()
+	if !validStep(cfg, step) || step == "review" {
 		http.NotFound(w, r)
 		return
 	}
-	cfg := s.Svc.Config()
 	d := wizardData{Step: step, Cfg: cfg}
 	var sections []string
 	switch step {
@@ -204,6 +219,28 @@ func (s *Server) setupSave(w http.ResponseWriter, r *http.Request) {
 			s.wizardPage(w, r, "setup_postgres", d)
 			return
 		}
+	case "mysql":
+		cfg.MySQL.BackupName = strings.TrimSpace(r.PostFormValue("backup_name"))
+		cfg.Server.Name = strings.TrimSpace(r.PostFormValue("name"))
+		if errs := filterErrors(cfg, "mysql."); len(errs) > 0 {
+			d.Errors = errs
+			s.wizardPage(w, r, "setup_mysql", d)
+			return
+		}
+		// Create liops's own MySQL account now, so a root password problem shows here.
+		// The root password is used for this one request and never stored.
+		inst := mysql.Instance{Cfg: cfg.MySQL, Run: s.Cmd}
+		if _, err := setup.EnsureMySQLAccount(r.Context(), inst, r.PostFormValue("root_password")); err != nil {
+			msg := err.Error()
+			if errors.Is(err, setup.ErrNeedRootPassword) {
+				msg = "MySQL's root account needs a password on this server: enter it below. liops uses it once, to create its own MySQL account, and doesn't keep it."
+			}
+			d.Errors = []string{msg}
+			s.audit(r, "setup", "create the MySQL account", false)
+			s.wizardPage(w, r, "setup_mysql", d)
+			return
+		}
+		s.audit(r, "setup", "create the MySQL account", true)
 	case "storage":
 		sections = []string{sectionStorage}
 	case "email":
@@ -252,9 +289,10 @@ func (s *Server) setupSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "setup", "saved step "+step, true)
-	for i, st := range wizardSteps {
+	steps := wizardSteps(cfg)
+	for i, st := range steps {
 		if st.ID == step {
-			http.Redirect(w, r, "/setup/"+wizardSteps[i+1].ID, http.StatusSeeOther)
+			http.Redirect(w, r, "/setup/"+steps[i+1].ID, http.StatusSeeOther)
 			return
 		}
 	}
@@ -270,6 +308,18 @@ func (s *Server) setupApply(w http.ResponseWriter, r *http.Request) {
 	s.setup.mu.Lock()
 	if s.setup.task != nil && s.setup.task.Running {
 		s.setup.mu.Unlock()
+		http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
+		return
+	}
+	if cfg.IsMySQL() {
+		s.setup.task = &applyTask{Running: true, Steps: []taskStep{
+			{Title: "Check MySQL, XtraBackup and the backup name, and turn on GTIDs", Status: stepPending},
+			{Title: "Take the first full backup and dump every database", Status: stepPending},
+			{Title: "Send the “setup finished” email", Status: stepPending},
+		}}
+		s.setup.mu.Unlock()
+		s.audit(r, "setup", "apply", true)
+		go s.runApplyMySQL(cfg, setup.MySQLOptions{})
 		http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
 		return
 	}
@@ -300,6 +350,76 @@ func (s *Server) setupRestart(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "setup", map[bool]string{true: "restart PostgreSQL now", false: "continue after a manual restart"}[restart], true)
 	go s.runApply(s.Svc.Config(), restart)
 	http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
+}
+
+// setupGTID makes the MySQL setting changes the user approved (the button on the apply
+// page) and continues the apply. A root password, if given, is used and forgotten.
+func (s *Server) setupGTID(w http.ResponseWriter, r *http.Request) {
+	s.setup.mu.Lock()
+	t := s.setup.task
+	if t == nil || t.Running || len(t.GTID) == 0 {
+		s.setup.mu.Unlock()
+		http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
+		return
+	}
+	t.Running, t.GTID = true, nil
+	s.setup.mu.Unlock()
+	s.audit(r, "setup", "turn on GTIDs", true)
+	go s.runApplyMySQL(s.Svc.Config(), setup.MySQLOptions{ApplySettings: true, RootPassword: r.PostFormValue("root_password")})
+	http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
+}
+
+// runApplyMySQL is the apply task for MySQL: check the server and claim the backup
+// name, wait for the user to approve the GTID change if it's needed, then the first
+// backup and the email.
+func (s *Server) runApplyMySQL(cfg *config.Config, opts setup.MySQLOptions) {
+	wz := s.setup
+	ctx := context.Background()
+	defer func() {
+		wz.mu.Lock()
+		wz.task.Running = false
+		wz.mu.Unlock()
+	}()
+	runner := s.Svc.Runner()
+	if runner == nil {
+		wz.set(0, stepFailed, "the config is no longer valid")
+		return
+	}
+
+	wz.set(0, stepRunning, "")
+	res, err := setup.SetupMySQL(ctx, cfg, s.Cmd, runner.Store, opts)
+	if errors.Is(err, setup.ErrNeedRootPassword) && opts.ApplySettings {
+		// Changing the settings needs root, and root needs a password: ask again.
+		res, err = setup.SetupMySQL(ctx, cfg, s.Cmd, runner.Store, setup.MySQLOptions{})
+		if err == nil && len(res.Pending) > 0 {
+			err = errors.New("MySQL's root account needs a password on this server to change these settings: enter it below")
+		}
+	}
+	if len(res.Pending) > 0 {
+		changes := make([]string, len(res.Pending))
+		for i, c := range res.Pending {
+			changes[i] = c.String()
+		}
+		detail := "Waiting for you: point-in-time backups need these MySQL settings changed. Nothing has been changed yet."
+		if err != nil {
+			detail = err.Error()
+		}
+		wz.set(0, stepWaiting, detail)
+		wz.mu.Lock()
+		wz.task.GTID, wz.task.NonInnoDB = changes, res.NonInnoDBTables
+		wz.mu.Unlock()
+		return
+	}
+	if err != nil {
+		wz.set(0, stepFailed, err.Error())
+		return
+	}
+	if err := s.Svc.MarkSetupComplete(); err != nil {
+		wz.set(0, stepFailed, err.Error())
+		return
+	}
+	wz.set(0, stepDone, fmt.Sprintf("MySQL %s, with XtraBackup; GTIDs are on (kept in %s). Scheduled backups are now on.", res.Version, cfg.MySQL.ConfFile))
+	s.firstBackupAndEmail(ctx, cfg, runner, 1)
 }
 
 func (s *Server) runApply(cfg *config.Config, restart bool) {
@@ -353,13 +473,20 @@ func (s *Server) runApply(cfg *config.Config, restart bool) {
 	}
 	wz.set(1, stepDone, "WAL archiving works end to end. Scheduled backups are now on.")
 
-	// 3. First backup and dumps. Failures are emailed by the job itself.
-	wz.set(2, stepRunning, "This can take a while for a large database. You can leave this page; progress is also on the Jobs page.")
 	runner := s.Svc.Runner()
 	if runner == nil {
 		wz.set(2, stepFailed, "the config is no longer valid")
 		return
 	}
+	s.firstBackupAndEmail(ctx, cfg, runner, 2)
+}
+
+// firstBackupAndEmail runs the apply task's last two steps, from task step i: the
+// first full backup and dumps, then the "setup finished" email.
+func (s *Server) firstBackupAndEmail(ctx context.Context, cfg *config.Config, runner *jobs.Runner, i int) {
+	wz := s.setup
+	// First backup and dumps. Failures are emailed by the job itself.
+	wz.set(i, stepRunning, "This can take a while for a large database. You can leave this page; progress is also on the Jobs page.")
 	backupErr := runner.Run(ctx, jobs.Full, jobs.Manual)
 	backupOK := true
 	if run, err := s.Svc.State.LastRun(jobs.Full, ""); err != nil || run == nil || run.Status != state.StatusOK {
@@ -375,24 +502,28 @@ func (s *Server) runApply(cfg *config.Config, restart bool) {
 		}
 	}
 	if backupErr != nil {
-		wz.set(2, stepFailed, backupErr.Error()+"\n\nSee the Jobs page for details. Scheduled backups are on, so it will be retried.")
+		wz.set(i, stepFailed, backupErr.Error()+"\n\nSee the Jobs page for details. Scheduled backups are on, so it will be retried.")
 	} else {
-		wz.set(2, stepDone, fmt.Sprintf("Full backup done; %d of %d databases dumped.", dumped, total))
+		wz.set(i, stepDone, fmt.Sprintf("Full backup done; %d of %d databases dumped.", dumped, total))
 	}
 
-	// 4. Email.
-	wz.set(3, stepRunning, "")
+	// Email.
+	wz.set(i+1, stepRunning, "")
 	var nextFull time.Time
-	if sched, err := cron.ParseStandard(cfg.PgBackRest.FullSchedule); err == nil {
+	spec := cfg.PgBackRest.FullSchedule
+	if cfg.IsMySQL() {
+		spec = cfg.MySQL.FullSchedule
+	}
+	if sched, err := cron.ParseStandard(spec); err == nil {
 		if loc, err := cfg.Location(); err == nil {
 			nextFull = sched.Next(time.Now().In(loc))
 		}
 	}
 	subject, body := notify.SetupFinished(runner.Server, backupOK, dumped, total, nextFull)
 	if err := runner.Mail.Send(ctx, subject, body); err != nil {
-		wz.set(3, stepFailed, err.Error())
+		wz.set(i+1, stepFailed, err.Error())
 	} else {
-		wz.set(3, stepDone, "Sent to "+strings.Join(cfg.Email.To, ", ")+".")
+		wz.set(i+1, stepDone, "Sent to "+strings.Join(cfg.Email.To, ", ")+".")
 	}
 	wz.mu.Lock()
 	wz.task.Done = true
@@ -417,7 +548,7 @@ func (s *Server) setupProgress(w http.ResponseWriter, r *http.Request) {
 	if runner := s.Svc.Runner(); runner != nil && t.Running {
 		d.Progress = runner.Progress()
 	}
-	d.Steps = wizardSteps
 	d.Cfg = s.Svc.Config()
+	d.Steps = wizardSteps(d.Cfg)
 	s.render(w, r, "setup_apply", page{Title: "Set up liops", Wizard: true, Refresh: refresh, Data: d})
 }

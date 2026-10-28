@@ -460,7 +460,7 @@ Rough estimates for one developer. Each phase ends with a usable result.
 - **MySQL:** [PLAN-mysql.md](PLAN-mysql.md). M0 (engine split), M1 (nightly `mysqldump`
   per database, users and grants, `setup`) and M2 (point-in-time: XtraBackup full/diff,
   binlog shipping, retention, `restore-files`, [restore-mysql.md](restore-mysql.md)) are built
-  on branch `mysql-support`; its §10 says what is tested. Next is M3 (wizard, settings page,
-  installer).
+  on branch `mysql-support`, and so is M3 (installer, wizard, settings). Its §10 says what
+  is tested: everything passed in an Ubuntu 26.04 VM; the Docker CI job hasn't run yet.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

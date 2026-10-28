@@ -3,8 +3,9 @@
 #
 # Runs the MySQL integration test (test/integration-mysql.sh --local) in a fresh Ubuntu VM
 # on a Mac, without Docker: the VM gets Ubuntu's own mysql-server, the way the servers
-# install it, and talks to throwaway MinIO and Mailpit on the Mac. Everything is removed
-# afterwards. See docs/development.md.
+# install it, then liops through scripts/install.sh (which installs XtraBackup and the
+# service, and must open the wizard at the MySQL step). It talks to throwaway MinIO and
+# Mailpit on the Mac. Everything is removed afterwards. See docs/development.md.
 #
 #   scripts/vm-test-mysql.sh            create the VM, run the test, delete the VM
 #   scripts/vm-test-mysql.sh --keep     keep the VM afterwards (multipass shell liops-vmtest)
@@ -63,18 +64,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "Create the VM (Ubuntu $UBUNTU) and install mysql-server and XtraBackup"
+step "Create the VM (Ubuntu $UBUNTU) and install mysql-server"
 multipass launch "$UBUNTU" --name "$VM" --cpus 2 --memory 4G --disk 16G >/dev/null
 vm sudo bash -s <<-'EOF'
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
-	apt-get install -y -qq mysql-server curl gnupg lsb-release >/dev/null
-	curl -fsSLO --output-dir /tmp https://repo.percona.com/apt/percona-release_latest.generic_all.deb
-	apt-get install -y -qq /tmp/percona-release_latest.generic_all.deb >/dev/null
-	percona-release enable pxb-84-lts release >/dev/null 2>&1
-	apt-get install -y -qq percona-xtrabackup-84 >/dev/null
+	apt-get install -y -qq mysql-server curl >/dev/null
 	mysqld --version
-	xtrabackup --version 2>&1 | tail -1
 EOF
 
 host=$(vm ip route | awk '/^default/ {print $3; exit}')
@@ -110,12 +106,38 @@ vm sudo bash -s <<-EOF
 	echo "MinIO and Mailpit are reachable from the VM, over verified TLS."
 EOF
 
-step "Build liops for linux/$arch and copy it into the VM"
+step "Build liops for linux/$arch, and install it with scripts/install.sh"
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "$tmp/liops" .
 multipass transfer "$tmp/liops" "$VM:/home/ubuntu/liops"
+multipass transfer scripts/install.sh "$VM:/home/ubuntu/install.sh"
 multipass transfer test/integration-mysql.sh "$VM:/home/ubuntu/integration-mysql.sh"
+vm sudo env LIOPS_BINARY=/home/ubuntu/liops bash /home/ubuntu/install.sh
+vm sudo bash -s <<-'EOF'
+	set -e
+	fail() { echo "FAIL: $*" >&2; exit 1; }
+	xtrabackup --version >/dev/null 2>&1 || fail "install.sh didn't install XtraBackup"
+	systemctl is-active --quiet liops || fail "the liops service isn't running"
+	grep -q '^engine: mysql$' /etc/liops/config.yaml || fail "install.sh should start the config with engine: mysql"
+	for _ in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break; sleep 1; done
+	[ "$(curl -fsS -o /dev/null -w '%{redirect_url}' http://127.0.0.1:8899/setup)" = "http://127.0.0.1:8899/setup/mysql" ] ||
+		fail "the wizard should start at the MySQL step"
+	curl -fsS http://127.0.0.1:8899/setup/mysql | grep -q "MySQL root password" || fail "the MySQL step didn't render"
+	echo "install.sh: XtraBackup installed, service running, wizard at the MySQL step."
+	# The integration test drives liops from the command line; the service would race it.
+	systemctl stop liops
+EOF
 
 step "Run test/integration-mysql.sh --local in the VM"
 vm sudo env LIOPS_BIN=/home/ubuntu/liops \
 	LIOPS_TEST_S3="$host:$S3_PORT" LIOPS_TEST_SMTP="$host:$SMTP_PORT" LIOPS_TEST_MAILPIT="http://$host:$MAILPIT_PORT" \
 	bash /home/ubuntu/integration-mysql.sh --local
+
+step "Run test/wizard-mysql.sh in the VM: the setup wizard over HTTP, against the installed service"
+multipass transfer test/wizard-mysql.sh "$VM:/home/ubuntu/wizard-mysql.sh"
+# Through stdin: multipass joins arguments into one command line, and the password (set
+# by the integration test) has quotes in it.
+vm sudo bash -s <<EOF
+export LIOPS_TEST_S3="$host:$S3_PORT" LIOPS_TEST_SMTP="$host:$SMTP_PORT" LIOPS_TEST_MAILPIT="http://$host:$MAILPIT_PORT"
+export MYSQL_ROOT_PASSWORD='Root#pass "w0rd'
+bash /home/ubuntu/wizard-mysql.sh
+EOF

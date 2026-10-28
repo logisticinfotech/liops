@@ -8,8 +8,8 @@ liops is a single static Go binary that runs on a PostgreSQL server (as root, un
 and manages two backup layers to S3-compatible storage: pgBackRest point-in-time backups
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
-plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2); its wizard and installer
-are still to come. Lightweight per-server monitoring is planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2), with the same installer,
+wizard and UI. Lightweight per-server monitoring is planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.

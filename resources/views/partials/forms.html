@@ -68,9 +68,11 @@
 {{end}}
 
 {{define "fields-schedules"}}
-<div class="hint">Pick a day and a clock time (server timezone above). These cover the whole PostgreSQL server.</div>
+{{$full := .PgBackRest.FullSchedule}}{{$diff := .PgBackRest.DiffSchedule}}{{$keep := .PgBackRest.RetentionDays}}
+{{if .IsMySQL}}{{$full = .MySQL.FullSchedule}}{{$diff = .MySQL.DiffSchedule}}{{$keep = .MySQL.RetentionDays}}{{end}}
+<div class="hint">Pick a day and a clock time (server timezone above). These cover the whole {{if .IsMySQL}}MySQL{{else}}PostgreSQL{{end}} server.</div>
 
-{{with $s := scheduleUI .PgBackRest.FullSchedule}}
+{{with $s := scheduleUI $full}}
 <label>Full backup</label>
 {{if $s.OK}}
 <div class="row">
@@ -85,7 +87,7 @@
 <div class="hint">Custom cron schedule.</div>
 {{end}}{{end}}
 
-{{with $s := scheduleUI .PgBackRest.DiffSchedule}}
+{{with $s := scheduleUI $diff}}
 <label>Differential backup</label>
 {{if $s.OK}}
 <div class="row">
@@ -116,8 +118,17 @@
 
 <div class="row">
   <div><label for="retention_days">Point-in-time retention (days)</label>
-    <input type="number" id="retention_days" name="retention_days" value="{{.PgBackRest.RetentionDays}}">
+    <input type="number" id="retention_days" name="retention_days" value="{{$keep}}">
     <div class="hint">You can restore to any moment in this window.</div></div>
+  {{if .IsMySQL}}
+  <div><label for="binlog_interval">Binlogs shipped</label>
+    <select id="binlog_interval" name="binlog_interval">
+      {{$cur := .MySQL.BinlogInterval.String}}
+      {{if not (hasBinlogPreset .MySQL.BinlogInterval)}}<option value="{{$cur}}" selected>Every {{$cur}} (current)</option>{{end}}
+      {{range binlogPresets}}<option value="{{.Value}}" {{if eq .Value $cur}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <div class="hint">At most this much recent work can be lost. Between 1m and 1h.</div></div>
+  {{else}}
   <div><label for="archive_timeout">WAL upload at least every</label>
     <select id="archive_timeout" name="archive_timeout">
       {{$cur := .PgBackRest.ArchiveTimeout.String}}
@@ -129,6 +140,7 @@
       {{end}}
     </select>
     <div class="hint">At most this much recent work can be lost. Between 1m and 24h.</div></div>
+  {{end}}
 </div>
 {{end}}
 

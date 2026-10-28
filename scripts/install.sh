@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Installs or upgrades liops on an Ubuntu server with PostgreSQL from PGDG:
+# Installs or upgrades liops on an Ubuntu server with PostgreSQL from PGDG (it installs
+# pgBackRest), or with MySQL 8.4 (it installs Percona XtraBackup 8.4):
 #
 #   curl -fsSL https://github.com/logisticinfotech/liops/releases/latest/download/install.sh | sudo bash
 #
@@ -9,7 +10,7 @@
 #   curl -fsSL https://github.com/logisticinfotech/liops/releases/download/v1.2.0/install.sh | sudo bash
 #
 # Re-running it upgrades the binary and restarts the service; the config, users and
-# backups are kept. It never restarts PostgreSQL.
+# backups are kept. It never restarts the database.
 #
 # For testing only: LIOPS_BINARY=/path/to/liops-linux-amd64 installs a local
 # build instead of downloading one (no checksum check).
@@ -47,13 +48,31 @@ case "$(uname -m)" in
     *) die "liops is built for x86_64 (amd64) only; this machine is $(uname -m)" ;;
 esac
 [ -d /run/systemd/system ] || die "liops needs systemd"
-command -v pg_lsclusters >/dev/null || die "PostgreSQL isn't installed (pg_lsclusters is missing). Install PostgreSQL 13 or newer from the PGDG repository first: https://www.postgresql.org/download/linux/ubuntu/"
-[ -n "$(pg_lsclusters --no-header 2>/dev/null)" ] || die "no PostgreSQL cluster found (pg_lsclusters shows none)"
 command -v curl >/dev/null || die "curl is missing (apt-get install curl)"
 
-# --- pgBackRest ---------------------------------------------------------------------
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
-if ! command -v pgbackrest >/dev/null; then
+# --- Which database -------------------------------------------------------------------
+
+engine=""
+if command -v pg_lsclusters >/dev/null && [ -n "$(pg_lsclusters --no-header 2>/dev/null)" ]; then
+    engine=postgres
+fi
+if command -v mysqld >/dev/null; then
+    if [ -n "$engine" ]; then
+        echo "Warning: both PostgreSQL and MySQL are installed. liops backs up one database server per machine," \
+            "and uses PostgreSQL here. For MySQL instead, set engine: mysql in /etc/liops/config.yaml before the setup wizard."
+    else
+        engine=mysql
+    fi
+fi
+[ -n "$engine" ] || die "neither PostgreSQL nor MySQL was found. Install one first: PostgreSQL 13 or newer from the PGDG repository (https://www.postgresql.org/download/linux/ubuntu/), or MySQL 8.4 (apt-get install mysql-server)"
+say "Database: $engine"
+
+# --- pgBackRest (PostgreSQL) ----------------------------------------------------------
+
+if [ "$engine" = postgres ] && ! command -v pgbackrest >/dev/null; then
     say "Installing pgBackRest from the PGDG repository"
     if ! grep -rqs "apt.postgresql.org" /etc/apt/sources.list /etc/apt/sources.list.d/; then
         [ -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ] ||
@@ -62,12 +81,28 @@ if ! command -v pgbackrest >/dev/null; then
     fi
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q pgbackrest
 fi
-say "pgBackRest: $(pgbackrest version)"
+[ "$engine" != postgres ] || say "pgBackRest: $(pgbackrest version)"
+
+# --- XtraBackup (MySQL) -----------------------------------------------------------------
+
+if [ "$engine" = mysql ]; then
+    mysqld_version=$(mysqld --version)
+    case "$mysqld_version" in
+        *" 8.4."*) ;;
+        *) die "liops backs up MySQL 8.4 (the LTS release), found: $mysqld_version" ;;
+    esac
+    if ! command -v xtrabackup >/dev/null; then
+        say "Installing Percona XtraBackup 8.4 from Percona's repository"
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q gnupg lsb-release
+        curl -fsSL --retry 3 -o "$tmp/percona-release.deb" https://repo.percona.com/apt/percona-release_latest.generic_all.deb
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$tmp/percona-release.deb"
+        percona-release enable pxb-84-lts release
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q percona-xtrabackup-84
+    fi
+    say "XtraBackup: $(xtrabackup --version 2>&1 | tail -1)"
+fi
 
 # --- The binary ---------------------------------------------------------------------
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
 
 if [ -n "${LIOPS_BINARY:-}" ]; then
     say "Installing the local build $LIOPS_BINARY (testing only)"
@@ -97,4 +132,4 @@ say "Installed $("$BIN" version)"
 
 # --- Service ------------------------------------------------------------------------
 
-"$BIN" install-system
+"$BIN" install-system --engine "$engine"

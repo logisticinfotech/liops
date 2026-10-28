@@ -219,7 +219,7 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
 | **M0. Engine split** | `cfg.BackupName()`, `jobs.Dumper`, shared `app/engines/dumps` (keys, streaming, retention). **Done** (October 2026). The `engine` setting moves to M1 and the layer-1 interface to M2, where a second implementation shapes them. | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
 | **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment. **Built** (October 2026); the integration test passed in an Ubuntu VM, see §10. | Dumps run, expire, and restore in the Docker test | 1 week |
 | **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md`. **Built** (October 2026); the restore test passed in an Ubuntu VM, see §10. | §7 passes in CI | 2 weeks |
-| **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |
+| **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL. **Built** (October 2026); passed in an Ubuntu VM, see §10. | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |
 
 ## 9. Risks and open questions
 
@@ -336,6 +336,21 @@ carry on from the backup's: it must use a new backup name, and setup refuses the
 The test then continues under a new name. The Docker mode skips the restore (MySQL is the
 container's main process, so it can't be stopped and swapped).
 
+**M3, installer and wizard (October 2026):** `install.sh` uses PostgreSQL when
+`pg_lsclusters` shows a cluster, otherwise MySQL when `mysqld` exists (it must be 8.4); for
+MySQL it installs XtraBackup 8.4 from Percona's repository and runs
+`liops install-system --engine mysql`, which starts a new config with `engine: mysql`. The
+wizard's first step on MySQL takes the backup name, the server name and, only if root needs
+one, root's password (used for that request to create liops's account, never stored). Apply
+checks the server and claims the backup name, then **waits for the user** with a "Turn on
+GTIDs now" button (and a root password field) if GTIDs are off, then takes the first backup
+and sends the email. The schedules form (wizard and Settings) edits `mysql.*` on MySQL, with
+a binlog interval instead of the WAL one. `make vm-test-mysql` now installs liops with the
+real `install.sh` in a VM that only has `mysql-server`, checks the service and the wizard,
+runs the integration test, then drives the wizard over HTTP (`test/wizard-mysql.sh`) from a
+new config to the first full backup: **all passed**. The wizard's GTID button is covered by
+the controller tests (`TestMySQLWizard`).
+
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
   a checksum-checked restore of every database, users and grants restored after the user
@@ -347,5 +362,3 @@ Not done yet:
   (`make integration-mysql`, CI job `testenv-mysql`) waits for its first CI run.
 - **Retention** (dumps, and MySQL base backups and binlogs) has only been tested with unit
   tests: it needs days to pass.
-- **The settings page and wizard** still show PostgreSQL fields; MySQL is configured by
-  editing `config.yaml` (M3).

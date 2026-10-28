@@ -64,7 +64,10 @@ func applyForm(cfg *config.Config, section string, f url.Values) error {
 		}
 		e.To = splitList(f.Get("to"))
 	case sectionSchedules:
-		p := &cfg.PgBackRest
+		full, diff, keep := &cfg.PgBackRest.FullSchedule, &cfg.PgBackRest.DiffSchedule, &cfg.PgBackRest.RetentionDays
+		if cfg.IsMySQL() {
+			full, diff, keep = &cfg.MySQL.FullSchedule, &cfg.MySQL.DiffSchedule, &cfg.MySQL.RetentionDays
+		}
 		readSchedule := func(prefix, fallbackField string, dest *string) {
 			if clock := text(prefix + "_time"); clock != "" {
 				days := text(prefix + "_days")
@@ -83,15 +86,19 @@ func applyForm(cfg *config.Config, section string, f url.Values) error {
 				*dest = v
 			}
 		}
-		readSchedule("full", "full_schedule", &p.FullSchedule)
-		readSchedule("diff", "diff_schedule", &p.DiffSchedule)
+		readSchedule("full", "full_schedule", full)
+		readSchedule("diff", "diff_schedule", diff)
 		readSchedule("report", "report_schedule", &cfg.Report.Schedule)
-		if d, err := time.ParseDuration(text("archive_timeout")); err != nil {
-			errs = append(errs, fmt.Errorf("archive_timeout: %q is not a duration (examples: 15m, 1h)", text("archive_timeout")))
-		} else {
-			p.ArchiveTimeout = config.Duration(d)
+		interval, dest := "archive_timeout", &cfg.PgBackRest.ArchiveTimeout
+		if cfg.IsMySQL() {
+			interval, dest = "binlog_interval", &cfg.MySQL.BinlogInterval
 		}
-		atoi("retention_days", &p.RetentionDays)
+		if d, err := time.ParseDuration(text(interval)); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %q is not a duration (examples: 5m, 1h)", interval, text(interval)))
+		} else {
+			*dest = config.Duration(d)
+		}
+		atoi("retention_days", keep)
 	case sectionDumps:
 		d := &cfg.Dumps
 		d.Enabled = checked("enabled")
@@ -122,12 +129,13 @@ func splitList(s string) []string {
 // wizard doesn't show errors for steps that come later.
 func sectionErrors(cfg *config.Config, section string) []string {
 	prefixes := map[string][]string{
-		sectionServer:    {"server."},
-		sectionStorage:   {"storage"},
-		sectionEmail:     {"email"},
-		sectionSchedules: {"pgbackrest.archive_timeout", "pgbackrest.retention_days", "pgbackrest.full_schedule", "pgbackrest.diff_schedule", "report."},
-		sectionDumps:     {"dumps.retention", "dumps.deleted", "dumps.concurrency"},
-		sectionLabels:    {"dumps.labels"},
+		sectionServer:  {"server."},
+		sectionStorage: {"storage"},
+		sectionEmail:   {"email"},
+		sectionSchedules: {"pgbackrest.archive_timeout", "pgbackrest.retention_days", "pgbackrest.full_schedule", "pgbackrest.diff_schedule", "report.",
+			"mysql.full_schedule", "mysql.diff_schedule", "mysql.retention_days", "mysql.binlog_interval"},
+		sectionDumps:  {"dumps.retention", "dumps.deleted", "dumps.concurrency"},
+		sectionLabels: {"dumps.labels"},
 	}[section]
 	return filterErrors(cfg, prefixes...)
 }

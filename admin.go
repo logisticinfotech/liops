@@ -139,8 +139,12 @@ func systemctl(args ...string) error {
 // again is how an upgrade restarts the service.
 func runInstallSystem(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("install-system", flag.ContinueOnError)
+	engine := flags.String("engine", "", "postgres or mysql: the database this server runs (install.sh detects it); only used for a new config")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *engine != "" && *engine != config.EnginePostgres && *engine != config.EngineMySQL {
+		return fmt.Errorf("--engine %q: expected %s or %s", *engine, config.EnginePostgres, config.EngineMySQL)
 	}
 	if err := requireRoot("liops install-system"); err != nil {
 		return err
@@ -153,6 +157,14 @@ func runInstallSystem(args []string, out io.Writer) error {
 			return err
 		}
 		if err := os.Chmod(d.path, d.mode); err != nil {
+			return err
+		}
+	}
+	// A new install starts the wizard with the right engine. An existing config is kept.
+	if _, err := os.Stat(config.DefaultPath); errors.Is(err, fs.ErrNotExist) && *engine != "" {
+		cfg := config.Default()
+		cfg.Engine = *engine
+		if err := cfg.Save(config.DefaultPath); err != nil {
 			return err
 		}
 	}

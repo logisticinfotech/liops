@@ -127,10 +127,24 @@ var ArchiveTimeoutPresets = []DayPreset{
 	{"12h", "Every 12 hours"},
 }
 
+// BinlogIntervalPresets are plain-language choices for mysql.binlog_interval.
+var BinlogIntervalPresets = []DayPreset{
+	{"1m", "Every minute"},
+	{"5m", "Every 5 minutes"},
+	{"15m", "Every 15 minutes"},
+	{"30m", "Every 30 minutes"},
+	{"1h", "Every hour"},
+}
+
 // HasArchiveTimeoutPreset reports whether d matches a preset value.
-func HasArchiveTimeoutPreset(d Duration) bool {
+func HasArchiveTimeoutPreset(d Duration) bool { return hasPreset(ArchiveTimeoutPresets, d) }
+
+// HasBinlogIntervalPreset reports whether d matches a preset value.
+func HasBinlogIntervalPreset(d Duration) bool { return hasPreset(BinlogIntervalPresets, d) }
+
+func hasPreset(presets []DayPreset, d Duration) bool {
 	s := d.String()
-	for _, p := range ArchiveTimeoutPresets {
+	for _, p := range presets {
 		if p.Value == s {
 			return true
 		}

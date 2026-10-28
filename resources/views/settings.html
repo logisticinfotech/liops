@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
 <h1>Settings</h1>
-<p class="muted">Saved settings are used straight away. pgBackRest's config is rewritten with them.</p>
+<p class="muted">Saved settings are used straight away.{{if not $.MySQL}} pgBackRest's config is rewritten with them.{{end}}</p>
 {{$errs := .Errors}}{{$res := .Result}}
 <form method="post" action="/settings/server" class="panel" id="server">
   <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Server</h2>

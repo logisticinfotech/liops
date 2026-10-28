@@ -5,7 +5,22 @@
   {{range .Task.Steps}}<li><span class="badge {{.Status}}">{{.Status}}</span> <strong>{{.Title}}</strong>{{if .Detail}}<pre>{{.Detail}}</pre>{{end}}</li>{{end}}
 </ul>
 {{if .Progress.Active}}{{template "progress" .Progress}}{{end}}
-{{if .Task.Restart}}
+{{if .Task.GTID}}
+<div class="panel">
+  <p><strong>Point-in-time backups need these MySQL settings changed:</strong></p>
+  <ul>{{range .Task.GTID}}<li><code>{{.}}</code></li>{{end}}</ul>
+  <p>They're changed in the running server: no restart, no downtime. They're also written to <code>{{$.Data.Cfg.MySQL.ConfFile}}</code>, so they survive a restart and a restore.</p>
+  <p class="muted">With <code>enforce_gtid_consistency</code> on, MySQL refuses the few statements that GTIDs can't log safely: mostly writing to a MyISAM table and an InnoDB table in one transaction, and <code>CREATE TABLE … SELECT</code> into a MyISAM table. Apps that only use InnoDB aren't affected.{{if .Task.NonInnoDB}} <strong>This server has {{.Task.NonInnoDB}} table(s) that aren't InnoDB: check how your app writes to them first.</strong>{{end}}</p>
+  <form method="post" action="/setup/apply/gtid">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label for="root_password">MySQL root password (only if root needs one)</label>
+    <input type="password" id="root_password" name="root_password" autocomplete="off">
+    <div class="hint">Changing these settings needs MySQL's root, once. The password is never stored.</div>
+    <div class="actions"><button data-confirm="Turn on GTIDs in MySQL now?">Turn on GTIDs now</button></div>
+  </form>
+  <p class="muted">Or make the change later from the command line: <code>sudo liops setup --enable-gtid</code>, then come back.</p>
+</div>
+{{else if .Task.Restart}}
 <div class="panel">
   <p><strong>PostgreSQL needs one restart</strong> to turn on WAL archiving. Connections drop for a few seconds.</p>
   <form method="post" action="/setup/apply/restart" class="actions">
