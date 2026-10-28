@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end test of MySQL support (docs/PLAN-mysql.md, M1) in the Docker test environment:
+# End-to-end test of MySQL support (docs/PLAN-mysql.md, M1):
 #   setup (root through the socket) → dumps → report → restore every database from its
 #   dump and compare checksums → restore users and grants → a dropped database is noticed
 #   → the UI → the emails → setup again when root needs a password.
 #
-# Builds liops for the Docker host's architecture and copies it into the mysql container.
+#   ./test/integration-mysql.sh            in the Docker test environment (CI). Builds liops
+#                                          for the Docker host and copies it into the container.
+#   sudo ./integration-mysql.sh --local    on this machine: a throwaway Ubuntu server or VM
+#                                          with mysql-server installed (docs/development.md).
+#       It installs $LIOPS_BIN as /usr/local/bin/liops, and uses the S3 server, SMTP server
+#       and Mailpit API in $LIOPS_TEST_S3, $LIOPS_TEST_SMTP and $LIOPS_TEST_MAILPIT. It changes
+#       MySQL (databases, users, root's password): never run it on a real server.
 set -euo pipefail
 cd "$(dirname "$0")"
 
+mode=docker
+if [ "${1:-}" = --local ]; then mode=local; fi
+s3=${LIOPS_TEST_S3:-minio:9000}
+smtp=${LIOPS_TEST_SMTP:-mailpit:1025}
+mailpit=${LIOPS_TEST_MAILPIT:-http://mailpit:8025}
+
 compose() { docker compose -f compose.yaml --profile mysql "$@"; }
-my() { compose exec -T mysql "$@"; }
+if [ "$mode" = local ]; then
+    my() { "$@"; }
+else
+    my() { compose exec -T mysql "$@"; }
+fi
 sql() { my mysql -N -B "$@"; }
 step() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -21,23 +37,30 @@ wait_mysql() {
         if my mysqladmin ping --silent 2>/dev/null; then return 0; fi
         sleep 1
     done
-    compose logs mysql >&2
+    if [ "$mode" = docker ]; then compose logs mysql >&2; fi
     fail "MySQL did not start"
 }
 
-step "Build liops"
-arch=$(docker version --format '{{.Server.Arch}}')
-(cd .. && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o test/.liops-linux .)
+if [ "$mode" = local ]; then
+    step "Install liops"
+    [ "$(id -u)" = 0 ] || fail "--local runs as root (sudo)"
+    install -m 755 "${LIOPS_BIN:?set LIOPS_BIN to a linux build of liops}" /usr/local/bin/liops
+    wait_mysql
+else
+    step "Build liops"
+    arch=$(docker version --format '{{.Server.Arch}}')
+    (cd .. && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o test/.liops-linux .)
 
-step "Start the test environment"
-compose up -d --build mysql
-wait_mysql
+    step "Start the test environment"
+    compose up -d --build mysql
+    wait_mysql
+    compose cp .liops-linux mysql:/usr/local/bin/liops
+    my chmod 755 /usr/local/bin/liops
+fi
 sql -e "SELECT VERSION()"
-compose cp .liops-linux mysql:/usr/local/bin/liops
-my chmod 755 /usr/local/bin/liops
 
 step "Write the config"
-my sh -c 'install -d -m 700 /etc/liops && umask 077 && cat > /etc/liops/config.yaml' <<'YAML'
+my sh -c 'install -d -m 700 /etc/liops && umask 077 && cat > /etc/liops/config.yaml' <<YAML
 engine: mysql
 server:
   name: test-mysql
@@ -51,7 +74,7 @@ dumps:
 storage:
   type: s3
   s3:
-    endpoint: minio:9000
+    endpoint: $s3
     region: us-east-1
     bucket: liops-test
     access_key_id: liops-test
@@ -59,8 +82,8 @@ storage:
     path_style: true
     verify_tls: true
 email:
-  smtp_host: mailpit
-  smtp_port: 1025
+  smtp_host: ${smtp%:*}
+  smtp_port: ${smtp##*:}
   tls: starttls
   username: test
   password: test
@@ -168,7 +191,7 @@ grep -q "sudo mysql" <<<"$page" || fail "the database page should show MySQL res
 my pkill -f "liops serve" || true
 
 step "Emails"
-subjects=$(my curl -fsS http://mailpit:8025/api/v1/messages | grep -o '"Subject":"[^"]*"' || true)
+subjects=$(my curl -fsS "$mailpit/api/v1/messages" | grep -o '"Subject":"[^"]*"' || true)
 echo "$subjects"
 grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
 grep -q "database no longer found: shop-2" <<<"$subjects" || fail "no deleted-database email"
@@ -183,6 +206,6 @@ out=$(printf '%s\n' 'Root#pass "w0rd' | my liops setup --mysql-root-password-std
 grep -q "Setup is complete" <<<"$out" || fail "setup with root's password did not complete"
 my liops run dumps
 
-rm -f .liops-linux
+if [ "$mode" = docker ]; then rm -f .liops-linux; fi
 echo
 echo "MySQL integration test passed."

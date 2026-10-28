@@ -213,7 +213,7 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
 | Phase | Deliverable | Done when | Estimate |
 |-------|-------------|-----------|----------|
 | **M0. Engine split** | `cfg.BackupName()`, `jobs.Dumper`, shared `app/engines/dumps` (keys, streaming, retention). **Done** (October 2026). The `engine` setting moves to M1 and the layer-1 interface to M2, where a second implementation shapes them. | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
-| **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment. **Built** (October 2026); the Docker test waits for its first CI run, see §10. | Dumps run, expire, and restore in the Docker test | 1 week |
+| **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment. **Built** (October 2026); the integration test passed in an Ubuntu VM, see §10. | Dumps run, expire, and restore in the Docker test | 1 week |
 | **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md` | §7 passes in CI | 2 weeks |
 | **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |
 
@@ -262,13 +262,13 @@ names the default role, which may not exist yet on a fresh server, so default ro
 now set after all accounts and grants (`SET DEFAULT ROLE`).
 
 Not done yet:
-- **The Docker test has been written but hasn't run yet.** `test/integration-mysql.sh`
-  (`make integration-mysql`, CI job `testenv-mysql`) covers Ubuntu 26.04's `mysql-server`
-  (root by socket), setup, dumps, a checksum-checked restore of every database, users and
-  grants restored after the user and role were dropped, a dropped database noticed, the
-  UI, the emails, and setup again once root has a password. Its SQL and checks were run
-  against a local MySQL 8.4.13, but the script hasn't run in Docker: it needs its first CI
-  run (no Docker on the machine it was written on).
+- **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
+  a checksum-checked restore of every database, users and grants restored after the user
+  and role were dropped, a dropped database noticed, the UI, the emails, and setup again
+  once root has a password. **It passed** with `--local` in an Ubuntu 26.04 Multipass VM
+  on Ubuntu's own `mysql-server` (8.4.11, root by `auth_socket`) — the way the servers
+  install it — with MinIO and Mailpit on the Mac (October 2026). Its default Docker mode
+  (`make integration-mysql`, CI job `testenv-mysql`) waits for its first CI run.
 - **Retention** has only been tested with unit tests (it's the shared PostgreSQL code).
 - **The settings page and wizard** still show PostgreSQL fields; MySQL is configured by
   editing `config.yaml` (M3).
