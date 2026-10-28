@@ -25,7 +25,7 @@ restoring from the UI (same rule as PLAN.md §2).
 | Layer 1 shape | Weekly full, nightly differential (incremental from the last *full*, so a restore is always full + at most one diff), plus **binlog shipping** for the moments in between. |
 | Who does layer 1 | **liops itself.** There's no pgBackRest for MySQL, so liops writes the base backups, binlogs, manifests and retention. This is the biggest difference from the PostgreSQL side. |
 | Recovery point | Binlogs are shipped every `binlog_interval` (default **5 minutes**, configurable 1m–1h). Worst case you lose that much on a total loss of the server. Zero-loss streaming is a later option (§9). |
-| GTIDs | **Required** (`gtid_mode=ON`, `enforce_gtid_consistency=ON`). Replay then skips transactions the base backup already has, and a bad transaction (e.g. an accidental `DROP TABLE`) can be skipped by its GTID. Both can be turned on **without a restart**. |
+| GTIDs | **Required** (`gtid_mode=ON`, `enforce_gtid_consistency=ON`). Replay then skips transactions the base backup already has, and a bad transaction (e.g. an accidental `DROP TABLE`) can be skipped by its GTID. Both can be turned on **without a restart**, but **setup asks first** (decided October 2026), like the PostgreSQL restart: `enforce_gtid_consistency` rejects a few kinds of statement an app might use, so a person decides when. |
 | Layer 2 tool | `mysqldump --single-transaction`, gzipped in Go (standard library), streamed to storage like `pg_dump` today. |
 | MySQL login | A dedicated MySQL user `liops@localhost` with only the privileges it needs. Its password is kept in `/etc/liops/mysql.cnf` (mode 0600, root) and passed with `--defaults-extra-file`, never on a command line. |
 | Restores | Manual, following a runbook (`docs/restore-mysql.md`). A `liops` helper downloads and prepares the files into an empty directory and prints the remaining commands. It never touches the live server. |
@@ -123,7 +123,11 @@ xtrabackup --defaults-extra-file=/etc/liops/mysql.cnf --backup \
    `--prepare --apply-log-only` (full), `--prepare --incremental-dir` (diff), `--prepare`.
 3. Prints the rest, filled in, for a person to run: stop MySQL, move the old datadir
    aside, `xtrabackup --copy-back`, `chown -R mysql:mysql`, start MySQL, then
-   `mysqlbinlog --start-position=<from the manifest> --stop-datetime="<target>" binlog.* | mysql`.
+   `mysqlbinlog --start-position=<from the manifest> --stop-datetime="<target>" <first binlog>`
+   followed by the later binlogs without `--start-position`, piped into `mysql`.
+   On Ubuntu the restore goes **in place** of `/var/lib/mysql`: the `mysqld` AppArmor profile
+   only allows the socket names `mysqld.sock`/`mysqlx.sock`, so a second server next to the
+   live one can't start without changing AppArmor (found in M2's spike).
    To undo one bad statement instead of stopping before it, the runbook shows
    `--exclude-gtids=<gtid of the DROP>`.
 
@@ -137,7 +141,7 @@ Checked by setup, and changed only after asking (like the PostgreSQL restart tod
 |---------|--------|----------|
 | `log_bin` | ON (8.4 default) | yes if it's off |
 | `binlog_format` | ROW (8.4 default) | no |
-| `gtid_mode`, `enforce_gtid_consistency` | ON | **no**: the documented online steps (`OFF_PERMISSIVE` → `ON_PERMISSIVE` → `ON`), with `SET PERSIST` |
+| `gtid_mode`, `enforce_gtid_consistency` | ON | **no**: the documented online steps (`OFF_PERMISSIVE` → `ON_PERMISSIVE` → `ON`) with `SET GLOBAL`, **and** written to `/etc/mysql/mysql.conf.d/zz-liops.cnf`. Not `SET PERSIST` alone: it saves to `mysqld-auto.cnf` in the data directory, which a restored backup doesn't have (found in M2's spike), so a restored server would come up with GTIDs off and replay would fail. |
 | `binlog_expire_logs_seconds` | ≥ 604800 (7 days) | no |
 | `sync_binlog`, `innodb_flush_log_at_trx_commit` | 1 (8.4 defaults) | no; warn only |
 | Storage engine | InnoDB for all user tables; warn about MyISAM (it's locked during backup and isn't crash-safe) | — |
@@ -260,6 +264,21 @@ procedure, blobs, Unicode), and restores. Every table checksum matched, both nex
 the original and on a fresh server. That test found one bug, now fixed: `SHOW CREATE USER`
 names the default role, which may not exist yet on a fresh server, so default roles are
 now set after all accounts and grants (`SET DEFAULT ROLE`).
+
+**M2 spike (October 2026)**, by hand in an Ubuntu 26.04 VM with Ubuntu's MySQL 8.4.11, before
+any M2 code:
+- Percona's apt repository has `percona-xtrabackup-84` for 26.04 (`resolute`, arm64 too):
+  `percona-release enable pxb-84-lts release`. XtraBackup **8.4.0-7 backs up MySQL 8.4.11**
+  (it doesn't refuse the newer 8.4 server). Streamed `--compress=zstd` full and
+  `--incremental-lsn` backups work; `--extra-lsndir` gives `to_lsn` and the binlog file,
+  position and GTID set.
+- GTIDs turn on online with `SET GLOBAL` steps, no restart, in seconds.
+- Full chain proven: full + incremental prepared, swapped in for `/var/lib/mysql`, then
+  binlogs replayed from the incremental's position with `--stop-datetime`: every row up to
+  the target time, nothing after (the `DROP TABLE` was skipped). Replaying the same binlogs
+  again changed nothing (GTIDs skip what's applied).
+- Two findings now in this plan: GTID settings must go in a `mysql.conf.d` file, not only
+  `SET PERSIST` (§4), and restores on Ubuntu go in place because of AppArmor (§3.5).
 
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
