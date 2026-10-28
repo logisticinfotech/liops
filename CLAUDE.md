@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 liops is a single static Go binary that runs on a PostgreSQL server (as root, under systemd)
 and manages two backup layers to S3-compatible storage: pgBackRest point-in-time backups
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
-UI and SMTP emails. MySQL 8.4 nightly dumps are built (`engine: mysql`, `docs/PLAN-mysql.md`);
-MySQL point-in-time backups and lightweight per-server monitoring are planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
+plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2); its wizard and installer
+are still to come. Lightweight per-server monitoring is planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -89,7 +90,9 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   `Runner.Backrest` (pgBackRest) or `Runner.XtraBackup`, never both. Check `cfg.IsMySQL()`
   before anything pgBackRest- or WAL-specific; pages get `page.MySQL`. MySQL base backups
   are folders under `xtrabackup/base/` whose `backup.json` is written last (no manifest =
-  failed attempt). MySQL point-in-time is still being built (PLAN-mysql.md §10).
+  failed attempt); binlogs are shipped by the `binlogs` job (own lock, not in the job
+history). `liops restore-files` prepares a restore and prints the commands; it never
+touches the live server.
   MySQL programs log in with `--defaults-extra-file` (`mysql.Instance.Command`), never with
   a password on the command line.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac

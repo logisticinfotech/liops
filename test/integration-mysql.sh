@@ -135,8 +135,8 @@ echo "$out"
 grep -q "Setup is complete" <<<"$out" || fail "setup did not complete"
 [ "$(sql -e 'SELECT @@gtid_mode, @@enforce_gtid_consistency')" = "$(printf 'ON\tON')" ] || fail "GTIDs aren't on"
 my grep -q "^gtid_mode = ON" /etc/mysql/mysql.conf.d/zz-liops.cnf || fail "the GTID settings weren't written to mysql.conf.d"
-mode=$(my stat -c %a /etc/liops/mysql.cnf)
-[ "$mode" = 600 ] || fail "/etc/liops/mysql.cnf has mode $mode, expected 600"
+perms=$(my stat -c %a /etc/liops/mysql.cnf)
+[ "$perms" = 600 ] || fail "/etc/liops/mysql.cnf has mode $perms, expected 600"
 my liops setup | grep -q "Setup is complete" || fail "setup should be safe to run again"
 
 step "Full backup + dumps, then a diff + dumps (XtraBackup, streamed)"
@@ -235,6 +235,45 @@ subjects=$(my curl -fsS "$mailpit/api/v1/messages" | grep -o '"Subject":"[^"]*"'
 echo "$subjects"
 grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
 grep -q "database no longer found: shop-2" <<<"$subjects" || fail "no deleted-database email"
+
+step "Point-in-time restore to just before a DROP TABLE (liops restore-files, then its printed commands)"
+if [ "$mode" = local ]; then
+    sql -e "INSERT INTO app.orders (note) VALUES ('the last row before the moment')"
+    want=$(sql -e "CHECKSUM TABLE app.orders" | awk '{print $2}')
+    sleep 2
+    moment=$(date -u '+%Y-%m-%d %H:%M:%S')
+    sleep 2
+    sql -e "DROP TABLE app.orders"
+    my liops run binlogs
+    out=$(my liops restore-files --to "$moment" --dir /restore/new)
+    echo "$out"
+    # Run the printed commands, steps 1 to 3, as a person would.
+    cmds=$(sed -n '/^# 1\./,/mysqlbinlog/p' <<<"$out" | grep -v '^#' | grep -v '^$')
+    grep -q "mysqlbinlog --start-position=" <<<"$cmds" || fail "restore-files printed no binlog replay"
+    while IFS= read -r line; do
+        case "$line" in
+        # The test runs liops by hand, not as a service.
+        "sudo systemctl stop liops mysql") systemctl stop mysql ;;
+        *) bash -c "$line" || fail "a printed restore command failed: $line" ;;
+        esac
+    done <<<"$cmds"
+    [ "$(sql -e "CHECKSUM TABLE app.orders" | awk '{print $2}')" = "$want" ] || fail "app.orders isn't as it was at $moment"
+    sql -e "SELECT note FROM app.orders" | grep -q "the last row before the moment" || fail "the last row before the moment is missing"
+    [ "$(sql -e 'SELECT @@gtid_mode')" = ON ] || fail "GTIDs should still be on after the restore (zz-liops.cnf)"
+    [ -d /var/lib/mysql.before-restore ] || fail "the old data should be kept aside"
+    echo "point-in-time restore OK (app.orders is back, exactly as at $moment)"
+
+    # Runbook step 4: the restored server (a new server_uuid, its binlogs counting on from
+    # the backup's) gets a new backup name, then setup and a full backup.
+    if out=$(my liops setup 2>&1); then fail "setup should refuse the old backup name after a restore"; fi
+    grep -q "already used" <<<"$out" || fail "setup should explain why it refuses the old name, got: $out"
+    my sed -i 's/^  backup_name: test-mysql$/  backup_name: test-mysql-r2/' /etc/liops/config.yaml
+    my liops setup | grep -q "Setup is complete" || fail "setup under the new backup name did not complete"
+    my liops run full
+    echo "after the restore, backups continue under the new name test-mysql-r2"
+else
+    echo "skipped in Docker: MySQL is the container's main process, so it can't be stopped and swapped (make vm-test-mysql runs it)"
+fi
 
 step "Setup when MySQL's root needs a password"
 sql -e "DROP USER 'liops'@'localhost'"

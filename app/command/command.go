@@ -29,6 +29,8 @@ type Cmd struct {
 	// User runs the program as this OS user (through runuser) when it isn't the
 	// current user. Database commands run as the postgres user.
 	User string
+	// Stdin, if set, is the program's standard input (e.g. a backup streamed from storage).
+	Stdin io.Reader
 }
 
 // String returns the command line, for logs.
@@ -105,6 +107,7 @@ func build(ctx context.Context, c Cmd) *exec.Cmd {
 		name, args = "runuser", append([]string{"-u", c.User, "--", c.Name}, c.Args...)
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = c.Stdin
 	// On cancellation ask nicely first (runuser passes SIGTERM on), then kill.
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 30 * time.Second

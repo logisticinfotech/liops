@@ -218,7 +218,7 @@ Then a week on a test VM with real traffic, and one restore drill on it, before 
 |-------|-------------|-----------|----------|
 | **M0. Engine split** | `cfg.BackupName()`, `jobs.Dumper`, shared `app/engines/dumps` (keys, streaming, retention). **Done** (October 2026). The `engine` setting moves to M1 and the layer-1 interface to M2, where a second implementation shapes them. | All existing tests pass; PostgreSQL output byte-for-byte unchanged | 2–3 days |
 | **M1. MySQL dumps** | `engines/mysql`, `engines/mysqldump`, users and grants, MySQL settings in config, CLI `setup`, Docker test environment. **Built** (October 2026); the integration test passed in an Ubuntu VM, see §10. | Dumps run, expire, and restore in the Docker test | 1 week |
-| **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md` | §7 passes in CI | 2 weeks |
+| **M2. Point-in-time** | XtraBackup full/diff streaming, manifests, binlog shipping + gap check, retention, report checks, `restore-files`, `docs/restore-mysql.md`. **Built** (October 2026); the restore test passed in an Ubuntu VM, see §10. | §7 passes in CI | 2 weeks |
 | **M3. UI, wizard, installer** | Engine-aware wizard, pages and emails, `install.sh` for MySQL | A fresh Ubuntu VM with MySQL 8.4 goes from nothing to its first backup with the installer and wizard | 1 week |
 
 ## 9. Risks and open questions
@@ -318,6 +318,23 @@ oldest backup's end) and "newest change saved" (the last binlog run that worked)
 a missed scheduled backup, failing or stale binlog shipping (over 3 intervals), and, in the
 daily report, setup's checks again (XtraBackup matching MySQL after an upgrade, GTIDs still
 on). The backups page lists MySQL's base backups and binlogs.
+
+**M2 steps 5 and 6, restore (October 2026):** `liops restore-files --dir DIR [--to TIME]`
+picks the newest full and diff finished by the moment and the shipped binlogs from that
+backup's position on (`xtrabackup.PlanRestore`, pure; it refuses a moment before the oldest
+backup and a binlog gap), streams each backup from storage into `xbstream` (commands gained
+`Stdin`), decompresses and prepares it, downloads the binlogs, and prints the commands that
+finish the restore, filled in: stop, move `/var/lib/mysql` aside, `--copy-back`, start, one
+`mysqlbinlog --start-position … --stop-datetime …` (in the server's local time) piped into
+`mysql`, then a new backup name. Runbook: [restore-mysql.md](restore-mysql.md).
+The integration test (`--local`, i.e. `make vm-test-mysql`) inserts a row, notes the moment,
+drops the table, ships binlogs, runs `restore-files` and then the printed commands as
+printed: the table comes back with the same checksum as at the moment. **It passed.**
+Found along the way: a restored server gets a new `server_uuid` (the backup has no
+`auto.cnf`), and XtraBackup copies the open binlog, so the restored server's binlog numbers
+carry on from the backup's: it must use a new backup name, and setup refuses the old one.
+The test then continues under a new name. The Docker mode skips the restore (MySQL is the
+container's main process, so it can't be stopped and swapped).
 
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,

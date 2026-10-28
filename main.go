@@ -32,6 +32,7 @@ Usage:
   liops serve           [flags]                     run the scheduler and the UI (the systemd service runs this)
   liops logs            [-n LINES] [-f]             show the log
   liops dumps list [DB] | url KEY                   list stored dumps; print a 10-minute download link
+  liops restore-files   --dir DIR [--to TIME]       MySQL: prepare a point-in-time restore in DIR (docs/restore-mysql.md)
   liops install-system                              install the systemd service (install.sh runs this)
   liops uninstall       [--purge] [--yes]           remove liops; backups in storage are kept
 
@@ -83,6 +84,8 @@ func run(args []string, out io.Writer) error {
 			return errors.New("dumps: expected list or url")
 		}
 		return runDumps(args[1], args[2:], out)
+	case "restore-files":
+		return runRestoreFiles(args[1:], out)
 	case "install-system":
 		return runInstallSystem(args[1:], out)
 	case "uninstall":
