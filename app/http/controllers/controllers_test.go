@@ -23,6 +23,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/service"
@@ -100,6 +101,7 @@ func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 			LockPath: filepath.Join(dir, "job.lock"), Now: time.Now, Log: io.Discard,
 		}
 		if cfg.IsMySQL() {
+			r.XtraBackup = xtrabackup.New(cfg, fake, h.store, filepath.Join(dir, "xtrabackup"))
 			r.Dumps = mysqldump.New(cfg, fake, h.store)
 		} else {
 			r.Backrest, r.Dumps = pgbackrest.New(cfg, fake), pgdump.New(cfg, fake, h.store)
@@ -338,21 +340,29 @@ func TestMySQLPages(t *testing.T) {
 	cfg.MySQL.BackupName = "shop-db-1"
 	h := newHarness(t, cfg, true)
 	h.store.Add(mysqldump.Key("app", time.Now().Add(-time.Hour)), []byte("gzipped SQL"), time.Now())
+	stop := time.Now().Add(-2 * time.Hour)
+	manifest := fmt.Sprintf(`{"label":"2026-10-25T013000Z-full","type":"full","start":%q,"stop":%q,"to_lsn":5000,"binlog_file":"binlog.000006","binlog_pos":158,"size":4900000}`,
+		stop.Add(-4*time.Second).Format(time.RFC3339), stop.Format(time.RFC3339))
+	h.store.Add(xtrabackup.Prefix+"2026-10-25T013000Z-full/"+xtrabackup.ManifestFile, []byte(manifest), time.Now())
 
 	code, _, body := h.get("/")
 	if code != 200 || !strings.Contains(body, "Database dumps") {
 		t.Fatalf("dashboard: %d\n%s", code, body)
 	}
-	for _, unwanted := range []string{"Last full backup", "Point-in-time backups", "pgBackRest"} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("the MySQL dashboard mustn't show %q", unwanted)
+	for _, want := range []string{"Last full backup", "4.7 MB stored", "Newest change saved (binlogs)", "Can restore back to"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the MySQL dashboard should show %q", want)
 		}
+	}
+	if strings.Contains(body, "pgBackRest") {
+		t.Error("the MySQL dashboard mustn't mention pgBackRest")
 	}
 	_, _, body = h.get("/databases/app")
 	if !strings.Contains(body, "gunzip -c /tmp/liops-restore.sql.gz | sudo mysql") || strings.Contains(body, "pg_restore") {
 		t.Errorf("database page should show MySQL restore commands:\n%s", body)
 	}
-	if _, _, body := h.get("/backups"); !strings.Contains(body, "later version") {
-		t.Errorf("backups page on MySQL:\n%s", body)
+	code, _, body = h.get("/backups")
+	if code != 200 || !strings.Contains(body, "2026-10-25T013000Z-full") || !strings.Contains(body, "binlog.000006:158") {
+		t.Errorf("backups page on MySQL: %d\n%s", code, body)
 	}
 }

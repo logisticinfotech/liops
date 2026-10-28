@@ -16,7 +16,7 @@
   {{if not .Wizard}}
   <nav>
     <a href="/" {{if eq .Nav "dashboard"}}class="active"{{end}}>Dashboard</a>
-    {{if not .MySQL}}<a href="/backups" {{if eq .Nav "backups"}}class="active"{{end}}>Point-in-time backups</a>{{end}}
+    <a href="/backups" {{if eq .Nav "backups"}}class="active"{{end}}>Point-in-time backups</a>
     <a href="/databases" {{if eq .Nav "databases"}}class="active"{{end}}>Databases</a>
     <a href="/jobs" {{if eq .Nav "jobs"}}class="active"{{end}}>Jobs</a>
     <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>Settings</a>

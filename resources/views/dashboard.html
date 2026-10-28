@@ -8,17 +8,15 @@
   </ul>{{end}}</div>
 </div>
 <div class="grid">
-  {{if not $.MySQL}}
   <div class="stat"><div class="label">Can restore back to</div><div class="value">{{date .Restore}}</div><div class="sub">any moment since then</div></div>
-  <div class="stat"><div class="label">Newest change saved (WAL)</div><div class="value">{{when .LastWAL}}</div></div>
+  <div class="stat"><div class="label">Newest change saved ({{if $.MySQL}}binlogs{{else}}WAL{{end}})</div><div class="value">{{when .LastWAL}}</div></div>
   <div class="stat"><div class="label">Last full backup</div>
-    {{with .LastFull}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{bytes .Size}} database</div>{{else}}<div class="value">none yet</div>{{end}}</div>
+    {{with .LastFull}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{if .Size}}{{bytes .Size}} database{{else}}{{bytes .Stored}} stored{{end}}</div>{{else}}<div class="value">none yet</div>{{end}}</div>
   <div class="stat"><div class="label">Last differential backup</div>
-    {{with .LastDiff}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{bytes .RepoSize}} stored</div>{{else}}<div class="value">none yet</div>{{end}}</div>
-  {{end}}
+    {{with .LastDiff}}<div class="value">{{when .Stop}}</div><div class="sub">{{duration .Duration}} · {{bytes .Stored}} stored</div>{{else}}<div class="value">none yet</div>{{end}}</div>
   <div class="stat"><div class="label">Database dumps</div>
     {{with .Dumps}}<div class="value">{{$.Data.DumpsOK}} of {{len .Dumps}} databases</div><div class="sub">{{when .Start}} · {{bytes .Size}}</div>{{else}}<div class="value">none yet</div>{{end}}</div>
-  <div class="stat"><div class="label">Storage used</div><div class="value">{{bytes .Storage}}</div><div class="sub">{{if $.MySQL}}all dumps{{else}}both layers{{end}}</div></div>
+  <div class="stat"><div class="label">Storage used</div><div class="value">{{bytes .Storage}}</div><div class="sub">both layers</div></div>
   <div class="stat"><div class="label">Server disk</div><div class="value">{{if ge .Disk 0}}{{.Disk}}% used{{else}}unknown{{end}}</div></div>
 </div>
 <h2>Next scheduled jobs</h2>

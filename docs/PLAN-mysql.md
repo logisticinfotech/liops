@@ -308,6 +308,17 @@ that is neither stored nor on the server is a gap: one email per gap, then a ful
 job history; the last good run is state meta `binlog_shipped_at`. In the VM test, a row
 written after the diff was found, with `mysqlbinlog`, in the shipped binlogs.
 
+**M2 step 4, retention and health (October 2026):** after each successful MySQL backup,
+`xtrabackup.PlanRetention` (pure) and `Apply` delete fulls older than `mysql.retention_days`
+except the newest one before the cutoff (so the whole window stays restorable), diffs with
+their full, binlogs older than the oldest kept backup's binlog file, and failed attempts
+older than a day. Manifests are deleted first. A failed cleanup emails but doesn't fail the
+backup. The daily report and dashboard show the last backup, "can restore back to" (the
+oldest backup's end) and "newest change saved" (the last binlog run that worked); they flag
+a missed scheduled backup, failing or stale binlog shipping (over 3 intervals), and, in the
+daily report, setup's checks again (XtraBackup matching MySQL after an upgrade, GTIDs still
+on). The backups page lists MySQL's base backups and binlogs.
+
 Not done yet:
 - **The integration test** `test/integration-mysql.sh` covers setup (root by socket), dumps,
   a checksum-checked restore of every database, users and grants restored after the user
@@ -317,6 +328,7 @@ Not done yet:
   install it — with MinIO and Mailpit on the Mac (October 2026). `make vm-test-mysql`
   does all of that in one command, from a fresh VM to cleanup. Its default Docker mode
   (`make integration-mysql`, CI job `testenv-mysql`) waits for its first CI run.
-- **Retention** has only been tested with unit tests (it's the shared PostgreSQL code).
+- **Retention** (dumps, and MySQL base backups and binlogs) has only been tested with unit
+  tests: it needs days to pass.
 - **The settings page and wizard** still show PostgreSQL fields; MySQL is configured by
   editing `config.yaml` (M3).

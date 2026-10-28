@@ -13,6 +13,7 @@ import (
 
 	"github.com/logisticinfotech/liops/app/engines/dumps"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -29,11 +30,33 @@ const (
 	HealthFailed    = "FAILED"
 )
 
+// lastBackup is a backup on the dashboard, from pgBackRest or XtraBackup.
+type lastBackup struct {
+	Stop     time.Time
+	Duration time.Duration
+	Size     int64 // the database's size; 0 if unknown (XtraBackup)
+	Stored   int64
+}
+
+func fromPgBackRest(b *pgbackrest.Backup) *lastBackup {
+	if b == nil {
+		return nil
+	}
+	return &lastBackup{Stop: b.Stop, Duration: b.Duration(), Size: b.Size, Stored: b.RepoSize}
+}
+
+func fromXtraBackup(m *xtrabackup.Manifest) *lastBackup {
+	if m == nil {
+		return nil
+	}
+	return &lastBackup{Stop: m.Stop, Duration: m.Duration(), Stored: m.Size}
+}
+
 type dashboardData struct {
 	Health     string
 	Problems   []string
-	LastFull   *pgbackrest.Backup
-	LastDiff   *pgbackrest.Backup
+	LastFull   *lastBackup
+	LastDiff   *lastBackup
 	Restore    time.Time
 	LastWAL    time.Time
 	Storage    int64
@@ -59,7 +82,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		Next:     s.Svc.Next(),
 	}
 	if h.Info != nil {
-		d.LastFull, d.LastDiff = h.Info.Last("full"), h.Info.Last("diff")
+		d.LastFull, d.LastDiff = fromPgBackRest(h.Info.Last("full")), fromPgBackRest(h.Info.Last("diff"))
+	}
+	if h.MySQLBackups != nil {
+		d.LastFull = fromXtraBackup(xtrabackup.Last(h.MySQLBackups, xtrabackup.Full))
+		d.LastDiff = fromXtraBackup(xtrabackup.Last(h.MySQLBackups, xtrabackup.Diff))
 	}
 
 	// FAILED when the newest backup run or the newest dumps run failed.
@@ -102,9 +129,18 @@ type backupsData struct {
 	Backups []pgbackrest.Backup // newest first
 }
 
+type mysqlBackupsData struct {
+	Name        string
+	Backups     []xtrabackup.Manifest // newest first
+	Binlogs     int
+	Shipped     time.Time // the last binlog shipping run that worked
+	Interval    time.Duration
+	RestoreFrom time.Time
+}
+
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
-	if s.Svc.Runner().Backrest == nil {
-		s.fail(w, r, errors.New("point-in-time backups for MySQL come in a later version; the nightly dumps are on the Databases page"))
+	if x := s.Svc.Runner().XtraBackup; x != nil {
+		s.mysqlBackups(w, r, x)
 		return
 	}
 	info, err := s.Svc.Runner().Backrest.Info(r.Context())
@@ -115,6 +151,29 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 	d := backupsData{Info: info, Backups: slices.Clone(info.Backups)}
 	slices.Reverse(d.Backups)
 	s.render(w, r, "backups", page{Title: "Point-in-time backups", Nav: "backups", Data: d})
+}
+
+func (s *Server) mysqlBackups(w http.ResponseWriter, r *http.Request, x *xtrabackup.Engine) {
+	list, err := x.Backups(r.Context())
+	if err != nil {
+		s.fail(w, r, errors.New("couldn't read the backup list: "+err.Error()))
+		return
+	}
+	binlogs, err := x.ShippedBinlogs(r.Context())
+	if err != nil {
+		s.fail(w, r, errors.New("couldn't list the shipped binlogs: "+err.Error()))
+		return
+	}
+	cfg := s.Svc.Config()
+	d := mysqlBackupsData{Name: cfg.BackupName(), Backups: slices.Clone(list), Binlogs: len(binlogs), Interval: time.Duration(cfg.MySQL.BinlogInterval)}
+	if len(list) > 0 {
+		d.RestoreFrom = list[0].Stop
+	}
+	if v, err := s.Svc.State.GetMeta(jobs.MetaBinlogShippedAt); err == nil {
+		d.Shipped, _ = time.Parse(time.RFC3339, v)
+	}
+	slices.Reverse(d.Backups)
+	s.render(w, r, "mysql_backups", page{Title: "Point-in-time backups", Nav: "backups", Data: d})
 }
 
 // dbRow is one database on the Databases page.

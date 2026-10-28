@@ -34,6 +34,7 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 	cfg.MySQL.BackupName = "shop-db-1"
 	cfg.MySQL.DataDir = t.TempDir()
 	w.binlogDir = t.TempDir()
+	w.mysqlSettings = "1\tROW\tON\tON\t2592000"
 	w.addBinlog("binlog.000003")
 
 	st, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -46,8 +47,16 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 	w.fake = &command.Fake{Handle: func(program string, c command.Cmd) ([]byte, error) {
 		query := c.Args[len(c.Args)-1]
 		switch {
+		case program == "xtrabackup" && slices.Contains(c.Args, "--version"):
+			return []byte("xtrabackup version 8.4.0-7 based on MySQL server 8.4.0 Linux (aarch64)\n"), nil
 		case program == "xtrabackup":
 			return fakeXtraBackup(c)
+		case program == "mysql" && strings.Contains(query, "VERSION()"):
+			return []byte("8.4.11-0ubuntu0.26.04.1\n"), nil
+		case program == "mysql" && strings.Contains(query, "@@log_bin,"):
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return []byte(w.mysqlSettings + "\n"), nil
 		case program == "mysqldump":
 			return []byte("-- MySQL dump of " + query + "\n"), nil
 		case program == "mysql" && strings.Contains(query, "information_schema.SCHEMATA"):
@@ -77,6 +86,7 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 		Now:        w.clock,
 		Log:        &w.log,
 	}
+	w.runner.XtraBackup.Now = w.clock
 	return w
 }
 
@@ -283,18 +293,73 @@ func TestMySQLFullThenDiff(t *testing.T) {
 
 func TestMySQLReport(t *testing.T) {
 	w := newMySQLWorld(t, "app")
-	if err := w.runner.Run(context.Background(), Dumps, Manual); err != nil {
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.runner.Run(context.Background(), Report, Manual); err != nil {
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.runner.Run(ctx, Report, Manual); err != nil {
 		t.Fatalf("report: %v\n%s", err, w.log.String())
 	}
 	if len(w.mail.Sent) != 1 {
 		t.Fatalf("emails = %v", w.subjects())
 	}
-	body := w.mail.Sent[0].Body
-	if !strings.Contains(w.mail.Sent[0].Subject, "backups healthy") || strings.Contains(body, "Point-in-time") {
-		t.Errorf("summary for a healthy MySQL server:\n%s\n%s", w.mail.Sent[0].Subject, body)
+	subject, body := w.mail.Sent[0].Subject, w.mail.Sent[0].Body
+	if !strings.Contains(subject, "backups healthy") {
+		t.Errorf("summary for a healthy MySQL server:\n%s\n%s", subject, body)
+	}
+	for _, want := range []string{"Point-in-time backup:  last full", "can restore back to", "Newest change saved:   today"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestMySQLReportFlagsProblems(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	// GTIDs were turned off by hand, and binlogs haven't been shipped for a while.
+	w.mysqlSettings = "1\tROW\tOFF\tON\t2592000"
+	w.write()
+	w.runner.Run(ctx, Binlogs, Scheduled)
+	w.advance(time.Hour)
+	w.runner.Run(ctx, Report, Manual)
+	body := w.mail.Sent[len(w.mail.Sent)-1].Body
+	for _, want := range []string{"gtid_mode: OFF → ON", "binlogs haven't been shipped since"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestMySQLRetentionAfterBackup(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	w.runner.Cfg.MySQL.RetentionDays = 7
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := w.runner.XtraBackup.Backups(ctx)
+	// Fulls 8 and 16 days later. At the last one, the full from day 8 is the newest one
+	// older than the 7-day window, so it's still needed; the one from day 0 isn't.
+	for range 2 {
+		w.advance(8 * 24 * time.Hour)
+		if err := w.runner.Run(ctx, Full, Manual); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, _ := w.runner.XtraBackup.Backups(ctx)
+	if len(list) != 2 || list[0].Label == old[0].Label {
+		t.Errorf("after retention: %+v", list)
+	}
+	if !strings.Contains(w.log.String(), "retention: deleted 1 old backup(s)") {
+		t.Errorf("log:\n%s", w.log.String())
 	}
 }
 

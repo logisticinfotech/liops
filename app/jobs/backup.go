@@ -124,6 +124,49 @@ func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *stat
 		note += " (against full " + m.Base + ")"
 	}
 	r.logf(typ, "%s", note)
+	if cleaned, err := r.mysqlRetention(ctx); err != nil {
+		// The backup itself worked: report the cleanup, but don't fail the run.
+		r.logf(typ, "deleting old backups and binlogs FAILED: %v", err)
+		note += "\ndeleting old backups and binlogs FAILED: " + err.Error()
+		subject, body := notify.FailureEmail(notify.Failure{
+			Server:   r.Server,
+			Headline: tonight(trigger) + "cleanup of old backups FAILED",
+			What:     "deleting backups and binlogs older than mysql.retention_days",
+			Safe:     "the " + backupName(m.Type) + " itself worked; old backups are just kept longer than they should be",
+			ToDo:     "check the details below; the next backup tries again",
+			Output:   errOutput(err),
+		})
+		r.send(ctx, typ, subject, body)
+	} else if cleaned != "" {
+		r.logf(typ, "%s", cleaned)
+		note += "\n" + cleaned
+	}
 	run.Output = note
 	return nil
+}
+
+// mysqlRetention deletes MySQL backups and binlogs older than mysql.retention_days
+// (xtrabackup.PlanRetention) and failed attempts. It returns what it deleted, for the log.
+func (r *Runner) mysqlRetention(ctx context.Context) (string, error) {
+	backups, err := r.XtraBackup.Backups(ctx)
+	if err != nil {
+		return "", err
+	}
+	incomplete, err := r.XtraBackup.Incomplete(ctx)
+	if err != nil {
+		return "", err
+	}
+	binlogs, err := r.XtraBackup.ShippedBinlogs(ctx)
+	if err != nil {
+		return "", err
+	}
+	plan := xtrabackup.PlanRetention(backups, incomplete, binlogs, r.now(), days(r.Cfg.MySQL.RetentionDays))
+	if plan.Empty() {
+		return "", nil
+	}
+	if err := r.XtraBackup.Apply(ctx, plan); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("retention: deleted %d old backup(s), %d failed attempt(s) and %d binlog(s)",
+		len(plan.Backups), len(plan.Incomplete), len(plan.Binlogs)), nil
 }

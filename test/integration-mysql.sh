@@ -215,7 +215,7 @@ out=$(my liops status)
 echo "$out"
 grep -q "shop-2 since" <<<"$out" || fail "shop-2 should be listed as no longer found"
 
-step "UI: the dashboard shows dumps and no point-in-time backups"
+step "UI: the dashboard and the backups page show the point-in-time backups"
 my sh -c 'nohup liops serve >/tmp/serve.log 2>&1 &'
 for _ in $(seq 1 30); do
     my curl -fsS -o /dev/null http://127.0.0.1:8899/static/app.css 2>/dev/null && break
@@ -223,7 +223,9 @@ for _ in $(seq 1 30); do
 done
 page=$(my curl -fsS http://127.0.0.1:8899/) || { my cat /tmp/serve.log; fail "the dashboard didn't load"; }
 grep -q "Database dumps" <<<"$page" || fail "the dashboard should show the dumps"
-if grep -q "Can restore back to" <<<"$page"; then fail "the MySQL dashboard mustn't offer point-in-time restores yet"; fi
+grep -q "Can restore back to" <<<"$page" || fail "the dashboard should show how far back a restore can go"
+page=$(my curl -fsS http://127.0.0.1:8899/backups) || fail "the backups page didn't load"
+grep -q -- "-full</td>" <<<"$page" || fail "the backups page should list the full backup"
 page=$(my curl -fsS http://127.0.0.1:8899/databases/app) || fail "the database page didn't load"
 grep -q "sudo mysql" <<<"$page" || fail "the database page should show MySQL restore commands"
 my pkill -f "liops serve" || true

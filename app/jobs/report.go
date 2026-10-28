@@ -14,7 +14,9 @@ import (
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
+	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
 )
 
@@ -24,8 +26,10 @@ const backupGrace = 6 * time.Hour
 // Health is the state of both backup layers, for the daily summary and the dashboard.
 type Health struct {
 	Summary notify.Summary
-	Info    *pgbackrest.Info // nil when pgBackRest couldn't be asked
-	Output  string           // details of the problems found
+	Info    *pgbackrest.Info // PostgreSQL; nil when pgBackRest couldn't be asked
+	// MySQLBackups are MySQL's complete base backups, oldest first.
+	MySQLBackups []xtrabackup.Manifest
+	Output       string // details of the problems found
 }
 
 // Health checks the backups. deep also runs pgBackRest check (which archives a WAL
@@ -33,7 +37,7 @@ type Health struct {
 // for every page view.
 func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	now := r.now()
-	h := Health{Summary: notify.Summary{Server: r.Server, Now: now, PointInTime: r.Backrest != nil, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}}
+	h := Health{Summary: notify.Summary{Server: r.Server, Now: now, PointInTime: r.Backrest != nil || r.XtraBackup != nil, DumpsEnabled: r.Cfg.Dumps.Enabled, DiskUsedPct: -1}}
 	s := &h.Summary
 	var output strings.Builder
 	problem := func(format string, args ...any) {
@@ -83,6 +87,10 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 		}
 	}
 
+	if r.XtraBackup != nil {
+		r.mysqlHealth(ctx, deep, &h, problem)
+	}
+
 	if r.Cfg.Dumps.Enabled {
 		r.summarizeDumps(s, now, problem)
 	}
@@ -111,6 +119,57 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	}
 	h.Output = output.String()
 	return h
+}
+
+// mysqlHealth checks MySQL's layer 1: the base backups, binlog shipping and, when deep,
+// that the server is still ready for them (XtraBackup matching MySQL, GTIDs on).
+func (r *Runner) mysqlHealth(ctx context.Context, deep bool, h *Health, problem func(string, ...any)) {
+	s := &h.Summary
+	now := r.now()
+	if deep {
+		inst := r.XtraBackup.Instance
+		if version, err := inst.Version(ctx); err != nil {
+			problem("couldn't connect to MySQL: %s", notify.LikelyReason(errOutput(err)))
+		} else if pending, _, err := setup.CheckPointInTime(ctx, inst, version); err != nil {
+			problem("%s", firstLine(err.Error()))
+		} else if len(pending) > 0 {
+			names := make([]string, len(pending))
+			for i, c := range pending {
+				names[i] = c.String()
+			}
+			problem("MySQL's settings have changed since setup (%s): run sudo liops setup", strings.Join(names, ", "))
+		}
+	}
+
+	list, err := r.XtraBackup.Backups(ctx)
+	if err != nil {
+		problem("couldn't read the backup list: %s", notify.LikelyReason(errOutput(err)))
+		return
+	}
+	h.MySQLBackups = list
+	if last := xtrabackup.Last(list, ""); last != nil {
+		s.LastBackupType, s.LastBackupAt, s.LastBackupDuration = last.Type, last.Stop, last.Duration()
+		s.RestoreFrom = list[0].Stop
+	}
+	if due := r.lastDueBackup(now); !due.IsZero() && (s.LastBackupAt.IsZero() || s.LastBackupAt.Before(due)) {
+		problem("the backup scheduled for %s didn't complete", notify.When(due, now))
+	}
+
+	if t, err := time.Parse(time.RFC3339, r.meta(MetaBinlogShippedAt)); err == nil {
+		s.LastWAL = t
+	}
+	if len(list) == 0 {
+		return // nothing is shipped before the first backup
+	}
+	interval := time.Duration(r.Cfg.MySQL.BinlogInterval)
+	switch failing := r.meta(metaBinlogFailing); {
+	case failing != "":
+		problem("binlog shipping has been failing since %s: changes since then aren't backed up yet", failing)
+	case s.LastWAL.IsZero():
+		problem("no binlogs have been shipped yet: changes since the last backup aren't backed up")
+	case now.Sub(s.LastWAL) > 3*interval+time.Minute:
+		problem("binlogs haven't been shipped since %s: changes since then aren't backed up yet", notify.When(s.LastWAL, now))
+	}
 }
 
 // report checks everything and sends the daily summary email.
@@ -165,7 +224,11 @@ func (r *Runner) summarizeDumps(s *notify.Summary, now time.Time, problem func(s
 func (r *Runner) lastDueBackup(now time.Time) time.Time {
 	var due time.Time
 	cutoff := now.Add(-backupGrace)
-	for _, spec := range []string{r.Cfg.PgBackRest.FullSchedule, r.Cfg.PgBackRest.DiffSchedule} {
+	specs := []string{r.Cfg.PgBackRest.FullSchedule, r.Cfg.PgBackRest.DiffSchedule}
+	if r.Cfg.IsMySQL() {
+		specs = []string{r.Cfg.MySQL.FullSchedule, r.Cfg.MySQL.DiffSchedule}
+	}
+	for _, spec := range specs {
 		sched, err := cron.ParseStandard(spec)
 		if err != nil {
 			continue

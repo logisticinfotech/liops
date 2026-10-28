@@ -38,6 +38,8 @@ type world struct {
 	binlogs     []string
 	binlogPos   int
 	failBinlogs bool
+	// mysqlSettings answers SELECT @@log_bin, @@binlog_format, @@gtid_mode, ...
+	mysqlSettings string
 
 	runner *Runner
 	store  *storage.Memory

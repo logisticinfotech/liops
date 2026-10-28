@@ -1,0 +1,15 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Point-in-time backups</h1>
+<p>Backup name <code>{{.Name}}</code> · {{len .Backups}} base backup(s) · {{.Binlogs}} binlog(s) shipped, last {{when .Shipped}}</p>
+<p class="muted">XtraBackup full and differential backups, plus MySQL's binlogs, shipped every {{duration .Interval}}. Together they restore the whole MySQL server to any moment{{if not .RestoreFrom.IsZero}} since {{datetime .RestoreFrom}}{{end}}, over SSH with <code>liops restore-files</code> (see docs/restore-mysql.md). They can't be downloaded one by one; for a single database use a dump.</p>
+<div class="table-wrap"><table>
+  <tr><th>Type</th><th>Label</th><th>Finished</th><th class="num">Took</th><th class="num">Stored</th><th>Binlog position</th><th>Based on</th></tr>
+  {{range .Backups}}<tr>
+    <td><span class="badge ok">{{.Type}}</span></td>
+    <td class="mono">{{.Label}}</td><td>{{datetime .Stop}}</td>
+    <td class="num">{{duration .Duration}}</td><td class="num">{{bytes .Size}}</td>
+    <td class="mono">{{.BinlogFile}}:{{.BinlogPos}}</td><td class="mono muted">{{.Base}}</td>
+  </tr>{{else}}<tr><td colspan="7" class="muted">No backups yet.</td></tr>{{end}}
+</table></div>
+{{end}}{{end}}
