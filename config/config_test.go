@@ -235,3 +235,36 @@ func TestUnknownEngine(t *testing.T) {
 		t.Errorf("want an engine error, got %v", err)
 	}
 }
+
+func TestIntervalPresetsAreValid(t *testing.T) {
+	for name, c := range map[string]struct {
+		presets  []DayPreset
+		min, max time.Duration
+		want     []string
+	}{
+		"pgbackrest.archive_timeout": {ArchiveTimeoutPresets, time.Minute, 24 * time.Hour, []string{"5m", "10m"}},
+		"mysql.binlog_interval":      {BinlogIntervalPresets, time.Minute, time.Hour, []string{"5m", "10m"}},
+	} {
+		var last time.Duration
+		values := map[string]bool{}
+		for _, p := range c.presets {
+			d, err := time.ParseDuration(p.Value)
+			if err != nil || d < c.min || d > c.max {
+				t.Errorf("%s: preset %q isn't a value validation accepts (%v)", name, p.Value, err)
+			}
+			if d <= last {
+				t.Errorf("%s: presets should be shortest first, %q comes after a longer one", name, p.Value)
+			}
+			last = d
+			values[p.Value] = true
+			if Duration(d).String() != p.Value {
+				t.Errorf("%s: preset %q won't match a saved value, which reads %q", name, p.Value, Duration(d).String())
+			}
+		}
+		for _, w := range c.want {
+			if !values[w] {
+				t.Errorf("%s: missing the %s choice", name, w)
+			}
+		}
+	}
+}

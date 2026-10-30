@@ -119,6 +119,8 @@ func DescribeSchedule(spec string) string {
 
 // ArchiveTimeoutPresets are plain-language WAL interval choices (Value is a Go duration string).
 var ArchiveTimeoutPresets = []DayPreset{
+	{"5m", "Every 5 minutes"},
+	{"10m", "Every 10 minutes"},
 	{"15m", "Every 15 minutes"},
 	{"30m", "Every 30 minutes"},
 	{"1h", "Every 1 hour"},
@@ -131,6 +133,7 @@ var ArchiveTimeoutPresets = []DayPreset{
 var BinlogIntervalPresets = []DayPreset{
 	{"1m", "Every minute"},
 	{"5m", "Every 5 minutes"},
+	{"10m", "Every 10 minutes"},
 	{"15m", "Every 15 minutes"},
 	{"30m", "Every 30 minutes"},
 	{"1h", "Every hour"},
