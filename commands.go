@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -326,13 +327,24 @@ func runSetup(args []string, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintln(out, "\nSetup is complete. WAL archiving works.")
-	fmt.Fprintln(out, "Next: take the first full backup and dumps, then start the service:")
 	if engine.Cluster.Homebrew() {
-		fmt.Fprintf(out, "\n  %s run full\n  make dev\n", self())
-	} else {
-		fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
+		fmt.Fprintf(out, "Next: take the first full backup and dumps, then start liops:\n\n  %s run full\n  make dev\n", self())
+		return nil
 	}
+	printNextSteps(out)
 	return nil
+}
+
+// printNextSteps says what's left after setup. install.sh has usually started the
+// service already, and it picks the finished setup up by itself.
+func printNextSteps(out io.Writer) {
+	if exec.Command("systemctl", "is-active", "--quiet", "liops").Run() == nil {
+		fmt.Fprintln(out, "The liops service is running and starts the backup schedule within a few seconds; nothing to restart.")
+		fmt.Fprintln(out, "If this server has no full backup yet, take one now (the dumps follow it):\n\n  sudo liops run full")
+		return
+	}
+	fmt.Fprintln(out, "Next: take the first full backup and dumps, then start the service:")
+	fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
 }
 
 // setupFlags are the MySQL choices on the setup command line.
@@ -371,8 +383,8 @@ func runMySQLSetup(cfg *config.Config, p *paths, f setupFlags, in io.Reader, out
 		return err
 	}
 	fmt.Fprintf(out, "GTIDs and binary logging are ready for point-in-time backups (settings kept in %s).\n", cfg.MySQL.ConfFile)
-	fmt.Fprintln(out, "\nSetup is complete. Next: take the first full backup and dumps, then start the service:")
-	fmt.Fprintln(out, "\n  sudo liops run full\n  sudo systemctl enable --now liops")
+	fmt.Fprintln(out, "\nSetup is complete.")
+	printNextSteps(out)
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ type Service struct {
 	cfg    *config.Config
 	runner *jobs.Runner // nil while the config isn't valid
 	sched  *jobs.Scheduler
+	closed bool
 	active map[string]string // job → "queued" or "running", for jobs started from the UI
 
 	healthMu sync.Mutex
@@ -85,7 +87,43 @@ func New(ctx context.Context, configPath, lockPath string, st *state.Store, log 
 	if err := s.applyLocked(cfg); err != nil {
 		return nil, err
 	}
+	go s.pickUpSetup()
 	return s, nil
+}
+
+// setupPoll is how often a service whose scheduler isn't running yet looks for setup
+// finished outside it.
+var setupPoll = 5 * time.Second
+
+// pickUpSetup notices setup finished outside the service: `liops setup` on the command
+// line, after install.sh started the service, writes the config and marks setup
+// complete in the state file. Until the scheduler runs, it reloads the config when setup
+// is complete and the config file has changed since it last looked.
+func (s *Service) pickUpSetup() {
+	t := time.NewTicker(setupPoll)
+	defer t.Stop()
+	var seen time.Time
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		if !s.closed && s.sched == nil && s.setupComplete() {
+			if info, err := os.Stat(s.ConfigPath); err == nil && !info.ModTime().Equal(seen) {
+				seen = info.ModTime()
+				if cfg, err := config.LoadDraft(s.ConfigPath); err != nil {
+					s.logf("setup was completed outside the service, but the config can't be read: %v", err)
+				} else if err := s.applyLocked(cfg); err != nil {
+					s.logf("setup was completed outside the service, but the scheduler can't start: %v", err)
+				} else if s.sched != nil {
+					s.logf("setup was completed outside the service (liops setup): backups now follow the schedule")
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *Service) logf(format string, args ...any) {
@@ -266,7 +304,7 @@ func (s *Service) invalidateHealth() {
 func (s *Service) Close() {
 	s.mu.Lock()
 	sched := s.sched
-	s.sched = nil
+	s.sched, s.closed = nil, true
 	s.mu.Unlock()
 	if sched != nil {
 		<-sched.Stop().Done()
