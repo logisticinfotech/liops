@@ -160,8 +160,11 @@ func runInstallSystem(args []string, out io.Writer) error {
 			return err
 		}
 	}
-	// A new install starts the wizard with the right engine. An existing config is kept.
-	if _, err := os.Stat(config.DefaultPath); errors.Is(err, fs.ErrNotExist) && *engine != "" {
+	// A kept config means an upgrade (also one moved over from pgtijori). A new install
+	// starts the wizard with the right engine.
+	_, cfgErr := os.Stat(config.DefaultPath)
+	hadConfig := cfgErr == nil
+	if errors.Is(cfgErr, fs.ErrNotExist) && *engine != "" {
 		cfg := config.Default()
 		cfg.Engine = *engine
 		if err := cfg.Save(config.DefaultPath); err != nil {
@@ -181,8 +184,9 @@ func runInstallSystem(args []string, out io.Writer) error {
 	// Left behind by early versions, which had a login and a setup token.
 	_ = os.Remove(stateDir + "/setup-token")
 
-	upgrade := exec.Command("systemctl", "is-active", "--quiet", "liops").Run() == nil
-	if upgrade {
+	running := exec.Command("systemctl", "is-active", "--quiet", "liops").Run() == nil
+	upgrade := running || hadConfig
+	if running {
 		if err := systemctl("restart", "liops"); err != nil {
 			return err
 		}

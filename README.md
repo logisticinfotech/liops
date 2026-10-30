@@ -50,7 +50,8 @@ ssh -L 8899:127.0.0.1:8899 <you>@<server>
 The wizard asks before it changes your database server. PostgreSQL needs one restart to turn
 on WAL archiving (a few seconds of downtime). MySQL needs GTIDs on, which liops turns on
 online, without a restart, once you approve it. Running the installer again upgrades liops and keeps the
-config. `sudo liops uninstall` removes it and leaves the backups in storage.
+config. A server running **pgtijori** (liops's old name) is moved over by the same command:
+its config, job history and logs are kept; then run `sudo liops setup` once. `sudo liops uninstall` removes it and leaves the backups in storage.
 
 ## Design
 

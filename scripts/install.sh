@@ -10,7 +10,8 @@
 #   curl -fsSL https://github.com/logisticinfotech/liops/releases/download/v1.2.0/install.sh | sudo bash
 #
 # Re-running it upgrades the binary and restarts the service; the config, users and
-# backups are kept. It never restarts the database.
+# backups are kept. It never restarts the database. A server running pgtijori (liops's
+# old name) is moved over: its config, job history and logs are kept.
 #
 # For testing only: LIOPS_BINARY=/path/to/liops-linux-amd64 installs a local
 # build instead of downloading one (no checksum check).
@@ -129,6 +130,28 @@ chmod 755 "$tmp/liops-linux-amd64"
 install -m 755 "$tmp/liops-linux-amd64" "$BIN.new"
 mv -f "$BIN.new" "$BIN"
 say "Installed $("$BIN" version)"
+
+# --- From pgtijori (liops's old name) --------------------------------------------------
+
+if [ -e /etc/pgtijori ] || [ -e /etc/systemd/system/pgtijori.service ]; then
+    say "Moving pgtijori to its new name, liops: the config, job history and logs are kept"
+    for pair in /etc/pgtijori:/etc/liops /var/lib/pgtijori:/var/lib/liops /var/log/pgtijori:/var/log/liops; do
+        from=${pair%%:*} to=${pair##*:}
+        if [ -e "$from" ] && [ -e "$to" ]; then
+            die "both $from and $to exist, so it isn't clear which one to keep. Nothing was changed. Keep the one with your config and job history, remove the other, and run this again"
+        fi
+    done
+    # The new binary is in place, so the old service only stops for the few seconds until
+    # liops starts. PostgreSQL keeps archiving WAL through pgBackRest meanwhile.
+    systemctl disable --now pgtijori 2>/dev/null || true
+    for pair in /etc/pgtijori:/etc/liops /var/lib/pgtijori:/var/lib/liops /var/log/pgtijori:/var/log/liops; do
+        from=${pair%%:*} to=${pair##*:}
+        if [ -e "$from" ]; then mv "$from" "$to"; fi
+    done
+    if [ -e /var/log/liops/pgtijori.log ]; then mv /var/log/liops/pgtijori.log /var/log/liops/liops.log; fi
+    rm -f /etc/systemd/system/pgtijori.service /etc/logrotate.d/pgtijori /usr/local/bin/pgtijori
+    systemctl daemon-reload
+fi
 
 # --- Service ------------------------------------------------------------------------
 
