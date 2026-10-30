@@ -100,6 +100,29 @@ func (s *S3) List(ctx context.Context, prefix string) ([]Object, error) {
 	return objs, listErr
 }
 
+func (s *S3) Any(ctx context.Context, prefix string) (bool, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	found := false
+	var listErr error
+	// Drain the channel after cancelling, or the lister leaks.
+	for o := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true, MaxKeys: 1}) {
+		if found || listErr != nil {
+			continue
+		}
+		if o.Err != nil {
+			listErr = fmt.Errorf("list %s: %w", prefix, o.Err)
+		} else {
+			found = true
+		}
+		cancel()
+	}
+	if found {
+		return true, nil
+	}
+	return false, listErr
+}
+
 func (s *S3) Delete(ctx context.Context, key string) error {
 	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("delete %s: %w", key, err)

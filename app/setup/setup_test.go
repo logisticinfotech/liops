@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
+	"github.com/logisticinfotech/liops/app/storage"
 	"github.com/logisticinfotech/liops/config"
 )
 
@@ -107,6 +109,9 @@ func TestDetectClustersFallsBackToHomebrewOnMac(t *testing.T) {
 
 func TestCheckOwner(t *testing.T) {
 	const mine = "7683116411252273504"
+	missing := `[{"name":"app-prod-1","db":[],"backup":[],"archive":[],"status":{"code":1,"message":"missing stanza path"}}]`
+	ours := `[{"name":"app-prod-1","db":[{"id":1,"system-id":` + mine + `}],"backup":[],"archive":[],"status":{"code":0,"message":"ok"}}]`
+	theirs := `[{"name":"app-prod-1","db":[{"id":1,"system-id":7000000000000000001}],"backup":[],"archive":[],"status":{"code":0,"message":"ok"}}]`
 	engine := func(infoJSON string) *pgbackrest.Engine {
 		cfg := config.Default()
 		cfg.PgBackRest.Stanza = "app-prod-1"
@@ -118,20 +123,42 @@ func TestCheckOwner(t *testing.T) {
 		}})
 	}
 	ctx := context.Background()
+	const myMarker = OwnersPrefix + "postgres-" + mine
 
-	missing := `[{"name":"app-prod-1","db":[],"backup":[],"archive":[],"status":{"code":1,"message":"missing stanza path"}}]`
-	if err := CheckOwner(ctx, engine(missing)); err != nil {
-		t.Errorf("a new backup name should be fine: %v", err)
-	}
-	ours := `[{"name":"app-prod-1","db":[{"id":1,"system-id":` + mine + `}],"backup":[],"archive":[],"status":{"code":0,"message":"ok"}}]`
-	if err := CheckOwner(ctx, engine(ours)); err != nil {
-		t.Errorf("this cluster's own backups should be fine: %v", err)
-	}
-	theirs := `[{"name":"app-prod-1","db":[{"id":1,"system-id":7000000000000000001}],"backup":[],"archive":[],"status":{"code":0,"message":"ok"}}]`
-	err := CheckOwner(ctx, engine(theirs))
-	var taken *NameTakenError
-	if !errors.As(err, &taken) || !strings.Contains(err.Error(), "restore.md") || !strings.Contains(err.Error(), "Choose a new backup name") {
-		t.Errorf("another cluster's backups must be refused with a clear message, got: %v", err)
+	for _, c := range []struct {
+		name    string
+		objects []string // already in the folder
+		info    string
+		want    string // "" when it's this cluster's to use; else part of the refusal
+	}{
+		{"a new name", nil, missing, ""},
+		{"setup run again", []string{myMarker, "pgbackrest/backup/app-prod-1/backup.info"}, ours, ""},
+		{"from before markers, this cluster's stanza", []string{"pgbackrest/backup/app-prod-1/backup.info"}, ours, ""},
+		{"from before markers, another cluster's stanza", []string{"pgbackrest/backup/app-prod-1/backup.info"}, theirs, "system identifier 7000000000000000001"},
+		{"another PostgreSQL server's marker", []string{OwnersPrefix + "postgres-7000000000000000001"}, missing, "another PostgreSQL server"},
+		{"a MySQL server's marker", []string{OwnersPrefix + "mysql-3e11fa47-71ca-11e1-9e33-c80aa9429562", "dumps/app/x.sql.gz"}, missing, "another MySQL server"},
+		{"dumps no server has claimed", []string{"dumps/app/2026-10-01T013000Z.dump"}, missing, "no server has claimed"},
+	} {
+		store := storage.NewMemory()
+		for _, key := range c.objects {
+			store.Add(key, []byte("x"), time.Now())
+		}
+		err := CheckOwner(ctx, engine(c.info), store)
+		_, marked := store.Get(myMarker)
+		if c.want == "" {
+			if err != nil || !marked {
+				t.Errorf("%s: want it claimed, got %v (marker written: %v)", c.name, err, marked)
+			}
+			continue
+		}
+		var taken *NameTakenError
+		if !errors.As(err, &taken) || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "restore.md") ||
+			!strings.Contains(err.Error(), "Choose a new backup name (pgbackrest.stanza)") {
+			t.Errorf("%s: want a refusal mentioning %q, got: %v", c.name, c.want, err)
+		}
+		if marked {
+			t.Errorf("%s: a refused folder must not get this cluster's marker", c.name)
+		}
 	}
 }
 
@@ -161,8 +188,10 @@ func TestWriteSettingsStopsBeforeArchivingWhenNameIsTaken(t *testing.T) {
 		return nil, nil // test -r
 	}})
 
+	store := storage.NewMemory()
+	store.Add(OwnersPrefix+"postgres-7000000000000000001", []byte("x"), time.Now())
 	var taken *NameTakenError
-	if _, err := WriteSettings(context.Background(), e); !errors.As(err, &taken) {
+	if _, err := WriteSettings(context.Background(), e, store); !errors.As(err, &taken) {
 		t.Fatalf("expected NameTakenError, got %v", err)
 	}
 	if _, err := os.Stat(e.Cluster.ConfDPath()); !errors.Is(err, os.ErrNotExist) {

@@ -24,6 +24,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/storage"
 	"github.com/logisticinfotech/liops/config"
 )
 
@@ -186,9 +187,10 @@ const (
 )
 
 // WriteSettings writes pgbackrest.conf and the conf.d file, and makes PostgreSQL
-// reload them when they changed and archiving is already on. It reports whether
+// reload them when they changed and archiving is already on. store is the backup
+// name's folder, which it claims for this cluster first (CheckOwner). It reports whether
 // PostgreSQL still needs a restart.
-func WriteSettings(ctx context.Context, e *pgbackrest.Engine) (Archiving, error) {
+func WriteSettings(ctx context.Context, e *pgbackrest.Engine, store storage.Store) (Archiving, error) {
 	c1, err := e.WriteBackRestConf()
 	if err != nil {
 		return NeedsRestart, fmt.Errorf("write settings: %w", err)
@@ -198,7 +200,7 @@ func WriteSettings(ctx context.Context, e *pgbackrest.Engine) (Archiving, error)
 	}
 	// Before WAL archiving points at the bucket: make sure the backup name's folder
 	// is new or this cluster's own.
-	if err := CheckOwner(ctx, e); err != nil {
+	if err := CheckOwner(ctx, e, store); err != nil {
 		return NeedsRestart, err
 	}
 	c2, err := e.WritePostgresConf()
@@ -237,20 +239,12 @@ func WriteSettings(ctx context.Context, e *pgbackrest.Engine) (Archiving, error)
 	return Ready, nil
 }
 
-// CheckOwner makes sure the backup name (pgbackrest.stanza) isn't already used in the
-// bucket by a different PostgreSQL cluster. A new name, or this cluster's own backups
-// (setup run again, or a server restored from them), are fine. pgBackRest would refuse
-// to mix two clusters anyway, but only after archiving was on, with a cryptic error.
-func CheckOwner(ctx context.Context, e *pgbackrest.Engine) error {
-	name := e.Cfg.PgBackRest.Stanza
-	info, err := e.Info(ctx)
-	if err != nil {
-		return fmt.Errorf("couldn't check whether backup name %q is already used in the bucket: %s: %w",
-			name, notify.LikelyReason(command.OutputOf(err)+err.Error()), err)
-	}
-	if info.SystemID == "" {
-		return nil // a new name
-	}
+// CheckOwner makes sure the backup name's folder is new or this cluster's own
+// (claimFolder), recording this cluster, known by its system identifier, as its owner.
+// A folder from before owner markers counts as this cluster's when its pgBackRest stanza
+// has this cluster's system identifier. pgBackRest would refuse to mix two clusters
+// anyway, but only after archiving was on, with a cryptic error.
+func CheckOwner(ctx context.Context, e *pgbackrest.Engine, store storage.Store) error {
 	rows, err := e.Cluster.Query(ctx, "postgres", "SELECT system_identifier FROM pg_control_system()")
 	if err != nil {
 		return fmt.Errorf("couldn't ask PostgreSQL for its system identifier (is it running?): %w", err)
@@ -258,20 +252,23 @@ func CheckOwner(ctx context.Context, e *pgbackrest.Engine) error {
 	if len(rows) != 1 || len(rows[0]) != 1 {
 		return fmt.Errorf("pg_control_system: unexpected output %q", rows)
 	}
-	if mine := rows[0][0]; mine != info.SystemID {
-		return &NameTakenError{Name: name, Theirs: info.SystemID, Mine: mine}
+	mine := rows[0][0]
+	name := e.Cfg.BackupName()
+	legacy := func(ctx context.Context) (string, error) {
+		info, err := e.Info(ctx)
+		if err != nil {
+			return "", fmt.Errorf("couldn't check whether backup name %q is already used in the bucket: %s: %w",
+				name, notify.LikelyReason(command.OutputOf(err)+err.Error()), err)
+		}
+		switch info.SystemID {
+		case mine:
+			return "", nil
+		case "":
+			return "backups or dumps that no server has claimed (from an older liops, or copied in by hand)", nil
+		}
+		return describeOwner("postgres-" + info.SystemID), nil
 	}
-	return nil
-}
-
-// NameTakenError: the backup name's folder holds another cluster's backups.
-type NameTakenError struct{ Name, Theirs, Mine string }
-
-func (e *NameTakenError) Error() string {
-	return fmt.Sprintf("backup name %q is already used in the bucket by a different PostgreSQL server "+
-		"(its system identifier is %s, this server's is %s). Nothing was changed. Choose a new backup name; "+
-		"each server needs its own. To restore that server's backups onto this one, see docs/restore.md section 3",
-		e.Name, e.Theirs, e.Mine)
+	return claimFolder(ctx, store, name, config.EnginePostgres, mine, legacy)
 }
 
 // RestartPostgres restarts the cluster (a few seconds of downtime) and waits until

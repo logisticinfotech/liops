@@ -298,8 +298,12 @@ func runSetup(args []string, out io.Writer) error {
 	ctx, stop := signalContext()
 	defer stop()
 
+	store, err := storage.Open(cfg)
+	if err != nil {
+		return err
+	}
 	engine := pgbackrest.New(cfg, command.Exec{})
-	archiving, err := setup.WriteSettings(ctx, engine)
+	archiving, err := setup.WriteSettings(ctx, engine, store)
 	if err != nil {
 		return err
 	}

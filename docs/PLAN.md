@@ -108,9 +108,12 @@ so it feels familiar to developers coming from those frameworks.
 
 - One **backup name per server** (`pgbackrest.stanza`). It is both the pgBackRest stanza and
   the server's folder in the bucket, so servers can share a bucket, and a replacement
-  server set up under a new name never touches the old server's backups. Setup refuses a
-  name whose folder holds another cluster's backups (compared by PostgreSQL system
-  identifier), before WAL archiving is turned on.
+  server set up under a new name never touches the old server's backups. Setup claims the
+  folder with a marker, `owners/<engine>-<identity>` (PostgreSQL: the system identifier;
+  MySQL: `server_uuid`), before WAL archiving is turned on. It only uses a folder that is
+  empty or holds its own marker: another server's marker, or backups and dumps no marker
+  accounts for, are refused (October 2026). A folder from before markers is adopted when its
+  pgBackRest stanza has this cluster's system identifier.
 - The stanza covers **every database in the cluster**, all captured at the
   same moment, so they stay consistent. New databases are included automatically.
 - Weekly full, nightly differential, `archive_timeout = 1h` (configurable, 1m–24h), 30-day

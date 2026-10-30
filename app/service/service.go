@@ -21,6 +21,7 @@ import (
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
+	"github.com/logisticinfotech/liops/app/storage"
 	"github.com/logisticinfotech/liops/config"
 )
 
@@ -66,7 +67,11 @@ func New(ctx context.Context, configPath, lockPath string, st *state.Store, log 
 		active:     map[string]string{},
 	}
 	s.WriteSettings = func(ctx context.Context, cfg *config.Config) (setup.Archiving, error) {
-		return setup.WriteSettings(ctx, pgbackrest.New(cfg, command.Exec{}))
+		store, err := storage.Open(cfg)
+		if err != nil {
+			return setup.NeedsRestart, err
+		}
+		return setup.WriteSettings(ctx, pgbackrest.New(cfg, command.Exec{}), store)
 	}
 	if s.NewRunner == nil {
 		s.NewRunner = func(cfg *config.Config) (*jobs.Runner, error) { return jobs.New(cfg, st, lockPath, log) }

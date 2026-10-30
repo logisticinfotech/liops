@@ -270,14 +270,20 @@ func TestSetupMySQLRefusesOldVersion(t *testing.T) {
 
 func TestSetupMySQLRefusesAnotherServersName(t *testing.T) {
 	for name, existing := range map[string]string{
-		"mysql":    "owners/mysql-another-uuid",
-		"postgres": "pgbackrest/backup/shop-db-1/backup.info",
+		"another MySQL server":       "owners/mysql-f0e1d2c3-0000-11e1-9e33-c80aa9429562",
+		"a PostgreSQL server":        "owners/postgres-7683116411252273504",
+		"PostgreSQL, before markers": "pgbackrest/backup/shop-db-1/backup.info",
+		"dumps nobody claimed":       "dumps/app/2026-10-01T013000Z.sql.gz",
 	} {
 		store := storage.NewMemory()
 		store.Add(existing, []byte("x"), time.Now())
-		var taken *MySQLNameTakenError
-		if _, err := setupMySQL(mysqlSetupConfig(t), readyMySQL(), store, MySQLOptions{}); !errors.As(err, &taken) {
-			t.Errorf("%s: want MySQLNameTakenError, got %v", name, err)
+		var taken *NameTakenError
+		_, err := setupMySQL(mysqlSetupConfig(t), readyMySQL(), store, MySQLOptions{})
+		if !errors.As(err, &taken) || !strings.Contains(err.Error(), "mysql.backup_name") || !strings.Contains(err.Error(), "restore-mysql.md") {
+			t.Errorf("%s: want a NameTakenError for MySQL, got %v", name, err)
+		}
+		if _, ok := store.Get("owners/mysql-3e11fa47-71ca-11e1-9e33-c80aa9429562"); ok {
+			t.Errorf("%s: a refused folder must not get this server's marker", name)
 		}
 	}
 }

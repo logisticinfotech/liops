@@ -185,7 +185,7 @@ dumps: …          # unchanged; MySQL's own schemas are always skipped
 | `app/engines/mysql/` | Instance: binary paths, `Command`, `Query` (`mysql -N -B` with `--defaults-extra-file`), `Setting`. The counterpart of `engines/postgres`. |
 | `app/engines/xtrabackup/` | Streamed backups, manifests, binlog shipping, gap check, `PlanRetention`, info for the UI. |
 | `app/engines/mysqldump/` | Discovery, dump, users and grants, implementing `jobs.Dumper`. Keys, streaming and retention come from `app/engines/dumps` (done in M0). |
-| `app/setup` | `mysql.go`: detect MySQL, create the user and `mysql.cnf`, check and enable settings, `CheckOwner` by `server_uuid`. |
+| `app/setup` | `mysql.go`: detect MySQL, create the user and `mysql.cnf`, check and enable settings, claiming the folder by `server_uuid` (shared rule in `app/setup/owner.go`). |
 | Wizard, UI, emails | Step 1 picks the engine (auto-detected). Backups page shows base backups and "can restore to any moment from X to Y, last binlog shipped N minutes ago". Wording per engine ("binlogs" vs "WAL", "users and grants" vs "roles"). |
 | `notify.LikelyReason` | MySQL and XtraBackup errors: access denied, the server-newer-than-XtraBackup error, purged binlog, lock wait timeout. |
 | `scripts/install.sh` | If `mysqld` is present (and PostgreSQL isn't), install `percona-xtrabackup-84` from Percona's repository instead of pgBackRest. |

@@ -442,7 +442,12 @@ func (s *Server) runApply(cfg *config.Config, restart bool) {
 			return
 		}
 	}
-	archiving, err := setup.WriteSettings(ctx, engine)
+	runner := s.Svc.Runner()
+	if runner == nil {
+		wz.set(0, stepFailed, "the config is no longer valid")
+		return
+	}
+	archiving, err := setup.WriteSettings(ctx, engine, runner.Store)
 	if err != nil {
 		wz.set(0, stepFailed, err.Error())
 		return
@@ -472,12 +477,6 @@ func (s *Server) runApply(cfg *config.Config, restart bool) {
 		return
 	}
 	wz.set(1, stepDone, "WAL archiving works end to end. Scheduled backups are now on.")
-
-	runner := s.Svc.Runner()
-	if runner == nil {
-		wz.set(2, stepFailed, "the config is no longer valid")
-		return
-	}
 	s.firstBackupAndEmail(ctx, cfg, runner, 2)
 }
 

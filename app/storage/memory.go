@@ -85,6 +85,11 @@ func (m *Memory) List(ctx context.Context, prefix string) ([]Object, error) {
 	return objs, nil
 }
 
+func (m *Memory) Any(ctx context.Context, prefix string) (bool, error) {
+	objs, err := m.List(ctx, prefix)
+	return len(objs) > 0, err
+}
+
 func (m *Memory) Delete(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

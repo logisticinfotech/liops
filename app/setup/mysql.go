@@ -27,10 +27,6 @@ const MySQLUser = "liops"
 // PROCESS, RELOAD, REPLICATION CLIENT), so that setup won't need root again for them.
 const mysqlPrivileges = "SELECT, SHOW VIEW, TRIGGER, EVENT, SHOW_ROUTINE, LOCK TABLES, PROCESS, RELOAD, REPLICATION CLIENT, BACKUP_ADMIN"
 
-// OwnersPrefix holds one marker object per server that has used the backup name,
-// e.g. owners/mysql-<server_uuid>.
-const OwnersPrefix = "owners/"
-
 // ErrNeedRootPassword: MySQL's root can't log in through the socket without a password.
 var ErrNeedRootPassword = errors.New("MySQL's root account needs a password here (it can't log in through the socket as the system root user). " +
 	"Run setup again with root's MySQL password on stdin, e.g.: read -rs PW && printf '%s\\n' \"$PW\" | sudo liops setup --mysql-root-password-stdin. " +
@@ -213,46 +209,12 @@ func writeAtomic(path, content string, mode os.FileMode) error {
 	return os.Rename(f.Name(), path)
 }
 
-// CheckMySQLOwner makes sure the backup name isn't already used in the bucket by a
-// different server, then records this server as its owner. A MySQL server is known by
-// its server_uuid; a PostgreSQL server by its pgBackRest backups.
+// CheckMySQLOwner makes sure the backup name's folder is new or this server's own
+// (claimFolder), recording this server, known by its server_uuid, as its owner.
 func CheckMySQLOwner(ctx context.Context, cfg *config.Config, inst mysql.Instance, store storage.Store) error {
 	uuid, err := inst.Value(ctx, "SELECT @@server_uuid")
 	if err != nil {
 		return fmt.Errorf("couldn't ask MySQL for its server_uuid: %w", err)
 	}
-	name := cfg.BackupName()
-	mine := OwnersPrefix + "mysql-" + uuid
-
-	pg, err := store.List(ctx, storage.PgBackRestPrefix+"backup/"+name+"/backup.info")
-	if err != nil {
-		return fmt.Errorf("couldn't check whether backup name %q is already used in the bucket: %w", name, err)
-	}
-	if len(pg) > 0 {
-		return &MySQLNameTakenError{Name: name, Theirs: "a PostgreSQL server"}
-	}
-	owners, err := store.List(ctx, OwnersPrefix)
-	if err != nil {
-		return fmt.Errorf("couldn't check whether backup name %q is already used in the bucket: %w", name, err)
-	}
-	for _, o := range owners {
-		if o.Key != mine {
-			return &MySQLNameTakenError{Name: name, Theirs: "another server (" + strings.TrimPrefix(o.Key, OwnersPrefix) + ")"}
-		}
-	}
-	if len(owners) == 0 {
-		marker := fmt.Sprintf("{\"engine\":\"mysql\",\"server_uuid\":%q}\n", uuid)
-		if _, err := store.Put(ctx, mine, strings.NewReader(marker)); err != nil {
-			return fmt.Errorf("record this server as the owner of backup name %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// MySQLNameTakenError: the backup name's folder holds another server's backups.
-type MySQLNameTakenError struct{ Name, Theirs string }
-
-func (e *MySQLNameTakenError) Error() string {
-	return fmt.Sprintf("backup name %q is already used in the bucket by %s. Nothing was changed. "+
-		"Choose a new backup name (mysql.backup_name); each server needs its own", e.Name, e.Theirs)
+	return claimFolder(ctx, store, cfg.BackupName(), config.EngineMySQL, uuid, nil)
 }

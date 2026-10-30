@@ -28,6 +28,9 @@ type Store interface {
 	// Read streams an object's content. The caller closes it.
 	Read(ctx context.Context, key string) (io.ReadCloser, error)
 	List(ctx context.Context, prefix string) ([]Object, error)
+	// Any reports whether there is at least one object under prefix. It stops at the
+	// first, so it's cheap even for a folder with thousands of WAL files.
+	Any(ctx context.Context, prefix string) (bool, error)
 	Delete(ctx context.Context, key string) error
 	DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, error)
 	// Probe writes, reads back and deletes a small test object.
@@ -88,6 +91,10 @@ func (p Prefixed) List(ctx context.Context, prefix string) ([]Object, error) {
 		objs[i].Key = strings.TrimPrefix(objs[i].Key, p.Prefix)
 	}
 	return objs, err
+}
+
+func (p Prefixed) Any(ctx context.Context, prefix string) (bool, error) {
+	return p.Store.Any(ctx, p.Prefix+prefix)
 }
 
 func (p Prefixed) Delete(ctx context.Context, key string) error {

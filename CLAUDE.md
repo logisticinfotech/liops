@@ -67,8 +67,10 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
 - **Bucket layout**: everything a server stores is under its backup name
   (`cfg.BackupName()` + "/", `storage.Folder`; for PostgreSQL that is `pgbackrest.stanza`). Get a store with `storage.Open(cfg)`, which
   adds the folder, so keys in code stay relative (`dumps/<db>/…`). pgBackRest's
-  `repo1-path` is `/<name>/pgbackrest`. `setup.CheckOwner` refuses a name whose folder
-  belongs to another cluster, before archiving is turned on.
+  `repo1-path` is `/<name>/pgbackrest`. Setup claims the folder (`setup.claimFolder`, used
+  by `CheckOwner` and `CheckMySQLOwner`): it writes `owners/<engine>-<identity>` and only
+  uses a folder that is empty or holds its own marker; anything else is refused before
+  anything changes.
 - **Dumps** stream `pg_dump` stdout through an `io.Pipe` into a multipart upload; there is no
   local file, and a failed dump leaves no object behind. What is the same for every engine
   (keys, `dumps.Stream`, the pure retention function `dumps.PlanRetention`) is in
