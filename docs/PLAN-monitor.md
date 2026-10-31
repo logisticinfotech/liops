@@ -1,6 +1,6 @@
 # liops monitoring: design and build plan
 
-Status: **proposed** (November 2026). Nothing here is built yet. [PLAN.md](PLAN.md) stays the
+Status: **agreed** (November 2026); building MO0. [PLAN.md](PLAN.md) stays the
 source of truth for everything this document doesn't change; read it first.
 
 ## 1. Requirement
@@ -98,7 +98,7 @@ The front web server's access log, tailed. Each request gives method, **route**,
   - **nginx**: needs `$request_time` and `$upstream_response_time` in the log format.
     Setup proposes a `log_format liops …` in `conf.d` and the one-line `access_log` change per
     site, shows them, and applies them after approval (`nginx -t`, then reload).
-  - **Apache**: needs `%D` (microseconds). Same approach, with a `LogFormat` and `CustomLog`.
+  - **Apache**: not used on these servers (§9); its parser (`%D`) is left for later.
   - **Caddy**: its JSON access logs already include the duration; the site needs `log`.
 - **Timeouts and slow upstreams** show up as both: a 502/504 count and the upstream time.
 
@@ -200,14 +200,18 @@ checks what the monitor reports.
 
 ## 9. Risks and open questions
 
-- **Which stacks run where?** For each server: the web server, PHP version(s), app services, and
-  database. The detection in §4 is built for the common Ubuntu layouts; anything unusual goes
-  in the config.
-- **Changing web server log formats** on live sites: done only with approval, checked before
-  reload. Some sites may have their own `access_log` lines; setup lists each change per site.
-- **The PostgreSQL restart** for `pg_stat_statements`: one restart per server, scheduled by you.
-  Without it, the database page still shows activity, locks and cache ratios, but not top
-  queries.
+Answered (November 2026):
+
+- **Stacks**: web servers are **nginx and Caddy** (no Apache: its parser is left for later);
+  PHP **8.2, 8.3, 8.4 and 8.5**, sometimes several on one server (one FPM service and pool
+  directory each: `php8.x-fpm`, `/etc/php/8.x/fpm/pool.d`); databases **PostgreSQL and MySQL**.
+- **Log format changes** on live sites are fine, with approval and a config check before reload.
+- **The PostgreSQL restart** for `pg_stat_statements` is fine, once per server, scheduled by a
+  person.
+
+Still open:
+
+- **Some sites may have their own `access_log` lines**; setup lists each change per site.
 - **Busy logs** (millions of lines a day): parsing is cheap in Go, but the budget in §2 is
   checked in the MO1 load test before it's called done.
 - **Thresholds** (slow request, alerts) are guesses until they've run on your servers for a
