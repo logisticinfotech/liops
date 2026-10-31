@@ -14,6 +14,8 @@ A small, per-server tool that answers the questions the team actually asks about
 - **Tune it, fix the app, or get a bigger VM?** A plain verdict, with the evidence for it.
 - **CPU, memory and disk** for the last 7 days, with trends long enough to plan capacity.
 - **Logs**: read the web server, PHP-FPM, app and system logs in one place.
+- **Tuning**: concrete recommendations for PHP, PHP-FPM, MySQL, PostgreSQL and Redis settings,
+  with the evidence, and liops applying them **when a person approves** (§5.1).
 
 ### 1.1 Why the database comes first: a real case
 
@@ -70,6 +72,8 @@ Not in scope (decided October 2026):
 | Storage | bbolt, as for the backup state, in its own file (`/var/lib/liops-monitor/metrics.db`): one record per minute (or hour) holding every series, compactly encoded. No time-series database to install. |
 | Charts | **Drawn on the server as SVG**: no JavaScript chart library, and nothing the strict CSP has to allow. |
 | Footprint | Budget: **under 50 MB of memory and 1% of a CPU** on a busy server. Logs are read incrementally (offsets, rotation by inode), never re-read. |
+| Tuning | **Always advise; apply only on approval; never on its own.** Approved changes go into files liops manages, are checked before they're applied, applied the least disruptive way (online, then reload; a restart only when asked), can be reverted in one click, and are measured before and after (§5.1). Durability and security settings are never touched. Indexes are suggested (SQL and a Laravel migration), never created: schema belongs in the app's migrations. |
+| App checks | The few Laravel settings that matter (§4.6) are read **by the root service, once a day**, from the app's `.env` and `bootstrap/cache`. Only true/false findings are kept; **no `.env` value is ever stored, shown or sent**. |
 | Alerts | Few, and through the existing email: a "server health" section in the daily summary, plus immediate emails for disk filling soon, memory exhaustion (OOM kills), and a sustained burst of 5xx errors. No pager-style alerting. |
 | Dependencies | **None new.** /proc, statfs, a small FastCGI client (for PHP-FPM's status page) and the existing `mysql`/`psql` client programs cover everything. |
 
@@ -117,6 +121,12 @@ From `/proc` and `statfs`, every 15 s:
   without touching them.
 - **Top processes** by CPU and memory, grouped by command (e.g. `php artisan queue:work` ×7):
   queue workers often all run under one supervisor service, so per service isn't enough.
+  **Memory of long-running processes over time**: a queue worker growing all day is leaking.
+- **What uses the disk**, hourly: each database's files, `pg_wal`, MySQL binlogs, `/var/log`,
+  each app's `storage/`. `pg_wal` growing while WAL archiving fails fills the disk and stops
+  PostgreSQL: that gets an immediate alert.
+- **Failed systemd units** (`systemctl --failed`: a dead queue worker unit) and **reboot
+  required** (`/var/run/reboot-required`), checked every few minutes.
 
 ### 4.2 Web requests
 
@@ -136,6 +146,13 @@ The front web server's access log, tailed. Each request gives method, **route**,
   - **Apache**: not used on these servers (§9); its parser (`%D`) is left for later.
   - **Caddy**: its JSON access logs already include the duration; the site needs `log`.
 - **Timeouts and slow upstreams** show up as both: a 502/504 count and the upstream time.
+- **Per host**: `$host` is in the log format, so every number above is also available per
+  site, which for subdomain tenants means **per tenant**: which tenant is heavy.
+- **Top clients**: requests and time per client IP and user-agent class (bots, devices,
+  browsers), to spot a crawler or a misbehaving device. IP addresses are personal data: only
+  the top 20 per hour, kept 7 days.
+- **Time of day**: a 7-day heatmap of slow requests by hour, where device pushes and queue
+  bursts show up as stripes.
 
 ### 4.3 PHP-FPM
 
@@ -144,6 +161,12 @@ The front web server's access log, tailed. Each request gives method, **route**,
   reason PHP sites are slow while the CPU is idle.
 - **Slow log** (`request_slowlog_timeout`): the PHP stack trace of each request slower than
   the threshold, shown next to the slow requests.
+- **Memory per worker** (average and largest), and from it **the `pm.max_children` the
+  server can afford** with the memory that's free.
+- **OPcache per PHP version** (8.2–8.5 can run side by side, each with its own cache): memory
+  used, full or not, hit rate, restarts, cached scripts against `max_accelerated_files`,
+  interned strings buffer. A full OPcache recompiles code on every request. Read by a small
+  read-only status script, run through the same FastCGI client on each pool.
 - Setup proposes the two pool settings, with the same approval and `php-fpm -t` check.
 
 ### 4.4 Databases: query efficiency first
@@ -186,6 +209,31 @@ with lock waits and idle-in-transaction sessions), connections, and the buffer c
 Also: `SHOW GLOBAL STATUS` (MySQL: threads, buffer pool reads vs requests, temporary tables on
 disk); PostgreSQL checkpoints and cache hit ratio.
 
+**Queries per request (N+1)**: a query shape's calls in 5 minutes divided by the requests in the
+same 5 minutes (§4.2), per host where it can be told apart. A shape at hundreds of calls per
+request is a loop in the code (§1.1's page ran about 10,600 queries). Shown with the routes
+that were busy at the time.
+
+**New query shapes**: MySQL records when each shape was first seen (`FIRST_SEEN`); liops keeps
+the same for PostgreSQL. "Queries that appeared since the deploy on Tuesday" (§4.8).
+
+**Locks and transactions**: lock waits (who waits for whom: MySQL
+`performance_schema.data_lock_waits`, PostgreSQL `pg_locks` with `pg_blocking_pids`),
+deadlocks (counters, and MySQL's latest deadlock report), and transactions open longer than a
+minute. Devices writing all day plus queue workers is where these come from.
+
+**Database memory against data size**: MySQL's `innodb_buffer_pool_size` (Ubuntu's default is
+128 MB), buffer pool reads from disk vs from memory; PostgreSQL's `shared_buffers`,
+`effective_cache_size`, `work_mem`, cache hit ratio; both against the data size and the
+server's free memory. Feeds the tuning advice (§5.1).
+
+**Index health**: unused indexes (MySQL `sys.schema_unused_indexes`, PostgreSQL
+`idx_scan = 0`) and duplicate ones (`sys.schema_redundant_indexes`, same columns on
+PostgreSQL), which cost time on every insert; tables without a primary key.
+
+**PostgreSQL upkeep**: dead rows and the last autovacuum per table (bloat), and **transaction ID
+age** per database (`age(datfrozenxid)`): rare, but it stops a database when it runs out.
+
 **Setup**: MySQL's digests are on by default. PostgreSQL needs `pg_stat_statements` in
 `shared_preload_libraries` and one restart, asked first (agreed, §9). Without it, the database
 page still shows the per-table scans, activity and locks.
@@ -198,10 +246,59 @@ config (e.g. Laravel/Goravel's `storage/logs/*.log`).
 
 - Show the last lines, follow live, filter by text, level (when the format has one) and time.
 - Hard limits on how much is read per request, so a 20 GB log can't slow the server.
+- **App errors, grouped**: Laravel's logs (`storage/logs/*.log`) are tailed, and each
+  `ERROR`/`CRITICAL` entry is counted by exception class and file:line, a light Sentry.
+  Counts and first/last seen are stored; messages (which can hold personal data) are only
+  shown live, from the file.
 - **Growth rate per log file** (lines and bytes per minute), on the Resources page: a debug log
   line written in a loop (§1.1) costs disk and I/O, and is easy to miss.
 - Logs can contain secrets and personal data. They stay behind the same SSH tunnel as
   everything else, and the monitor's user only gets read access to the logs it's given.
+
+### 4.6 Laravel apps
+
+Apps are found from the web servers' configs (each site's `root` → the app folder above
+`public/`). Once a day the root service checks, per app, and keeps only true/false findings
+(§2):
+
+| Check | Why it matters |
+|---|---|
+| `APP_DEBUG=true` in production | Slower, and shows stack traces (and secrets) to visitors |
+| Config, routes, events or views **not cached** (`bootstrap/cache`) | Rebuilt on every request |
+| `LOG_LEVEL=debug` | Large, fast-growing logs (§1.1) |
+| **`QUEUE_CONNECTION=sync`** | Queued jobs run inside the web request |
+| Telescope or Debugbar on in production | Records every request: slow, and a data store of its own |
+| `SESSION_DRIVER` / `CACHE_STORE` = `file` or `database` on a busy app | Disk or database work on every request; Redis is the usual fix (§4.7) |
+
+**Queues**: backlog (how old the oldest waiting job is) and failed jobs per hour, from Redis
+(queue lengths) or, for the database driver, from the tables' size estimates (the monitor
+can't read the app's rows). **The scheduler**: whether `schedule:run` ran every minute (cron's
+journal lines), and whether runs overlapped.
+
+### 4.7 Redis
+
+From `INFO` and `SLOWLOG`, every 15 s / 5 min: memory against `maxmemory`, **evictions**,
+hit ratio, connected clients, commands per second, slow commands, persistence (last save, AOF).
+The monitor connects with its own Redis ACL user, allowed only `INFO`, `SLOWLOG GET` and
+`CONFIG GET` (set up with approval).
+
+**Sessions in Redis** get their own checks, because a wrong setup silently logs people out:
+
+- sessions and cache share a Redis database, so clearing the cache ends every session;
+- an eviction policy that can drop session keys (`allkeys-*` / `volatile-*`) with memory near
+  `maxmemory`, or evictions already happening;
+- no persistence (RDB or AOF), so a Redis restart ends every session;
+- Redis reachable from outside the server, or without a password/ACL.
+
+### 4.8 Markers: what changed, and when
+
+Charts carry markers, and comparisons use them:
+
+- **Deploys**, detected from a release symlink changing (`current -> releases/…`), the app's
+  git `HEAD` changing, or a PHP-FPM reload in the journal. "Slower since the deploy at 14:02":
+  routes and query shapes compared before vs after.
+- **liops's own jobs** (the 01:30 backup and dumps), so their load isn't mistaken for the app's.
+- **Applied tuning** (§5.1), with the before/after comparison.
 
 ## 5. The verdict: tune it, fix the app, or a bigger VM?
 
@@ -217,10 +314,52 @@ numbers and the charts behind it; liops never claims more than the data shows:
 | A few query shapes take most of the database's time; rows examined ≫ rows sent, or no index used | **Fix the app first**: those queries need indexes or rewriting (listed, with the tables' indexes and pattern flags) |
 | Long statements (> 1 s) while CPU is high and unrelated routes slow down | The scans are holding CPU cores: fixing them speeds up the rest too |
 | A log file growing by thousands of lines a minute | Logging too much (e.g. a debug level left on): costs disk and I/O |
+| A query shape with hundreds of calls per request | **N+1 in the code**: load the relation with the parent query (eager loading) |
+| Lock waits or deadlocks between web requests, queue workers and device pushes | Contention: shorter transactions, ordered updates, or an index on the locked rows' filter |
+| Buffer pool / cache mostly read from disk while data fits in free memory | Give the database more memory (§5.1) |
+| OPcache full, or restarting | Raise `opcache.memory_consumption` / `max_accelerated_files` (§5.1) |
+| A Laravel check failing (§4.6) | The specific fix (e.g. `php artisan config:cache`, a real queue driver) |
+| Slower since a deploy | The routes and new query shapes that changed, before vs after |
 | Database cache hit ratio low while memory is free | Give the database more memory (`innodb_buffer_pool_size`, `shared_buffers`) |
 | CPU busy (> 80%) for long stretches, spread across services, no single cause | The workload has outgrown the VM: more CPUs |
 | Slow routes with low database time and low CPU | Time is spent waiting elsewhere: external APIs, locks, sleeps; see the slow log |
 | Disk growth trend | "Full in about N days" |
+
+### 5.1 Tuning: advise, then apply on approval
+
+Each recommendation says what, why (the numbers), the expected effect, and how it would be
+applied. A person approves it in the UI; liops then:
+
+1. writes it to **a file liops manages**, never the main config:
+   `/etc/mysql/mysql.conf.d/zz-liops-tuning.cnf`,
+   `/etc/postgresql/<v>/main/conf.d/20-liops-tuning.conf`, a `zz-liops-tuning.ini` in each PHP
+   version's `fpm/conf.d`, and, for pool settings (which can't be split across files), the pool
+   file itself, with a backup of the original;
+2. **checks** it (`php-fpm8.x -t`, `mysqld --validate-config`, PostgreSQL's
+   `pg_file_settings` errors), and stops if the check fails;
+3. **applies it the least disruptive way**: online where the database allows (MySQL resizes
+   `innodb_buffer_pool_size` and `innodb_redo_log_capacity` live; PostgreSQL reloads most
+   settings), a PHP-FPM reload, and a **restart only when the setting needs one and a person
+   presses it** (PostgreSQL `shared_buffers`, `max_connections`);
+4. keeps the previous version for **one-click revert**, and puts a marker on the charts with a
+   **before/after** comparison after a day.
+
+In scope:
+
+| Component | Settings |
+|---|---|
+| PHP-FPM | `pm` (dynamic / ondemand / static), `pm.max_children` from memory per worker, spare servers, `pm.max_requests` (for leaking workers), `request_terminate_timeout`, `request_slowlog_timeout` |
+| PHP | OPcache (`memory_consumption`, `interned_strings_buffer`, `max_accelerated_files`, `validate_timestamps` with deploys clearing the cache), `realpath_cache_size`, `memory_limit` |
+| MySQL | `innodb_buffer_pool_size`, `innodb_redo_log_capacity`, `max_connections`, `tmp_table_size` / `max_heap_table_size`, `table_open_cache` |
+| PostgreSQL | `shared_buffers`, `effective_cache_size`, `work_mem`, `maintenance_work_mem`, `random_page_cost` / `effective_io_concurrency` (SSD), `max_wal_size`, autovacuum per busy table |
+| Redis | `maxmemory`, `maxmemory-policy` (and a separate database or instance for sessions), persistence for sessions |
+
+Never touched: durability (`innodb_flush_log_at_trx_commit`, `sync_binlog`,
+`synchronous_commit`, `fsync`), replication, authentication and network exposure. Indexes are
+**suggested** with the `CREATE INDEX` and a Laravel migration snippet, never created.
+
+Memory recommendations are made together, against the server's RAM: the buffer pool, PHP
+workers, Redis and the OS cache share it, and liops won't recommend more than there is.
 
 ## 6. UI
 
@@ -237,6 +376,10 @@ A "Monitoring" section in the same UI, through the same tunnel:
   running statements, connections, cache hit ratio.
 - **Resources**: CPU (with iowait and steal), memory, swap, disk, I/O, network, per-service
   CPU and memory.
+- **Apps**: per Laravel app, the checks (§4.6), errors grouped (§4.5), queues and the scheduler.
+- **Redis**: memory, evictions, hit ratio, slow commands, and the session checks (§4.7).
+- **Tuning**: the recommendations (§5.1), each with its evidence and an Apply button; applied
+  changes with their before/after and a Revert button.
 - **Logs**: the viewer.
 
 Time ranges: last hour (15 s), 24 hours and 7 days (1 minute), 90 days (1 hour). Query
@@ -258,6 +401,9 @@ monitor:
   services: []              # systemd units to watch; empty: every running service
   log_files: []             # extra log files for the viewer, globs allowed
   routes: []                # route patterns that override the automatic ones
+  apps: []                  # Laravel app folders; empty: found from the web servers' configs
+  redis: []                 # Redis instances (host:port or socket); empty: the local default
+  deploy_markers: true      # detect deploys (§4.8)
 ```
 
 What's detected automatically is shown in Settings, with the source it came from.
@@ -269,14 +415,16 @@ the problem.
 
 | Phase | Deliverable | Done when | Estimate |
 |---|---|---|---|
-| **MO0. Skeleton + machine** | `liops monitor`, the `liops-monitor` user and unit, the Unix-socket API, the rollup store, machine, per-service and top-process metrics (§4.1), the Resources page, SVG charts | A VM shows CPU/memory/disk history; the monitor stays under budget; backups unaffected with it stopped or crashing | 1 week |
-| **MO1. Query efficiency** | MySQL digests and PostgreSQL `pg_stat_statements` (with the approved restart), per database; per-table stats; running statements; pattern flags; indexes side by side; the live MySQL sample; the Database page; the headline in the daily email | §1.1 reproduced on a VM: a seeded table of ~1M rows, a `LOWER(col) LIKE '%x%'` search and a `DATE(col) =` filter come out on top with their ratios, flags and missing indexes, in a multi-database setup | 1.5 weeks |
-| **MO2. Requests and PHP-FPM** | nginx and Caddy log parsers, routes, percentiles, slowest requests, the approved log format change; PHP-FPM status and slow log (§4.2, §4.3); their pages | A load test against nginx + PHP-FPM shows the slow routes, and a starved pool shows as "max children reached" | 1.5 weeks |
-| **MO3. Verdict, logs, alerts** | The verdict rules (§5), the log viewer and log growth (§4.5), the immediate alerts | On scripted scenarios (CPU hog, memory pressure, bad query, small `pm.max_children`, full-ish disk, chatty log) the verdict names the right cause | 1 week |
+| **MO0. Skeleton + machine** | `liops monitor`, the `liops-monitor` user and unit, the Unix-socket API, the rollup store, machine, per-service, top-process and disk-breakdown metrics, failed units and reboot-required (§4.1), the Resources page, SVG charts, markers for liops's jobs (§4.8) | A VM shows CPU/memory/disk history; the monitor stays under budget; backups unaffected with it stopped or crashing | 1 week |
+| **MO1. Databases** | Query efficiency (digests, `pg_stat_statements` with the approved restart), per database; queries per request; new shapes; locks, deadlocks, long transactions; memory against data size; index health; PostgreSQL upkeep; the Database page; the headline in the daily email | §1.1 reproduced on a VM (a ~1M-row table, `LOWER(col) LIKE '%x%'` and `DATE(col) =` on top, with ratios, flags and missing indexes, across several databases), plus a scripted N+1 page and a lock wait | 2 weeks |
+| **MO2. Requests, PHP, Laravel, Redis** | nginx and Caddy parsers with `$host`, routes, percentiles, slowest requests, top clients, heatmap, the approved log format change; PHP-FPM status, slow log, memory per worker, OPcache per version; Laravel checks, errors grouped, queues, scheduler; Redis and the session checks; deploy markers | A load test against nginx + PHP-FPM + Redis shows the slow routes per host; a starved pool, a full OPcache, `QUEUE_CONNECTION=sync` and an evicting session Redis are each reported | 2 weeks |
+| **MO3. Verdict, logs, alerts** | The verdict rules (§5), the log viewer and log growth (§4.5), the immediate alerts (including `pg_wal` growing) | On scripted scenarios (CPU hog, memory pressure, bad query, N+1, small `pm.max_children`, full-ish disk, chatty log, slower after a deploy) the verdict names the right cause | 1 week |
+| **MO4. Tuning** | Recommendations and apply-on-approval with check, least-disruptive apply, revert and before/after (§5.1), for PHP-FPM, OPcache, MySQL, PostgreSQL and Redis | On a VM with default settings and a realistic load, the recommendations are sensible, applying them works online or by reload (restarts only on request), revert restores the old file, and the before/after shows the change | 1.5 weeks |
 
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
-`make vm-test-monitor` that builds a LEMP VM (nginx, PHP-FPM, MySQL, and PostgreSQL for MO1),
-drives load at it, and checks what the monitor reports.
+`make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
+Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the
+monitor reports.
 
 ## 9. Risks and open questions
 
@@ -286,6 +434,10 @@ Answered (November 2026):
   PHP **8.2, 8.3, 8.4 and 8.5**, sometimes several on one server (one FPM service and pool
   directory each: `php8.x-fpm`, `/etc/php/8.x/fpm/pool.d`); databases **PostgreSQL and MySQL**.
 - **Log format changes** on live sites are fine, with approval and a config check before reload.
+- **Redis** is used for the cache, and sessions are planned to move to it: the session checks in
+  §4.7 decide whether that setup is safe.
+- **Tuning** (§5.1): advise, and apply on approval; never by itself. Indexes are suggested, not
+  created.
 - **The PostgreSQL restart** for `pg_stat_statements` is fine, once per server, scheduled by a
   person.
 
@@ -295,6 +447,8 @@ Still open:
   every table's indexes without reading rows. Check on MySQL 8.4 in MO1 that it is enough
   for `information_schema.STATISTICS` and `TABLES`; if not, the index list comes from the root
   service instead.
+- **Reading `.env`** (§4.6) needs the root service and touches a file full of secrets; only the
+  named keys are parsed, in memory, and only true/false results leave the function.
 - **Many tenant databases** (hundreds): the hourly per-table pass on PostgreSQL connects to
   each database; it's spread over the hour and capped, measured in MO1.
 
@@ -309,4 +463,6 @@ Still open:
 - **A central view**: each server pushes a small daily summary (or the verdict) to a bucket,
   and one page lists all servers.
 - **App metrics** from apps that expose Prometheus `/metrics` (Go apps can, with one library).
+- **Goravel checks** like the Laravel ones in §4.6, once their settings are listed.
+- **Apache**, if a server ever runs it (`%D` in the log format).
 - **Tracing** (OpenTelemetry) for requests whose time isn't explained by the database or PHP.
