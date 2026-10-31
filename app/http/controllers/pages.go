@@ -98,9 +98,10 @@ func (s *Server) backupHealth(h *jobs.Health) (level string, failed []state.Run,
 // chartSpec is what app.js draws: x as Unix seconds, one value per x per series (null for
 // none).
 type chartSpec struct {
-	Unit   string        `json:"unit"`
-	X      []int64       `json:"x"`
-	Series []chartSeries `json:"series"`
+	Unit    string        `json:"unit"`
+	X       []int64       `json:"x"`
+	Series  []chartSeries `json:"series"`
+	Markers []chartMarker `json:"markers,omitempty"` // liops's jobs, as bands
 }
 
 type chartSeries struct {

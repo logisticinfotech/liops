@@ -421,14 +421,29 @@ the problem.
 | **MO3. Verdict, logs, alerts** | The verdict rules (§5), the log viewer and log growth (§4.5), the immediate alerts (including `pg_wal` growing) | On scripted scenarios (CPU hog, memory pressure, bad query, N+1, small `pm.max_children`, full-ish disk, chatty log, slower after a deploy) the verdict names the right cause | 1 week |
 | **MO4. Tuning** | Recommendations and apply-on-approval with check, least-disruptive apply, revert and before/after (§5.1), for PHP-FPM, OPcache, MySQL, PostgreSQL and Redis | On a VM with default settings and a realistic load, the recommendations are sensible, applying them works online or by reload (restarts only on request), revert restores the old file, and the before/after shows the change | 1.5 weeks |
 
-**Status (November 2026).** MO0's core is built: `liops monitor`, the `liops-monitor` user and
+**Status (November 2026).** MO0 is built: `liops monitor`, the `liops-monitor` user and
 hardened unit (`install-system` writes it; Settings → Monitoring enables it), the socket API,
 the rollup store, machine/per-service/top-process metrics, and the Resources page (charts
-are uPlot, vendored, not hand-made SVG). Checked in an Ubuntu 26.04 VM: it runs as
-`liops-monitor` under the unit's sandbox, reads cgroups and every filesystem, uses about 6 MB,
-and a CPU/disk load shows up correctly on the page. Still to do for MO0: the disk breakdown
-(database files, `pg_wal`, binlogs, `/var/log`), failed units, reboot-required, and markers
-for liops's jobs on the charts.
+are uPlot, vendored, not hand-made SVG), with:
+
+- **Checks every 5 minutes:** failed units (`systemctl list-units --state=failed`, which works
+  for the monitor's user inside its sandbox) and Ubuntu's reboot-required flag with its
+  packages, shown as alerts on the page.
+- **The disk breakdown, hourly:** the monitor sizes `/var/log` itself. It can't read the
+  database folders, so root `serve` asks the database (`jobs.Runner.DiskUsage`: each
+  database's size, `pg_wal` or the binlogs) and pushes the numbers over the socket
+  (`POST /v1/push`, only `db.size:` and `disk.use:` names, kept for 2 hours). For MySQL the
+  size is data plus indexes as InnoDB counts them. Each filesystem and each item shows its
+  growth over the last day, and a filesystem that fills within 90 days at that rate says when.
+  Each app's `storage/` folder comes with app discovery in MO2.
+- **Job markers:** liops's own runs are shaded bands on every chart, with a backup and its
+  dumps joined into one.
+
+Checked in an Ubuntu 26.04 VM with PostgreSQL 18 and MySQL 8.4: it runs as `liops-monitor`
+under the unit's sandbox, reads cgroups and every filesystem, uses about 6 MB, a CPU/disk load
+shows up correctly, a failing unit and a pending restart are reported, liops's size queries
+run on both databases, and the socket refuses other users and names it doesn't allow. The
+push from a running `serve` is covered by unit tests; the VM pushed the same values by hand.
 
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,

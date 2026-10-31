@@ -4,6 +4,11 @@
 {{if .Problem}}
 <div class="note">{{.Problem}}{{with .Detail}}<div class="muted mono">{{.}}</div>{{end}}</div>
 {{else}}
+{{with .Checks}}
+{{if .FailedUnits}}<div class="error"><strong>{{len .FailedUnits}} {{if eq (len .FailedUnits) 1}}service has{{else}}services have{{end}} failed:</strong> <span class="mono">{{join .FailedUnits ", "}}</span>. See why with <code>sudo systemctl status {{index .FailedUnits 0}}</code> and <code>sudo journalctl -u {{index .FailedUnits 0}} -n 50</code>; once it's fixed, start it again with <code>sudo systemctl restart {{index .FailedUnits 0}}</code>.</div>{{end}}
+{{if .RebootRequired}}<div class="note">Ubuntu says this server needs a restart to finish installing updates{{with .RebootPackages}} (<span class="mono">{{join . ", "}}</span>){{end}}. Plan one for a quiet time: <code>sudo reboot</code>. liops, the databases and the web servers start again on their own.</div>{{end}}
+{{if .FailedError}}<div class="note">liops couldn't ask systemd which services have failed. <div class="muted mono">{{.FailedError}}</div></div>{{end}}
+{{end}}
 <nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/resources?range={{.}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else if eq . "7d"}}7 days{{else}}90 days{{end}}</a>{{end}}</nav>
 <div class="grid">
   <div class="stat"><div class="label">CPU busy</div><div class="value">{{printf "%.0f" .CPUBusy}}%</div><div class="sub">{{printf "%.0f" .CPUs}} CPUs</div></div>
@@ -12,7 +17,23 @@
   <div class="stat"><div class="label">Fullest disk</div><div class="value">{{printf "%.0f" .FullestPct}}%</div><div class="sub mono">{{.FullestDisk}}</div></div>
 </div>
 {{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
-{{if not .Charts}}<p class="muted">The charts appear once there are two samples to draw (15 seconds after the monitor starts; the longer ranges after their first minute or hour).</p>{{end}}
+{{if not .Charts}}<p class="muted">The charts appear once there are two samples to draw (15 seconds after the monitor starts; the longer ranges after their first minute or hour).</p>
+{{else}}<p class="muted">Shaded bands are liops's own jobs (backups and dumps), so you can tell their load from the apps'.</p>{{end}}
+
+<h2>Disk</h2>
+<div class="table-wrap"><table>
+  <tr><th>Filesystem</th><th class="num">Used</th><th class="num">Size</th><th class="num">Full</th><th class="num">Last 24 hours</th></tr>
+  {{range .Filesystems}}<tr><td class="mono">{{.Mount}}</td><td class="num">{{bytes (int64 .Used)}}</td><td class="num">{{bytes (int64 .Size)}}</td><td class="num">{{printf "%.0f" .Pct}}%</td>
+    <td class="num">{{if .HasGrowth}}{{perDay .Growth}}{{else}}<span class="muted">measuring</span>{{end}}{{if .FullInDays}} <span class="badge failed">full in about {{.FullInDays}} {{if eq .FullInDays 1}}day{{else}}days{{end}}</span>{{end}}</td></tr>
+  {{end}}
+</table></div>
+<div class="table-wrap"><table>
+  <tr><th>What uses it</th><th class="num">Size</th><th class="num">Last 24 hours</th></tr>
+  {{range .DiskUses}}<tr><td class="mono">{{.What}}</td><td class="num">{{bytes (int64 .Size)}}</td><td class="num">{{if .HasGrowth}}{{perDay .Growth}}{{else}}<span class="muted">measuring</span>{{end}}</td></tr>
+  {{end}}
+  {{if .NoDBSizes}}<tr><td colspan="3" class="muted">The databases' sizes come from liops within a few minutes of turning monitoring on, then every hour.</td></tr>{{end}}
+</table></div>
+<p class="muted">Growth shows once there are six hours of history.</p>
 
 <h2>Services</h2>
 <div class="table-wrap"><table>

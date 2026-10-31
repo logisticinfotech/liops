@@ -7,6 +7,7 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,15 +38,19 @@ type Monitor struct {
 	Store     *Store
 	Log       io.Writer
 	Now       func() time.Time
+	// Systemctl runs systemctl (for failed units); tests replace it.
+	Systemctl func(ctx context.Context, args ...string) ([]byte, error)
 
 	mu        sync.Mutex
 	started   time.Time
 	processes []Process
 	lastErr   string
+	checks    Checks
+	held      map[string]held // values from the slow checks and from Push
 }
 
 func New(collector *Collector, store *Store, log io.Writer) *Monitor {
-	return &Monitor{Collector: collector, Store: store, Log: log, Now: time.Now}
+	return &Monitor{Collector: collector, Store: store, Log: log, Now: time.Now, Systemctl: systemctl}
 }
 
 func (m *Monitor) logf(format string, args ...any) {
@@ -62,6 +67,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	if err := m.collect(); err != nil {
 		return err // no /proc: this isn't a machine liops can monitor
 	}
+	go m.slowLoop(ctx)
 	tick := time.NewTicker(Interval)
 	defer tick.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -91,6 +97,7 @@ func (m *Monitor) collect() error {
 		return err
 	}
 	m.lastErr = ""
+	m.heldValues(sample.Values, sample.Time)
 	if top != nil {
 		m.processes = top
 	}
@@ -110,11 +117,17 @@ type Status struct {
 	Error   string    `json:"error,omitempty"`
 }
 
-// Latest is the newest sample and the busiest processes.
+// Latest is the newest sample, the busiest processes and the checks.
 type Latest struct {
 	Time      time.Time          `json:"time"`
 	Values    map[string]float64 `json:"values"`
 	Processes []Process          `json:"processes"`
+	Checks    Checks             `json:"checks"`
+}
+
+// PushRequest is what the root service sends: database sizes and the like.
+type PushRequest struct {
+	Values map[string]float64 `json:"values"`
 }
 
 // SeriesResponse is the history of some series over a range.
@@ -153,9 +166,21 @@ func (m *Monitor) Handler() http.Handler {
 			return
 		}
 		m.mu.Lock()
-		procs := append([]Process(nil), m.processes...)
+		procs, checks := append([]Process(nil), m.processes...), m.checks
 		m.mu.Unlock()
-		writeJSON(w, Latest{Time: s.Time, Values: s.Values, Processes: procs})
+		writeJSON(w, Latest{Time: s.Time, Values: s.Values, Processes: procs, Checks: checks})
+	})
+	mux.HandleFunc("POST /v1/push", func(w http.ResponseWriter, r *http.Request) {
+		var req PushRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := m.Push(req.Values); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
 		span, ok := Ranges[r.URL.Query().Get("range")]
@@ -230,7 +255,11 @@ func NewClient(socket string) *Client {
 var ErrNotRunning = errors.New("the monitor isn't running")
 
 func (c *Client) get(ctx context.Context, path string, v any) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://monitor"+path, nil)
+	return c.do(ctx, "GET", path, nil, v)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body io.Reader, v any) error {
+	req, err := http.NewRequestWithContext(ctx, method, "http://monitor"+path, body)
 	if err != nil {
 		return err
 	}
@@ -239,9 +268,12 @@ func (c *Client) get(ctx context.Context, path string, v any) error {
 		return fmt.Errorf("%w (%s): %v", ErrNotRunning, c.Socket, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode/100 != 2 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("monitor: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	if v == nil {
+		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
 }
@@ -263,4 +295,13 @@ func (c *Client) Series(ctx context.Context, rng string, names ...string) (Serie
 	}
 	var s SeriesResponse
 	return s, c.get(ctx, "/v1/series?"+q, &s)
+}
+
+// Push sends values (database sizes) for the monitor to keep with its samples.
+func (c *Client) Push(ctx context.Context, values map[string]float64) error {
+	data, err := json.Marshal(PushRequest{Values: values})
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, "POST", "/v1/push", bytes.NewReader(data), nil)
 }

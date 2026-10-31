@@ -470,7 +470,7 @@ Rough estimates for one developer. Each phase ends with a usable result.
   is tested: everything passed in an Ubuntu 26.04 VM; the Docker CI job hasn't run yet.
 - **Monitoring:** proposed in [PLAN-monitor.md](PLAN-monitor.md) (November 2026): a per-server,
   non-root `liops-monitor` service for slow requests, PHP-FPM, database query load, machine
-  resources and logs, with a "tune, fix the app, or a bigger VM" verdict. MO0's core is built
-  (machine, services, processes, the Resources page); see its §8 for what's left.
+  resources and logs, with a "tune, fix the app, or a bigger VM" verdict. MO0 is built
+  (machine, services, processes, checks, disk breakdown, the Resources page); see its §8.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

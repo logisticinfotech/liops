@@ -549,14 +549,17 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 		json.NewEncoder(w).Encode(monitor.Latest{Time: now, Values: map[string]float64{
 			"cpus": 4, "cpu.busy": 37, "cpu.user": 30, "load.1": 6.5, "mem.total": 8 << 30, "mem.used": 3 << 30,
 			"disk.pct:/": 41, "disk.pct:/var": 88, "io.read:sda": 1000, "net.rx:eth0": 500,
+			"disk.used:/var": 88e9, "disk.size:/var": 100e9, "db.size:shop": 5 << 30, "disk.use:pg_wal": 1 << 30,
 			"svc.mem:nginx.service": 50 << 20, "svc.cpu:nginx.service": 2, "svc.mem:postgresql.service": 900 << 20,
-		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 12, CPU: 80, Memory: 600 << 20}}})
+		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 12, CPU: 80, Memory: 600 << 20}},
+			Checks: monitor.Checks{Time: now, FailedUnits: []string{"queue-worker.service"}, RebootRequired: true, RebootPackages: []string{"libc6"}}})
 	})
 	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
-		one := 1.0
-		res := monitor.SeriesResponse{Step: 60, X: []int64{now.Unix() - 60, now.Unix()}, Series: map[string]monitor.SeriesValues{}}
+		// Twelve hours in which everything grew by 1 GB: 2 GB a day.
+		zero, gb := 0.0, 1e9
+		res := monitor.SeriesResponse{Step: 60, X: []int64{now.Unix() - 12*3600, now.Unix()}, Series: map[string]monitor.SeriesValues{}}
 		for _, n := range r.URL.Query()["name"] {
-			res.Series[n] = monitor.SeriesValues{Avg: []*float64{&one, nil}, Max: []*float64{&one, nil}}
+			res.Series[n] = monitor.SeriesValues{Avg: []*float64{&zero, &gb}, Max: []*float64{&zero, &gb}}
 		}
 		json.NewEncoder(w).Encode(res)
 	})
@@ -578,13 +581,21 @@ func TestResourcesPage(t *testing.T) {
 	cfg.Monitor.Enabled = true
 	h := newHarness(t, cfg, true)
 	h.ui.Monitor = fakeMonitor(t)
+	for _, job := range []string{"full", "dumps"} {
+		run := &state.Run{Job: job, Start: time.Now().Add(-2 * time.Hour)}
+		h.st.StartRun(run)
+		run.Status, run.End = state.StatusOK, run.Start.Add(5*time.Minute)
+		h.st.SaveRun(run)
+	}
 
 	code, _, body := h.get("/monitoring/resources?range=7d")
 	if code != 200 {
 		t.Fatalf("GET: %d\n%s", code, body)
 	}
 	for _, want := range []string{`href="/monitoring/resources">Resources`, "6.50", "work is waiting", "/var", "88%",
-		"postgresql", "php-fpm: pool www", `class="tab active" href="/monitoring/resources?range=7d"`, "data-chart=", "Disk I/O", "read sda"} {
+		"postgresql", "php-fpm: pool www", `class="tab active" href="/monitoring/resources?range=7d"`, "data-chart=", "Disk I/O", "read sda",
+		"1 service has failed", "systemctl status queue-worker.service", "needs a restart", "libc6",
+		"database shop", "WAL (pg_wal)", "&#43;1.9 GB", "full in about 6 days", "Databases and logs on disk", "&#34;markers&#34;", "dumps"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the page should contain %q", want)
 		}

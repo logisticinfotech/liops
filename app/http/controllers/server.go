@@ -94,7 +94,8 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return t.In(loc()).Format("2 Jan 2006 15:04:05 MST")
 		},
-		"bytes": notify.Bytes,
+		"bytes":  notify.Bytes,
+		"perDay": formatPerDay,
 		"int64": func(v any) int64 {
 			switch n := v.(type) {
 			case float64:

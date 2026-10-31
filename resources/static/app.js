@@ -43,8 +43,8 @@ document.addEventListener("DOMContentLoaded", applyTheme);
 
 // Charts: <div class="chart" data-chart='{"unit":"bytes","x":[unix…],"series":[{"label":…,"values":[…]}]}'>.
 const palette = {
-  light: { axis: "#71717a", grid: "#e4e4e7", series: ["#18181b", "#0284c7", "#d97706", "#059669", "#dc2626"] },
-  dark: { axis: "#a1a1aa", grid: "#27272a", series: ["#f4f4f5", "#38bdf8", "#fbbf24", "#34d399", "#f87171"] },
+  light: { axis: "#71717a", grid: "#e4e4e7", marker: "rgba(113, 113, 122, 0.12)", series: ["#18181b", "#0284c7", "#d97706", "#059669", "#dc2626"] },
+  dark: { axis: "#a1a1aa", grid: "#27272a", marker: "rgba(161, 161, 170, 0.11)", series: ["#f4f4f5", "#38bdf8", "#fbbf24", "#34d399", "#f87171"] },
 };
 
 function formatValue(unit, v) {
@@ -71,6 +71,31 @@ function yRange(unit) {
 // Byte axes step in powers of 1024, to match how formatValue prints them.
 const byteIncrs = [0, 1, 2, 3, 4].flatMap((k) => [1, 2, 5, 10, 25, 50, 100, 250, 500].map((n) => n * 1024 ** k));
 
+// Bands where liops's own jobs ran, behind the lines; labelled when few are in view.
+function drawMarkers(u, markers, colors) {
+  if (!markers) return;
+  const { ctx, bbox } = u;
+  const dpr = devicePixelRatio || 1;
+  const shown = markers.filter((m) => m.end >= u.scales.x.min && m.start <= u.scales.x.max);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+  ctx.clip();
+  ctx.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+  for (const m of shown) {
+    const x0 = u.valToPos(m.start, "x", true);
+    const x1 = u.valToPos(m.end, "x", true);
+    ctx.fillStyle = colors.marker;
+    ctx.fillRect(x0, bbox.top, Math.max(2 * dpr, x1 - x0), bbox.height);
+    if (shown.length <= 8) {
+      ctx.fillStyle = colors.axis;
+      // A job that started before the chart's first point is labelled at the left edge.
+      ctx.fillText(m.label, Math.max(x0, bbox.left) + 4 * dpr, bbox.top + 14 * dpr);
+    }
+  }
+  ctx.restore();
+}
+
 function drawChart(el) {
   if (!window.uPlot) return;
   const spec = JSON.parse(el.dataset.chart);
@@ -82,6 +107,7 @@ function drawChart(el) {
     width: Math.max(200, el.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight)),
     height: +(el.dataset.height || 220),
     cursor: { points: { size: 6 } },
+    hooks: { drawClear: [(u) => drawMarkers(u, spec.markers, colors)] },
     scales: { x: { time: true }, y: { range: yRange(spec.unit) } },
     axes: [axis, {
       ...axis, size: 70,

@@ -155,6 +155,7 @@ func runServe(args []string, out io.Writer) error {
 		return err
 	}
 	ui.Monitor = monitor.NewClient(p.monitorSocket)
+	go svc.PushDiskUsage(ui.Monitor.Push)
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {
 		return fmt.Errorf("ui.listen: %w", err)

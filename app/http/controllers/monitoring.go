@@ -3,14 +3,17 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/logisticinfotech/liops/app/monitor"
+	"github.com/logisticinfotech/liops/app/notify"
 )
 
 // monitorRanges are the Resources page's time ranges, in order.
@@ -28,14 +31,43 @@ type resourcesData struct {
 	FullestDisk                                      string
 	FullestPct                                       float64
 
+	Checks      monitor.Checks
+	Filesystems []fsRow
+	DiskUses    []diskUseRow
+	NoDBSizes   bool // no database sizes from liops yet
+
 	Charts    []chartBox
 	Services  []serviceRow
 	Processes []monitor.Process
 }
 
+// fsRow is one filesystem: how full it is and how fast it fills.
+type fsRow struct {
+	Mount           string
+	Used, Size, Pct float64
+	Growth          float64 // bytes per day
+	HasGrowth       bool
+	FullInDays      int // 0: not filling, or not within 90 days
+}
+
+// diskUseRow is one thing that takes disk space: a database, the WAL, logs.
+type diskUseRow struct {
+	What      string
+	Size      float64
+	Growth    float64 // bytes per day
+	HasGrowth bool
+}
+
 type chartBox struct {
 	Title string
 	Spec  string // JSON for app.js
+}
+
+// chartMarker is a band on a chart where one of liops's own jobs ran.
+type chartMarker struct {
+	Start int64  `json:"start"`
+	End   int64  `json:"end"`
+	Label string `json:"label"`
 }
 
 type serviceRow struct {
@@ -92,6 +124,88 @@ var resourceCharts = []chartGroup{
 	{"Disk space (% used)", "percent", with("disk.pct:"), labelAfter},
 	{"Disk I/O", "bytes/s", with("io.read:", "io.write:"), labelAfter},
 	{"Network", "bytes/s", with("net.rx:", "net.tx:"), labelAfter},
+	{"Databases and logs on disk", "bytes", with("db.size:", "disk.use:"), diskUseLabel},
+}
+
+// diskUseLabel names a db.size: or disk.use: series for people.
+func diskUseLabel(name string) string {
+	if db, ok := strings.CutPrefix(name, "db.size:"); ok {
+		return db
+	}
+	switch what := strings.TrimPrefix(name, "disk.use:"); what {
+	case "pg_wal":
+		return "WAL (pg_wal)"
+	case "binlogs":
+		return "binlogs"
+	default:
+		return what
+	}
+}
+
+// perDay is how fast a series grew over its range, per day. ok is false with less than
+// six hours between the first and last values.
+func perDay(x []int64, values []*float64) (float64, bool) {
+	first, last := -1, -1
+	for i, v := range values {
+		if v != nil {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first < 0 || x[last]-x[first] < 6*3600 {
+		return 0, false
+	}
+	return (*values[last] - *values[first]) / float64(x[last]-x[first]) * 86400, true
+}
+
+// growth returns the per-day growth of each series over the last 24 hours, asking the
+// monitor in batches of 50 (its limit).
+func (s *Server) growth(ctx context.Context, names []string) map[string]float64 {
+	out := map[string]float64{}
+	for len(names) > 0 {
+		batch := names[:min(50, len(names))]
+		names = names[len(batch):]
+		res, err := s.Monitor.Series(ctx, "24h", batch...)
+		if err != nil {
+			continue
+		}
+		for _, n := range batch {
+			if g, ok := perDay(res.X, res.Series[n].Avg); ok {
+				out[n] = g
+			}
+		}
+	}
+	return out
+}
+
+// jobMarkers are liops's own jobs in the range, joined when one starts right after
+// another (a backup and its dumps), so the charts show when backups put load on the
+// machine.
+func (s *Server) jobMarkers(since time.Time) []chartMarker {
+	runs, err := s.Svc.State.Runs("", 2000)
+	if err != nil {
+		return nil
+	}
+	var out []chartMarker
+	for i := len(runs) - 1; i >= 0; i-- { // oldest first
+		r := runs[i]
+		end := r.End
+		if end.IsZero() {
+			end = time.Now()
+		}
+		if end.Before(since) {
+			continue
+		}
+		if n := len(out); n > 0 && r.Start.Unix() <= out[n-1].End+600 {
+			out[n-1].End = max(out[n-1].End, end.Unix())
+			out[n-1].Label += " + " + r.Job
+			continue
+		}
+		out = append(out, chartMarker{Start: r.Start.Unix(), End: end.Unix(), Label: r.Job})
+	}
+	return out
 }
 
 // resources is the Resources page: the machine's CPU, memory, disk and network, now and
@@ -102,8 +216,9 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 		d.Range = "24h"
 	}
 	render := func() { s.render(w, r, "resources", page{Title: "Resources", Nav: "resources", Data: d}) }
+	ctx := r.Context()
 
-	latest, err := s.Monitor.Latest(r.Context())
+	latest, err := s.Monitor.Latest(ctx)
 	if err != nil {
 		switch {
 		case !d.Enabled:
@@ -138,17 +253,58 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(d.Services, func(i, j int) bool { return d.Services[i].Memory > d.Services[j].Memory })
 	d.Processes = latest.Processes
+	d.Checks = latest.Checks
+
+	// Disk: each filesystem and what takes the space, with growth over the last day.
+	var growing []string
+	for _, n := range names {
+		if strings.HasPrefix(n, "disk.used:") || strings.HasPrefix(n, "db.size:") || strings.HasPrefix(n, "disk.use:") {
+			growing = append(growing, n)
+		}
+	}
+	grow := s.growth(ctx, growing)
+	for _, n := range names {
+		if mount, ok := strings.CutPrefix(n, "disk.pct:"); ok {
+			f := fsRow{Mount: mount, Pct: v[n], Used: v["disk.used:"+mount], Size: v["disk.size:"+mount]}
+			f.Growth, f.HasGrowth = grow["disk.used:"+mount]
+			if f.Growth > 0 {
+				if days := (f.Size - f.Used) / f.Growth; days < 90 {
+					f.FullInDays = max(1, int(math.Round(days)))
+				}
+			}
+			d.Filesystems = append(d.Filesystems, f)
+		}
+		if strings.HasPrefix(n, "db.size:") || strings.HasPrefix(n, "disk.use:") {
+			u := diskUseRow{What: diskUseLabel(n), Size: v[n]}
+			if strings.HasPrefix(n, "db.size:") {
+				u.What = "database " + u.What
+			}
+			u.Growth, u.HasGrowth = grow[n]
+			d.DiskUses = append(d.DiskUses, u)
+		}
+	}
+	sort.Slice(d.DiskUses, func(i, j int) bool { return d.DiskUses[i].Size > d.DiskUses[j].Size })
+	hasDB := false
+	for _, n := range names {
+		hasDB = hasDB || strings.HasPrefix(n, "db.size:")
+	}
+	d.NoDBSizes = !hasDB
+	markers := s.jobMarkers(time.Now().Add(-monitor.Ranges[d.Range]))
 
 	for _, g := range resourceCharts {
 		series := g.series(names)
 		if len(series) == 0 {
 			continue
 		}
-		res, err := s.Monitor.Series(r.Context(), d.Range, series...)
+		if len(series) > 10 { // the largest ten: a chart of 60 databases can't be read
+			sort.SliceStable(series, func(i, j int) bool { return v[series[i]] > v[series[j]] })
+			series = series[:10]
+		}
+		res, err := s.Monitor.Series(ctx, d.Range, series...)
 		if err != nil || len(res.X) < 2 {
 			continue
 		}
-		spec := chartSpec{Unit: g.unit, X: res.X}
+		spec := chartSpec{Unit: g.unit, X: res.X, Markers: markers}
 		for _, n := range series {
 			spec.Series = append(spec.Series, chartSeries{Label: g.label(n), Values: res.Series[n].Avg})
 		}
@@ -157,4 +313,15 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	render()
+}
+
+// formatPerDay prints a growth in bytes per day: "+12 MB", "−3.0 MB", "no change".
+func formatPerDay(b float64) string {
+	switch {
+	case b >= 1024:
+		return "+" + notify.Bytes(int64(b))
+	case b <= -1024:
+		return "−" + notify.Bytes(int64(-b))
+	}
+	return "no change"
 }

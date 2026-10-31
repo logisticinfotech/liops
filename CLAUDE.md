@@ -109,7 +109,9 @@ touches the live server.
   liops's config or credentials. The root UI reads it with `monitor.Client`; series are named
   `metric` or `metric:label` (`disk.pct:/var`, `svc.mem:nginx.service`). `monitor.enabled` in
   Settings enables and starts the unit (`service.SetMonitor`; tests replace it). Parsers take
-  a root directory, so tests use a fake `/proc` tree.
+  a root directory, so tests use a fake `/proc` tree. What the monitor's user can't read
+  (database sizes) root `serve` pushes hourly (`Service.PushDiskUsage` → `POST /v1/push`,
+  only `db.size:`/`disk.use:` names); keep that the only write path.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`
