@@ -5,8 +5,8 @@ package monitor
 import (
 	"context"
 	"net/http"
-	"sort"
 	"net/url"
+	"sort"
 	"time"
 )
 
