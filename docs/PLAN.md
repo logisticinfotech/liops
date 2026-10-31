@@ -465,5 +465,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
   binlog shipping, retention, `restore-files`, [restore-mysql.md](restore-mysql.md)) are built
   on branch `mysql-support`, and so is M3 (installer, wizard, settings). Its §10 says what
   is tested: everything passed in an Ubuntu 26.04 VM; the Docker CI job hasn't run yet.
+- **Monitoring:** proposed in [PLAN-monitor.md](PLAN-monitor.md) (November 2026): a per-server,
+  non-root `liops-monitor` service for slow requests, PHP-FPM, database query load, machine
+  resources and logs, with a "tune, fix the app, or a bigger VM" verdict. Not started.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.
