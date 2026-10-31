@@ -30,6 +30,7 @@ var settingsTabs = []settingsTab{
 	{"email", "Email", []string{sectionEmail}},
 	{"backups", "Backups", []string{sectionSchedules}},
 	{"dumps", "Dumps", []string{sectionDumps, sectionLabels}},
+	{"monitoring", "Monitoring", []string{sectionMonitor}},
 }
 
 // tabOf returns the tab a section's form is on.

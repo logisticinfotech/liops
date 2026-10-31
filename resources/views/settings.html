@@ -37,4 +37,11 @@
   {{template "fields-labels" .Cfg}}
   <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
 </form>{{end}}
+{{if eq $.Data.Tab "monitoring"}}<form method="post" action="/settings/monitor" class="panel" id="monitor">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Monitoring</h2>
+  {{template "errors" index $errs "monitor"}}
+  <label class="check"><input type="checkbox" name="monitor_enabled" {{if .Cfg.Monitor.Enabled}}checked{{end}}> Monitor this server: CPU, memory, disk, network, services and processes</label>
+  <div class="hint">It runs as a separate service, <code>liops-monitor</code>, under its own unprivileged user, never reads liops's config or credentials, and is capped at 100 MB of memory and 10% of a CPU. It keeps 7 days of minute-by-minute history and 90 days of hourly history in <code>/var/lib/liops-monitor</code>.</div>
+  <div class="actions"><button name="action" value="save">Save</button></div>
+</form>{{end}}
 {{end}}{{end}}

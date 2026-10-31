@@ -34,13 +34,17 @@ var systemdUnit []byte
 //go:embed deploy/liops.logrotate
 var logrotateConf []byte
 
+//go:embed deploy/liops-monitor.service
+var monitorUnit []byte
+
 const (
-	binPath       = "/usr/local/bin/liops"
-	unitPath      = "/etc/systemd/system/liops.service"
-	logrotatePath = "/etc/logrotate.d/liops"
-	configDir     = "/etc/liops"
-	stateDir      = "/var/lib/liops"
-	logDir        = "/var/log/liops"
+	binPath         = "/usr/local/bin/liops"
+	unitPath        = "/etc/systemd/system/liops.service"
+	monitorUnitPath = "/etc/systemd/system/liops-monitor.service"
+	logrotatePath   = "/etc/logrotate.d/liops"
+	configDir       = "/etc/liops"
+	stateDir        = "/var/lib/liops"
+	logDir          = "/var/log/liops"
 )
 
 // runLogs prints the end of the log, and with -f keeps printing as it grows.
@@ -177,6 +181,17 @@ func runInstallSystem(args []string, out io.Writer) error {
 	if err := os.WriteFile(logrotatePath, logrotateConf, 0o644); err != nil {
 		return err
 	}
+	// Monitoring: its own unprivileged user (in adm, to read logs later) and unit, which
+	// only starts when monitoring is turned on in Settings.
+	if exec.Command("id", "-u", monitorUser).Run() != nil {
+		if out, err := exec.Command("useradd", "--system", "--no-create-home", "--home-dir", monitorDataDir,
+			"--shell", "/usr/sbin/nologin", "--groups", "adm", monitorUser).CombinedOutput(); err != nil {
+			return fmt.Errorf("create the %s user: %v: %s", monitorUser, err, out)
+		}
+	}
+	if err := os.WriteFile(monitorUnitPath, monitorUnit, 0o644); err != nil {
+		return err
+	}
 	if err := systemctl("daemon-reload"); err != nil {
 		return err
 	}
@@ -253,14 +268,16 @@ func runUninstall(args []string, in io.Reader, out io.Writer) error {
 	}
 
 	_ = systemctl("disable", "--now", "liops")
-	for _, f := range []string{unitPath, logrotatePath} {
+	_ = systemctl("disable", "--now", "liops-monitor")
+	for _, f := range []string{unitPath, logrotatePath, monitorUnitPath} {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
 	_ = systemctl("daemon-reload")
+	_ = exec.Command("userdel", monitorUser).Run()
 	if *purge {
-		for _, d := range []string{configDir, stateDir, logDir} {
+		for _, d := range []string{configDir, stateDir, logDir, monitorDataDir} {
 			if err := os.RemoveAll(d); err != nil {
 				return err
 			}

@@ -9,7 +9,7 @@ and manages two backup layers to S3-compatible storage: pgBackRest point-in-time
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
 plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2), with the same installer,
-wizard and UI. Lightweight per-server monitoring is planned. **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0, machine resources, is in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -102,6 +102,14 @@ history). `liops restore-files` prepares a restore and prints the commands; it n
 touches the live server.
   MySQL programs log in with `--defaults-extra-file` (`mysql.Instance.Command`), never with
   a password on the command line.
+- **Monitoring** (`app/monitor`, `liops monitor`, `deploy/liops-monitor.service`): a separate
+  non-root service (user `liops-monitor`, hardened unit, `MemoryMax=100M`) samples `/proc`,
+  `/sys` and cgroups every 15 s, keeps raw samples for an hour in memory and minute/hour
+  rollups in its own bbolt file, and answers JSON on a 0600 Unix socket. It never reads
+  liops's config or credentials. The root UI reads it with `monitor.Client`; series are named
+  `metric` or `metric:label` (`disk.pct:/var`, `svc.mem:nginx.service`). `monitor.enabled` in
+  Settings enables and starts the unit (`service.SetMonitor`; tests replace it). Parsers take
+  a root directory, so tests use a fake `/proc` tree.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`

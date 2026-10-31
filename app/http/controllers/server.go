@@ -17,6 +17,7 @@ import (
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/http/middleware"
+	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/service"
 	"github.com/logisticinfotech/liops/app/state"
@@ -32,6 +33,8 @@ type Server struct {
 	Now      func() time.Time
 	// Cmd runs the wizard's commands (pg_lsclusters, pgbackrest, ...); tests replace it.
 	Cmd command.Runner
+	// Monitor reads the liops-monitor service over its Unix socket; tests point it elsewhere.
+	Monitor *monitor.Client
 
 	pages map[string]*template.Template
 	setup *wizard
@@ -44,6 +47,7 @@ func New(svc *service.Service) (*Server, error) {
 		Sessions: middleware.NewSessions(),
 		Now:      time.Now,
 		Cmd:      command.Exec{},
+		Monitor:  monitor.NewClient(monitor.DefaultSocket),
 		pages:    map[string]*template.Template{},
 		setup:    newWizard(),
 	}
@@ -90,7 +94,16 @@ func (s *Server) funcs() template.FuncMap {
 			}
 			return t.In(loc()).Format("2 Jan 2006 15:04:05 MST")
 		},
-		"bytes":           notify.Bytes,
+		"bytes": notify.Bytes,
+		"int64": func(v any) int64 {
+			switch n := v.(type) {
+			case float64:
+				return int64(n)
+			case uint64:
+				return int64(n)
+			}
+			return 0
+		},
 		"duration":        notify.Duration,
 		"since":           func(a, b time.Time) string { return notify.Duration(b.Sub(a)) },
 		"name":            notify.Name,
@@ -128,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /settings", page(s.settings))
 	mux.Handle("POST /settings/{section}", page(s.saveSettings))
 	mux.Handle("GET /audit", page(s.auditPage))
+	mux.Handle("GET /monitoring/resources", page(s.resources))
 
 	var h http.Handler = mux
 	h = middleware.CSRF(h)
@@ -161,6 +175,7 @@ type page struct {
 	Refresh int    // seconds; reload the page while something runs
 	MySQL   bool   // a MySQL server: MySQL restore commands, binlogs instead of WAL
 	Health  string // overall backup health for the top bar (HealthOK, …); empty in the wizard
+	Monitor bool   // monitoring is turned on: the sidebar shows its pages
 	Data    any
 }
 
@@ -178,7 +193,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p p
 	}
 	p.Server = s.serverName()
 	p.Version = version.Version
-	p.MySQL = s.Svc.Config().IsMySQL()
+	cfg := s.Svc.Config()
+	p.MySQL, p.Monitor = cfg.IsMySQL(), cfg.Monitor.Enabled
 	if !p.Wizard && p.Health == "" {
 		if h := s.Svc.Health(r.Context()); h != nil {
 			p.Health, _, _ = s.backupHealth(h)

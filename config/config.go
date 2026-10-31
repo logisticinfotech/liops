@@ -43,6 +43,14 @@ type Config struct {
 	Storage    Storage    `yaml:"storage"`
 	Email      Email      `yaml:"email"`
 	Report     Report     `yaml:"report"`
+	Monitor    Monitor    `yaml:"monitor"`
+}
+
+// Monitor is the per-server monitoring (docs/PLAN-monitor.md), run by the separate,
+// unprivileged liops-monitor service.
+type Monitor struct {
+	// Enabled starts the liops-monitor service. Off until turned on in Settings.
+	Enabled bool `yaml:"enabled"`
 }
 
 // Server describes this machine.

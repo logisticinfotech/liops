@@ -34,6 +34,10 @@
       <a class="nav-link{{if eq .Nav "backups"}} active{{end}}" href="/backups">Point-in-time</a>
       <a class="nav-link{{if eq .Nav "databases"}} active{{end}}" href="/databases">Dumps</a>
       <a class="nav-link{{if eq .Nav "jobs"}} active{{end}}" href="/jobs">Jobs</a>
+      {{if .Monitor}}
+      <div class="nav-group">Monitoring</div>
+      <a class="nav-link{{if eq .Nav "resources"}} active{{end}}" href="/monitoring/resources">Resources</a>
+      {{end}}
       <div class="nav-group">Server</div>
       <a class="nav-link{{if eq .Nav "settings"}} active{{end}}" href="/settings">Settings</a>
       <a class="nav-link{{if eq .Nav "audit"}} active{{end}}" href="/audit">Audit log</a>

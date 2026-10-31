@@ -5,6 +5,8 @@ package controllers
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +29,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/service"
 	"github.com/logisticinfotech/liops/app/setup"
@@ -159,6 +162,7 @@ func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 	}
 	t.Cleanup(h.svc.Close)
 	h.svc.WriteSettings = func(context.Context, *config.Config) (setup.Archiving, error) { return setup.Ready, nil }
+	h.svc.SetMonitor = func(bool) error { return nil }
 
 	h.ui, err = New(h.svc)
 	if err != nil {
@@ -528,5 +532,109 @@ func TestErrorPageLeadsWithTheReason(t *testing.T) {
 	_, _, body := h.get("/databases")
 	if !strings.Contains(body, "Likely reason:") || !strings.Contains(body, "Technical details") || strings.Contains(body, "javascript:") {
 		t.Errorf("error page:\n%s", body)
+	}
+}
+
+// fakeMonitor serves canned answers on a Unix socket, as liops-monitor would.
+func fakeMonitor(t *testing.T) *monitor.Client {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "lm") // a short path: socket paths are limited to ~100 bytes
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	now := time.Now()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/latest", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.Latest{Time: now, Values: map[string]float64{
+			"cpus": 4, "cpu.busy": 37, "cpu.user": 30, "load.1": 6.5, "mem.total": 8 << 30, "mem.used": 3 << 30,
+			"disk.pct:/": 41, "disk.pct:/var": 88, "io.read:sda": 1000, "net.rx:eth0": 500,
+			"svc.mem:nginx.service": 50 << 20, "svc.cpu:nginx.service": 2, "svc.mem:postgresql.service": 900 << 20,
+		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 12, CPU: 80, Memory: 600 << 20}}})
+	})
+	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
+		one := 1.0
+		res := monitor.SeriesResponse{Step: 60, X: []int64{now.Unix() - 60, now.Unix()}, Series: map[string]monitor.SeriesValues{}}
+		for _, n := range r.URL.Query()["name"] {
+			res.Series[n] = monitor.SeriesValues{Avg: []*float64{&one, nil}, Max: []*float64{&one, nil}}
+		}
+		json.NewEncoder(w).Encode(res)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	socket := filepath.Join(dir, "m.sock")
+	go monitor.Serve(ctx, socket, mux)
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(socket); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return monitor.NewClient(socket)
+}
+
+func TestResourcesPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+
+	code, _, body := h.get("/monitoring/resources?range=7d")
+	if code != 200 {
+		t.Fatalf("GET: %d\n%s", code, body)
+	}
+	for _, want := range []string{`href="/monitoring/resources">Resources`, "6.50", "work is waiting", "/var", "88%",
+		"postgresql", "php-fpm: pool www", `class="tab active" href="/monitoring/resources?range=7d"`, "data-chart=", "Disk I/O", "read sda"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the page should contain %q", want)
+		}
+	}
+	if strings.Index(body, "postgresql") > strings.Index(body, "nginx") {
+		t.Error("services should be sorted by memory, largest first")
+	}
+}
+
+func TestResourcesWithoutTheMonitor(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	h.ui.Monitor = monitor.NewClient("/tmp/liops-no-such.sock")
+	if _, _, body := h.get("/"); strings.Contains(body, "/monitoring/resources") {
+		t.Error("the sidebar shouldn't link to monitoring while it's off")
+	}
+	if _, _, body := h.get("/monitoring/resources"); !strings.Contains(body, "Monitoring is off") {
+		t.Errorf("off: %s", body)
+	}
+
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h = newHarness(t, cfg, true)
+	h.ui.Monitor = monitor.NewClient("/tmp/liops-no-such.sock")
+	if _, _, body := h.get("/monitoring/resources"); !strings.Contains(body, "systemctl status liops-monitor") {
+		t.Errorf("not running: %s", body)
+	}
+}
+
+func TestMonitoringSetting(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	var calls []bool
+	h.svc.SetMonitor = func(on bool) error { calls = append(calls, on); return nil }
+	save := func(form url.Values) {
+		form.Set("action", "save")
+		if code, loc, body := h.post("/settings?tab=monitoring", "/settings/monitor", form); code != 303 || loc != "/settings?tab=monitoring" {
+			t.Fatalf("save: %d %q\n%s", code, loc, body)
+		}
+	}
+	save(url.Values{"monitor_enabled": {"on"}})
+	save(url.Values{"monitor_enabled": {"on"}}) // unchanged: no second start
+	if !h.svc.Config().Monitor.Enabled {
+		t.Error("monitoring should be on")
+	}
+	save(url.Values{})
+	if !slices.Equal(calls, []bool{true, false}) {
+		t.Errorf("SetMonitor calls: %v", calls)
+	}
+
+	h.svc.SetMonitor = func(bool) error { return errors.New("Unit liops-monitor.service not found") }
+	if _, _, body := h.post("/settings?tab=monitoring", "/settings/monitor", url.Values{"monitor_enabled": {"on"}, "action": {"save"}}); h.svc.Config().Monitor.Enabled {
+		t.Errorf("a failed start shouldn't save the setting:\n%s", body)
 	}
 }

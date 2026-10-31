@@ -52,13 +52,24 @@ function formatValue(unit, v) {
   if (unit === "bytes") {
     const units = ["B", "KB", "MB", "GB", "TB"];
     let i = 0;
-    while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    // Divide at 1000, not 1024, so no label needs four digits ("1000 MB" → "1.0 GB").
+    while (Math.abs(v) >= 1000 && i < units.length - 1) { v /= 1024; i++; }
     return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
   }
+  if (unit === "bytes/s") return `${formatValue("bytes", v)}/s`;
   if (unit === "percent") return `${v.toFixed(0)}%`;
   if (unit === "ms") return v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${v.toFixed(0)} ms`;
   return `${+v.toFixed(2)}`;
 }
+
+// Every value liops charts is zero or more, so the y-axis starts at 0 (a 37→40% change
+// shouldn't fill the chart); percentages always show 0–100.
+function yRange(unit) {
+  return (u, min, max) => [0, unit === "percent" ? 100 : max > 0 ? max * 1.1 : 1];
+}
+
+// Byte axes step in powers of 1024, to match how formatValue prints them.
+const byteIncrs = [0, 1, 2, 3, 4].flatMap((k) => [1, 2, 5, 10, 25, 50, 100, 250, 500].map((n) => n * 1024 ** k));
 
 function drawChart(el) {
   if (!window.uPlot) return;
@@ -71,15 +82,19 @@ function drawChart(el) {
     width: Math.max(200, el.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight)),
     height: +(el.dataset.height || 220),
     cursor: { points: { size: 6 } },
-    scales: { x: { time: true } },
-    axes: [axis, { ...axis, size: 70, values: (u, vals) => vals.map((v) => formatValue(spec.unit, v)) }],
+    scales: { x: { time: true }, y: { range: yRange(spec.unit) } },
+    axes: [axis, {
+      ...axis, size: 70,
+      incrs: spec.unit.startsWith("bytes") ? byteIncrs : undefined,
+      values: (u, vals) => vals.map((v) => formatValue(spec.unit, v)),
+    }],
     series: [{}, ...spec.series.map((s, i) => ({
       label: s.label,
       stroke: colors.series[i % colors.series.length],
       fill: spec.series.length === 1 ? colors.series[0] + "1a" : undefined,
       width: 2,
       spanGaps: true,
-      points: { show: true, size: 5 },
+      points: { size: 5 }, // uPlot hides them when they'd crowd (a day of 15-second samples)
       value: (u, v) => formatValue(spec.unit, v),
     }))],
   };

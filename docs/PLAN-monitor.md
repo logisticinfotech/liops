@@ -421,6 +421,15 @@ the problem.
 | **MO3. Verdict, logs, alerts** | The verdict rules (§5), the log viewer and log growth (§4.5), the immediate alerts (including `pg_wal` growing) | On scripted scenarios (CPU hog, memory pressure, bad query, N+1, small `pm.max_children`, full-ish disk, chatty log, slower after a deploy) the verdict names the right cause | 1 week |
 | **MO4. Tuning** | Recommendations and apply-on-approval with check, least-disruptive apply, revert and before/after (§5.1), for PHP-FPM, OPcache, MySQL, PostgreSQL and Redis | On a VM with default settings and a realistic load, the recommendations are sensible, applying them works online or by reload (restarts only on request), revert restores the old file, and the before/after shows the change | 1.5 weeks |
 
+**Status (November 2026).** MO0's core is built: `liops monitor`, the `liops-monitor` user and
+hardened unit (`install-system` writes it; Settings → Monitoring enables it), the socket API,
+the rollup store, machine/per-service/top-process metrics, and the Resources page (charts
+are uPlot, vendored, not hand-made SVG). Checked in an Ubuntu 26.04 VM: it runs as
+`liops-monitor` under the unit's sandbox, reads cgroups and every filesystem, uses about 6 MB,
+and a CPU/disk load shows up correctly on the page. Still to do for MO0: the disk breakdown
+(database files, `pg_wal`, binlogs, `/var/log`), failed units, reboot-required, and markers
+for liops's jobs on the charts.
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the

@@ -24,6 +24,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/http/controllers"
 	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/service"
 	"github.com/logisticinfotech/liops/app/setup"
@@ -36,7 +37,8 @@ const defaultLogPath = "/var/log/liops/liops.log"
 
 // paths are the file locations shared by setup, run, status and serve.
 type paths struct {
-	config, state, log string
+	config, state, log         string
+	monitorSocket, monitorData string // liops-monitor's; no flags except on `liops monitor`
 }
 
 func parseFlags(name string, args []string) (*flag.FlagSet, *paths, error) {
@@ -47,7 +49,7 @@ func parseFlags(name string, args []string) (*flag.FlagSet, *paths, error) {
 // newFlags is parseFlags for commands that add flags of their own before parsing.
 func newFlags(name string) (*flag.FlagSet, *paths) {
 	d := defaultPaths()
-	p := &paths{}
+	p := &paths{monitorSocket: d.monitorSocket, monitorData: d.monitorData}
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.StringVar(&p.config, "config", d.config, "config file path")
 	flags.StringVar(&p.state, "state", d.state, "state file path")
@@ -152,6 +154,7 @@ func runServe(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	ui.Monitor = monitor.NewClient(p.monitorSocket)
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {
 		return fmt.Errorf("ui.listen: %w", err)

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +44,9 @@ type Service struct {
 	NewRunner  func(cfg *config.Config) (*jobs.Runner, error)
 	// WriteSettings rewrites the pgBackRest and PostgreSQL settings; tests replace it.
 	WriteSettings func(ctx context.Context, cfg *config.Config) (setup.Archiving, error)
+	// SetMonitor starts (and enables) or stops (and disables) the liops-monitor service;
+	// tests replace it.
+	SetMonitor func(on bool) error
 
 	ctx    context.Context // jobs started by the UI or scheduler run with this
 	mu     sync.Mutex
@@ -74,6 +79,16 @@ func New(ctx context.Context, configPath, lockPath string, st *state.Store, log 
 			return setup.NeedsRestart, err
 		}
 		return setup.WriteSettings(ctx, pgbackrest.New(cfg, command.Exec{}), store)
+	}
+	s.SetMonitor = func(on bool) error {
+		args := []string{"disable", "--now", "liops-monitor"}
+		if on {
+			args[0] = "enable"
+		}
+		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 	if s.NewRunner == nil {
 		s.NewRunner = func(cfg *config.Config) (*jobs.Runner, error) { return jobs.New(cfg, st, lockPath, log) }
@@ -219,6 +234,11 @@ func (s *Service) SaveSettings(ctx context.Context, cfg *config.Config) error {
 			// Settings changed from the UI never turn archiving off, so this means
 			// someone changed PostgreSQL by hand. Save anyway, but say so.
 			defer s.logf("warning: archive_mode is off; WAL archiving needs: %s", setup.RestartCommand(cfg))
+		}
+	}
+	if on := cfg.Monitor.Enabled; on != s.Config().Monitor.Enabled {
+		if err := s.SetMonitor(on); err != nil {
+			return fmt.Errorf("couldn't %s the monitoring service: %w", map[bool]string{true: "start", false: "stop"}[on], err)
 		}
 	}
 	return s.SaveDraft(cfg)

@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 
+	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/config"
 )
@@ -22,7 +23,7 @@ func devMode() bool { return os.Getenv(devEnv) == "1" }
 // defaultPaths are the file locations used when --config, --state and --log aren't given.
 func defaultPaths() paths {
 	if devMode() {
-		return paths{config: "dev/config.yaml", state: "dev/state.db", log: "dev/liops.log"}
+		return paths{config: "dev/config.yaml", state: "dev/state.db", log: "dev/liops.log", monitorSocket: "dev/monitor.sock", monitorData: "dev/monitor"}
 	}
-	return paths{config: config.DefaultPath, state: state.DefaultPath, log: defaultLogPath}
+	return paths{config: config.DefaultPath, state: state.DefaultPath, log: defaultLogPath, monitorSocket: monitor.DefaultSocket, monitorData: monitorDataDir}
 }

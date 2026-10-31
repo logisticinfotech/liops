@@ -268,3 +268,13 @@ func TestIntervalPresetsAreValid(t *testing.T) {
 		}
 	}
 }
+
+func TestMonitorIsOffByDefault(t *testing.T) {
+	if Default().Monitor.Enabled {
+		t.Error("monitoring must be off until turned on")
+	}
+	c, err := Decode([]byte("monitor:\n  enabled: true\n"))
+	if err != nil || !c.Monitor.Enabled {
+		t.Errorf("monitor.enabled: %v, %v", c.Monitor.Enabled, err)
+	}
+}

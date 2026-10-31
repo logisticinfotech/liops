@@ -1,0 +1,32 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Resources</h1>
+{{if .Problem}}
+<div class="note">{{.Problem}}{{with .Detail}}<div class="muted mono">{{.}}</div>{{end}}</div>
+{{else}}
+<nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/resources?range={{.}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else if eq . "7d"}}7 days{{else}}90 days{{end}}</a>{{end}}</nav>
+<div class="grid">
+  <div class="stat"><div class="label">CPU busy</div><div class="value">{{printf "%.0f" .CPUBusy}}%</div><div class="sub">{{printf "%.0f" .CPUs}} CPUs</div></div>
+  <div class="stat"><div class="label">Load (1 min)</div><div class="value">{{printf "%.2f" .Load}}</div><div class="sub">{{if gt .Load .CPUs}}more than the {{printf "%.0f" .CPUs}} CPUs: work is waiting{{else}}within {{printf "%.0f" .CPUs}} CPUs{{end}}</div></div>
+  <div class="stat"><div class="label">Memory used</div><div class="value">{{bytes (int64 .MemUsed)}}</div><div class="sub">of {{bytes (int64 .MemTotal)}}{{if gt .SwapUsed 0.0}} · swap {{bytes (int64 .SwapUsed)}}{{end}}</div></div>
+  <div class="stat"><div class="label">Fullest disk</div><div class="value">{{printf "%.0f" .FullestPct}}%</div><div class="sub mono">{{.FullestDisk}}</div></div>
+</div>
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+{{if not .Charts}}<p class="muted">The charts appear once there are two samples to draw (15 seconds after the monitor starts; the longer ranges after their first minute or hour).</p>{{end}}
+
+<h2>Services</h2>
+<div class="table-wrap"><table>
+  <tr><th>Service</th><th class="num">CPU (% of one)</th><th class="num">Memory</th></tr>
+  {{range .Services}}<tr><td>{{.Name}}</td><td class="num">{{printf "%.1f" .CPU}}</td><td class="num">{{bytes (int64 .Memory)}}</td></tr>
+  {{else}}<tr><td colspan="3" class="muted">No systemd services found.</td></tr>{{end}}
+</table></div>
+
+<h2>Busiest processes</h2>
+<div class="table-wrap"><table>
+  <tr><th>Command</th><th class="num">Processes</th><th class="num">CPU (% of one)</th><th class="num">Memory</th></tr>
+  {{range .Processes}}<tr><td class="mono">{{.Command}}</td><td class="num">{{.Count}}</td><td class="num">{{printf "%.1f" .CPU}}</td><td class="num">{{bytes (int64 .Memory)}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">Measured from the second sample on.</td></tr>{{end}}
+</table></div>
+<p class="muted">Updated {{when .Updated}}; sampled every 15 seconds by the liops-monitor service.</p>
+{{end}}
+{{end}}{{end}}

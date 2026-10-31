@@ -25,6 +25,7 @@ const (
 	sectionSchedules = "schedules"
 	sectionDumps     = "dumps"
 	sectionLabels    = "labels"
+	sectionMonitor   = "monitor"
 )
 
 // applyForm copies one section's form values into cfg. Secret fields left empty keep
@@ -106,6 +107,8 @@ func applyForm(cfg *config.Config, section string, f url.Values) error {
 		atoi("deleted_retention_days", &d.DeletedRetentionDays)
 		atoi("concurrency", &d.Concurrency)
 		d.Exclude = splitList(f.Get("exclude"))
+	case sectionMonitor:
+		cfg.Monitor.Enabled = checked("monitor_enabled")
 	case sectionLabels:
 		cfg.Dumps.Labels.Database, cfg.Dumps.Labels.SQL = text("labels_database"), text("labels_sql")
 	default:
@@ -134,8 +137,9 @@ func sectionErrors(cfg *config.Config, section string) []string {
 		sectionEmail:   {"email"},
 		sectionSchedules: {"pgbackrest.archive_timeout", "pgbackrest.retention_days", "pgbackrest.full_schedule", "pgbackrest.diff_schedule", "report.",
 			"mysql.full_schedule", "mysql.diff_schedule", "mysql.retention_days", "mysql.binlog_interval"},
-		sectionDumps:  {"dumps.retention", "dumps.deleted", "dumps.concurrency"},
-		sectionLabels: {"dumps.labels"},
+		sectionDumps:   {"dumps.retention", "dumps.deleted", "dumps.concurrency"},
+		sectionLabels:  {"dumps.labels"},
+		sectionMonitor: {"monitor."},
 	}[section]
 	return filterErrors(cfg, prefixes...)
 }

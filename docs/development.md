@@ -77,6 +77,9 @@ make dev-down                             # stop MinIO and Mailpit
 - `--config`, `--state` and `--log` default to `dev/config.yaml`, `dev/state.db` and
   `dev/liops.log`.
 - `setup --skip-pgbackrest` is allowed. It's refused without `LIOPS_DEV=1`.
+- `liops monitor` keeps its socket and history in `dev/monitor.sock` and `dev/monitor/`, and
+  `serve` reads that socket. The monitor needs Linux's `/proc`, so on a Mac the Resources page
+  says it isn't answering. Run it in a Linux VM to see data.
 
 Never set it on a server.
 

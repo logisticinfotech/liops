@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# liops monitoring (docs/PLAN-monitor.md). Installed to /etc/systemd/system/liops-monitor.service
+# by `liops install-system`, but only started when monitoring is turned on in Settings.
+# It runs as its own unprivileged user, apart from the root backup service, and only reads
+# the system; its data and socket are its own.
+[Unit]
+Description=liops monitoring (CPU, memory, disk, services)
+Documentation=https://github.com/logisticinfotech/liops
+After=network.target
+
+[Service]
+User=liops-monitor
+Group=liops-monitor
+ExecStart=/usr/local/bin/liops monitor
+Restart=on-failure
+RestartSec=10s
+RuntimeDirectory=liops-monitor
+RuntimeDirectoryMode=0750
+StateDirectory=liops-monitor
+StateDirectoryMode=0700
+
+# Read-only, unprivileged, and capped, so it can never starve what it watches.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=100M
+CPUQuota=10%
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
