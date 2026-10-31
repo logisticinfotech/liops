@@ -40,6 +40,10 @@ type Monitor struct {
 	Now       func() time.Time
 	// Systemctl runs systemctl (for failed units); tests replace it.
 	Systemctl func(ctx context.Context, args ...string) ([]byte, error)
+	// DBs are the database servers to read; FindDBs, when set, finds them again every
+	// QueryInterval (a database installed later is picked up).
+	DBs     []DBServer
+	FindDBs func() []DBServer
 
 	mu        sync.Mutex
 	started   time.Time
@@ -47,6 +51,8 @@ type Monitor struct {
 	lastErr   string
 	checks    Checks
 	held      map[string]held // values from the slow checks and from Push
+	dbOnce    sync.Once
+	dbst      *dbState
 }
 
 func New(collector *Collector, store *Store, log io.Writer) *Monitor {
@@ -68,6 +74,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 		return err // no /proc: this isn't a machine liops can monitor
 	}
 	go m.slowLoop(ctx)
+	go m.dbLoop(ctx)
 	tick := time.NewTicker(Interval)
 	defer tick.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -170,6 +177,7 @@ func (m *Monitor) Handler() http.Handler {
 		m.mu.Unlock()
 		writeJSON(w, Latest{Time: s.Time, Values: s.Values, Processes: procs, Checks: checks})
 	})
+	m.dbHandlers(mux, writeJSON)
 	mux.HandleFunc("POST /v1/push", func(w http.ResponseWriter, r *http.Request) {
 		var req PushRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {

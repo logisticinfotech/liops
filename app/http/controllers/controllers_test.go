@@ -117,6 +117,9 @@ func fakeServer(program string, c command.Cmd) ([]byte, error) {
 		if strings.Contains(args, "pg_stat_archiver") {
 			return fmt.Appendf(nil, "%d\t0\n", now), nil
 		}
+		if strings.Contains(args, "pending_restart") {
+			return []byte("t\n"), nil
+		}
 		return []byte(hex.EncodeToString([]byte("app")) + "\n"), nil
 	}
 	return nil, nil
@@ -554,6 +557,9 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 12, CPU: 80, Memory: 600 << 20}},
 			Checks: monitor.Checks{Time: now, FailedUnits: []string{"queue-worker.service"}, RebootRequired: true, RebootPackages: []string{"libc6"}}})
 	})
+	mux.HandleFunc("GET /v1/db", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]monitor.DBStatus{{Label: "mysql", Title: "MySQL", Engine: "mysql", Checked: now, Statements: true}})
+	})
 	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
 		// Twelve hours in which everything grew by 1 GB: 2 GB a day.
 		zero, gb := 0.0, 1e9
@@ -647,5 +653,38 @@ func TestMonitoringSetting(t *testing.T) {
 	h.svc.SetMonitor = func(bool) error { return errors.New("Unit liops-monitor.service not found") }
 	if _, _, body := h.post("/settings?tab=monitoring", "/settings/monitor", url.Values{"monitor_enabled": {"on"}, "action": {"save"}}); h.svc.Config().Monitor.Enabled {
 		t.Errorf("a failed start shouldn't save the setting:\n%s", body)
+	}
+}
+
+func TestMonitoringDatabaseAccess(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	_, _, body := h.get("/settings?tab=monitoring")
+	for _, want := range []string{"Set up database access", "PostgreSQL needs one restart", "sudo systemctl restart postgresql@18-main", "MySQL", "collected"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Monitoring tab should show %q", want)
+		}
+	}
+
+	// MySQL: the button creates the monitoring account as MySQL's root.
+	mcfg := mysqlWizardConfig(t)
+	mcfg.Monitor.Enabled = true
+	h = newHarness(t, mcfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	code, loc, body := h.post("/settings?tab=monitoring", "/settings/monitor/databases", url.Values{})
+	if code != 303 || loc != "/settings?tab=monitoring" {
+		t.Fatalf("set up: %d %q\n%s", code, loc, body)
+	}
+	if _, _, body := h.get("/settings?tab=monitoring"); !strings.Contains(body, "Done.") || strings.Contains(body, "needs one restart") {
+		t.Errorf("after set up:\n%s", body)
+	}
+	found := false
+	for _, c := range h.ui.Cmd.(*command.Fake).Calls {
+		found = found || strings.Contains(strings.Join(c.Args, " "), "--execute=source ")
+	}
+	if !found {
+		t.Error("the account script should have run")
 	}
 }

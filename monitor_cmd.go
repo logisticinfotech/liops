@@ -27,6 +27,8 @@ func runMonitor(args []string, out io.Writer) error {
 	d := defaultPaths()
 	socket := flags.String("socket", d.monitorSocket, "the Unix socket the UI reads from")
 	data := flags.String("data", d.monitorData, "where the history (metrics.db) is kept")
+	pgDir := flags.String("pg-socket-dir", monitor.DefaultPGSocketDir, "where PostgreSQL's sockets are")
+	mysqlSocket := flags.String("mysql-socket", monitor.DefaultMySQLSocket, "MySQL's socket")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -42,6 +44,7 @@ func runMonitor(args []string, out io.Writer) error {
 	ctx, stop := signalContext()
 	defer stop()
 	m := monitor.New(monitor.NewCollector("/"), store, os.Stderr)
+	m.FindDBs = func() []monitor.DBServer { return monitor.FindDBServers(*pgDir, *mysqlSocket) }
 	errc := make(chan error, 1)
 	go func() { errc <- monitor.Serve(ctx, *socket, m.Handler()) }()
 	fmt.Fprintf(out, "liops monitor: sampling every %s, answering on %s\n", monitor.Interval, *socket)

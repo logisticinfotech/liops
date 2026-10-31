@@ -141,6 +141,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /jobs/run", page(s.runNow))
 	mux.Handle("GET /settings", page(s.settings))
 	mux.Handle("POST /settings/{section}", page(s.saveSettings))
+	mux.Handle("POST /settings/monitor/databases", page(s.monitorDatabases))
+	mux.Handle("POST /settings/monitor/restart", page(s.monitorRestart))
 	mux.Handle("GET /audit", page(s.auditPage))
 	mux.Handle("GET /monitoring/resources", page(s.resources))
 

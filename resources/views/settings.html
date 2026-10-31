@@ -43,5 +43,30 @@
   <label class="check"><input type="checkbox" name="monitor_enabled" {{if .Cfg.Monitor.Enabled}}checked{{end}}> Monitor this server: CPU, memory, disk, network, services and processes</label>
   <div class="hint">It runs as a separate service, <code>liops-monitor</code>, under its own unprivileged user, never reads liops's config or credentials, and is capped at 100 MB of memory and 10% of a CPU. It keeps 7 days of minute-by-minute history and 90 days of hourly history in <code>/var/lib/liops-monitor</code>.</div>
   <div class="actions"><button name="action" value="save">Save</button></div>
-</form>{{end}}
+</form>
+{{if .Cfg.Monitor.Enabled}}<div class="panel" id="databases">
+  <h2>Databases</h2>
+  <p class="muted">The monitor reads each database's own statistics: which queries take the time, whole-table scans, locks, tables and indexes. It logs in as <code>liops-monitor</code> through the socket, with no password, and can't read the apps' rows.</p>
+  {{with .DBError}}<div class="note">{{.}}</div>{{end}}
+  {{with .DBProblem}}<div class="error">{{.}}</div>{{end}}
+  <div class="table-wrap"><table>
+    <tr><th>Database</th><th>Login</th><th>Query statistics</th></tr>
+    {{range .DBs}}<tr><td>{{.Title}}</td>
+      <td>{{if .Error}}<span class="badge failed">not set up</span><div class="muted mono">{{.Error}}</div>{{else if .Checked.IsZero}}<span class="badge pending">checking</span>{{else}}<span class="badge ok">works</span>{{end}}</td>
+      <td>{{if .Statements}}<span class="badge ok">collected</span>{{else if .StatementsError}}<span class="badge waiting">not yet</span><div class="muted">{{.StatementsError}}</div>{{else}}<span class="badge pending">checking</span>{{end}}</td></tr>
+    {{else}}{{if not .DBError}}<tr><td colspan="3" class="muted">No PostgreSQL or MySQL socket found on this server.</td></tr>{{end}}{{end}}
+  </table></div>
+  <form method="post" action="/settings/monitor/databases">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <p class="hint">Set up database access {{if .Cfg.IsMySQL}}creates the MySQL account <code>'liops-monitor'@'localhost'</code> (auth_socket) with PROCESS, REFERENCES and read access to <code>performance_schema</code> and <code>sys</code>.{{else}}creates the PostgreSQL role <code>liops-monitor</code> in <code>pg_monitor</code>, the <code>pg_stat_statements</code> extension, and adds it to <code>shared_preload_libraries</code> (keeping what's there) in <code>conf.d/20-liops-monitor.conf</code>. Loading it needs one restart, which liops only does when you click the button for it.{{end}} Safe to run again.</p>
+    {{if .NeedRootPassword}}<label>MySQL root password<input type="password" name="mysql_root_password" autocomplete="off"></label>{{end}}
+    <div class="actions"><button>Set up database access</button></div>
+  </form>
+  {{if .PGRestart}}<form method="post" action="/settings/monitor/restart" class="note">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <p><strong>PostgreSQL needs one restart</strong> to load <code>pg_stat_statements</code>. The apps can't reach the database for a few seconds. Restart now, or run <code>{{.PGRestartCommand}}</code> yourself at a quiet time.</p>
+    <div class="actions"><button>Restart PostgreSQL now</button></div>
+  </form>{{end}}
+</div>{{end}}
+{{end}}
 {{end}}{{end}}
