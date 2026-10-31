@@ -185,6 +185,7 @@ func (r *Runner) report(ctx context.Context, run *state.Run) error {
 	}
 	run.Output = output
 
+	h.Summary.Health = r.serverHealth(ctx)
 	subject, body := notify.DailySummary(h.Summary)
 	if err := r.Mail.Send(ctx, subject, body); err != nil {
 		return fmt.Errorf("send daily summary: %w", err)

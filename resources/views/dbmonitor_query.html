@@ -1,0 +1,42 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<p><a href="{{if .BackLink}}{{.BackLink}}{{else}}/monitoring/database{{end}}">← Database</a></p>
+<h1>Query</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+{{with .Row}}
+<nav class="tabs" aria-label="Time range">{{range $.Data.Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="{{index $.Data.RangeLinks .}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else}}7 days{{end}}</a>{{end}}</nav>
+<pre class="query">{{.Text}}</pre>
+<p class="muted">In <span class="mono">{{.DB}}</span> on {{$.Data.Server.Title}} · first seen {{when .FirstSeen}} · the values are placeholders ({{if eq .Engine "mysql"}}?{{else}}$1{{end}}): the statistics keep no real values.</p>
+
+{{if or .Eff.Scans .Flags}}<div class="error">
+  {{if .Eff.Scans}}<p><strong>It scans whole tables:</strong> {{if gt .Eff.Ratio 0.0}}{{count .Eff.Ratio}} {{if eq .Engine "postgres"}}blocks (8 KB each){{else}}rows{{end}} read for every row it returns{{else}}{{count .Eff.PerCall}} {{if eq .Engine "postgres"}}blocks{{else}}rows{{end}} read per call, and nothing returned{{end}}.{{if gt .NoIndex 0.0}} {{printf "%.0f" .NoIndex}} of {{printf "%.0f" .Calls}} calls used no index at all.{{end}}</p>{{end}}
+  {{range .Flags}}<p><strong>{{.Name}}.</strong> {{.Fix}}</p>{{end}}
+</div>{{end}}
+
+<div class="grid">
+  <div class="stat"><div class="label">Total time</div><div class="value">{{ms .TimeMS}}</div><div class="sub">in this range</div></div>
+  <div class="stat"><div class="label">Calls</div><div class="value">{{count .Calls}}</div><div class="sub">{{ms .PerCallMS}} each on average</div></div>
+  <div class="stat"><div class="label">Slowest call</div><div class="value">{{ms .MaxMS}}</div><div class="sub">since the statistics were reset</div></div>
+  <div class="stat"><div class="label">{{if eq .Engine "postgres"}}Blocks read{{else}}Rows examined{{end}}</div><div class="value">{{count .RowsExamined}}</div><div class="sub">for {{count .RowsSent}} rows returned</div></div>
+</div>
+{{end}}
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+
+{{if .Sample}}<h2>A real statement</h2>
+<pre class="query">{{.Sample.Text}}</pre>
+{{range .SampleFlags}}<div class="error"><p><strong>{{.Name}}.</strong> {{.Fix}}</p></div>{{end}}
+<p class="muted">MySQL kept this one from {{when .Sample.Seen}} ({{ms .Sample.MS}}). It has real values, so it's read live for this page and never stored, logged or emailed.</p>
+{{else if .SampleError}}<p class="muted">MySQL has no sample statement for this query right now.</p>{{end}}
+
+<h2>The tables it uses</h2>
+{{range .Touched}}
+<h3 class="mono">{{.Table.DB}}.{{if .Table.Schema}}{{.Table.Schema}}.{{end}}{{.Table.Name}} <span class="muted">{{count .Table.Rows}} rows · {{bytes (int64 .Table.Bytes)}}</span></h3>
+<div class="table-wrap"><table>
+  <tr><th>Index</th><th>Columns</th><th></th></tr>
+  {{range .Indexes}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Definition}}</td><td>{{if .Primary}}<span class="badge ok">primary key</span>{{else if .Unique}}<span class="badge pending">unique</span>{{end}}{{if .Unused}} <span class="badge waiting">unused</span>{{end}}</td></tr>
+  {{else}}<tr><td colspan="3"><span class="badge failed">no indexes</span></td></tr>{{end}}
+</table></div>
+{{else}}<p class="muted">The tables it names weren't in the last table pass (it runs hourly), or the query names none.</p>{{end}}
+<p class="muted">An index helps when its first columns are the ones the query filters on with = (then a range or a sort). An index can't be used for a column inside a function, or a LIKE starting with %. Add indexes in the app's migrations, not by hand.</p>
+{{end}}
+{{end}}{{end}}

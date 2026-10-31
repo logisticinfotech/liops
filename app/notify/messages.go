@@ -36,6 +36,10 @@ type Summary struct {
 	DiskUsedPct int // -1 if unknown
 
 	NextFull time.Time
+
+	// Health is the monitoring's findings (the queries that scan whole tables), in plain
+	// language; empty when monitoring is off.
+	Health []string
 }
 
 // DailySummary returns the subject and body of the daily summary.
@@ -82,6 +86,12 @@ func DailySummary(s Summary) (subject, body string) {
 	}
 	if s.PointInTime && !s.NextFull.IsZero() {
 		b.WriteString("\nNext full backup: " + s.NextFull.Format("Mon 2 Jan 15:04") + "\n")
+	}
+	if len(s.Health) > 0 {
+		b.WriteString("\nServer health:\n")
+		for _, h := range s.Health {
+			b.WriteString(h + "\n")
+		}
 	}
 	return subject, b.String()
 }
@@ -218,4 +228,41 @@ func SetupFinished(server string, backupOK bool, dumped, total int, nextFull tim
 	}
 	b.WriteString("\nFrom now on you get a daily summary, and an email straight away if anything fails.\n")
 	return subject, b.String()
+}
+
+// MS prints milliseconds for people: "850 ms", "2.6 s", "41 min", "3.2 h".
+func MS(ms float64) string {
+	switch {
+	case ms < 1:
+		return fmt.Sprintf("%.2f ms", ms)
+	case ms < 1000:
+		return fmt.Sprintf("%.0f ms", ms)
+	case ms < 60e3:
+		return fmt.Sprintf("%.1f s", ms/1e3)
+	case ms < 600e3:
+		return fmt.Sprintf("%.1f min", ms/60e3)
+	case ms < 3600e3:
+		return fmt.Sprintf("%.0f min", ms/60e3)
+	}
+	return fmt.Sprintf("%.1f h", ms/3600e3)
+}
+
+// Count prints a count for people: "950", "12.4K", "1.65M", "2.1B".
+func Count(n float64) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%.0f", n)
+	case n < 1e6:
+		return trimZero(fmt.Sprintf("%.1f", n/1e3)) + "K"
+	case n < 1e9:
+		return trimZero(fmt.Sprintf("%.2f", n/1e6)) + "M"
+	}
+	return trimZero(fmt.Sprintf("%.2f", n/1e9)) + "B"
+}
+
+func trimZero(s string) string {
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
 }

@@ -96,6 +96,8 @@ func (s *Server) funcs() template.FuncMap {
 		},
 		"bytes":  notify.Bytes,
 		"perDay": formatPerDay,
+		"ms":     notify.MS,
+		"count":  notify.Count,
 		"int64": func(v any) int64 {
 			switch n := v.(type) {
 			case float64:
@@ -145,6 +147,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /settings/monitor/restart", page(s.monitorRestart))
 	mux.Handle("GET /audit", page(s.auditPage))
 	mux.Handle("GET /monitoring/resources", page(s.resources))
+	mux.Handle("GET /monitoring/database", page(s.dbMonitor))
+	mux.Handle("GET /monitoring/database/query", page(s.dbMonitorQuery))
 
 	var h http.Handler = mux
 	h = middleware.CSRF(h)

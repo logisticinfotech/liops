@@ -560,6 +560,47 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 	mux.HandleFunc("GET /v1/db", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]monitor.DBStatus{{Label: "mysql", Title: "MySQL", Engine: "mysql", Checked: now, Statements: true}})
 	})
+	search := monitor.QueryTotal{
+		QueryShape: monitor.QueryShape{Server: "mysql", DB: "tenant_a", ID: strings.Repeat("ab", 32), FirstSeen: now.Add(-48 * time.Hour), MaxMS: 2900,
+			Text: "SELECT * FROM `customers` WHERE LOWER ( `name` ) LIKE ? OR LOWER ( `email` ) LIKE ?"},
+		QueryCounters: monitor.QueryCounters{Calls: 40, TimeMS: 106000, RowsExamined: 40 * 1.65e6, RowsSent: 40},
+	}
+	filter := monitor.QueryTotal{
+		QueryShape:    monitor.QueryShape{Server: "mysql", DB: "tenant_a", ID: strings.Repeat("cd", 32), Text: "SELECT `id` FROM `readings` WHERE DATE ( `created_at` ) = ?"},
+		QueryCounters: monitor.QueryCounters{Calls: 30, TimeMS: 54000, RowsExamined: 30 * 900000, RowsSent: 30 * 50, NoIndex: 30},
+	}
+	lookup := monitor.QueryTotal{
+		QueryShape:    monitor.QueryShape{Server: "mysql", DB: "tenant_b", ID: strings.Repeat("ef", 32), Text: "SELECT * FROM `users` WHERE `id` = ?"},
+		QueryCounters: monitor.QueryCounters{Calls: 90000, TimeMS: 9000, RowsExamined: 90000, RowsSent: 90000},
+	}
+	mux.HandleFunc("GET /v1/db/queries", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]monitor.QueryTotal{search, filter, lookup})
+	})
+	mux.HandleFunc("GET /v1/db/query", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("id") != search.ID {
+			http.Error(w, "no such query", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(monitor.QueryDetailResponse{Shape: search.QueryShape, Points: []monitor.QueryPoint{
+			{At: now.Unix() - 600, QueryCounters: monitor.QueryCounters{Calls: 20, TimeMS: 53000, RowsExamined: 33e6, RowsSent: 20}},
+			{At: now.Unix() - 300, QueryCounters: monitor.QueryCounters{Calls: 20, TimeMS: 53000, RowsExamined: 33e6, RowsSent: 20}},
+		}})
+	})
+	mux.HandleFunc("GET /v1/db/sample", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.QuerySample{Text: "SELECT * FROM customers WHERE LOWER(name) LIKE '%example-term%'", Seen: now, MS: 2650})
+	})
+	mux.HandleFunc("GET /v1/db/activity", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.Activity{Statements: []monitor.RunningStatement{{PID: 42, DB: "tenant_a", State: "executing", Seconds: 3, BlockedBy: "41", Query: "UPDATE readings SET v = 1"}},
+			Transactions: []monitor.OpenTransaction{{PID: 41, Seconds: 95, State: "RUNNING", RowsModified: 1200}}})
+	})
+	mux.HandleFunc("GET /v1/db/tables", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.DBTables{Server: "mysql", At: now, StatsSince: now.Add(-30 * 24 * time.Hour),
+			Tables: []monitor.TableInfo{{DB: "tenant_a", Name: "customers", Rows: 1.65e6, Bytes: 400e6, PrimaryKey: true}, {DB: "tenant_a", Name: "readings", Rows: 9e5, Bytes: 600e6}},
+			Indexes: []monitor.IndexInfo{{DB: "tenant_a", Table: "customers", Name: "PRIMARY", Definition: "(id)", Primary: true, Unique: true},
+				{DB: "tenant_a", Table: "customers", Name: "old_idx", Definition: "(tenant_id)", Unused: true, Duplicate: "tenant_email"}},
+			Memory: map[string]float64{"innodb_buffer_pool_size": 128 << 20},
+			Growth: map[string]float64{"tenant_a/readings": 30e6}})
+	})
 	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
 		// Twelve hours in which everything grew by 1 GB: 2 GB a day.
 		zero, gb := 0.0, 1e9
@@ -686,5 +727,42 @@ func TestMonitoringDatabaseAccess(t *testing.T) {
 	}
 	if !found {
 		t.Error("the account script should have run")
+	}
+}
+
+func TestDatabasePages(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+
+	code, _, body := h.get("/monitoring/database?range=24h")
+	if code != 200 {
+		t.Fatalf("GET: %d\n%s", code, body)
+	}
+	for _, want := range []string{`href="/monitoring/database">Database`, "These queries scan whole tables", "LOWER(name) in a filter",
+		"DATE(created_at) in a filter", "1.65M rows", "1.8 min", "waits for 41", "Open transactions", "tenant_a.readings",
+		"&#43;29 MB", "Never used", "old_idx", "Duplicates", "Tables without a primary key", "128 MB is Ubuntu&#39;s default", "About 13% of the data fits"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Database page should contain %q", want)
+		}
+	}
+	scans := body[strings.Index(body, "These queries scan whole tables"):strings.Index(body, "Queries by total time")]
+	if strings.Contains(scans, "users") {
+		t.Error("a lookup by primary key isn't a scan")
+	}
+
+	code, _, body = h.get("/monitoring/database/query?server=mysql&db=tenant_a&id=" + strings.Repeat("ab", 32) + "&range=24h")
+	if code != 200 {
+		t.Fatalf("GET query: %d\n%s", code, body)
+	}
+	for _, want := range []string{"It scans whole tables", "1.65M rows read for every row it returns", "A real statement", "example-term",
+		"a leading wildcard", "never stored", "old_idx", "primary key", "data-chart="} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the query page should contain %q", want)
+		}
+	}
+	if code, _, body := h.get("/monitoring/database/query?server=mysql&db=tenant_a&id=nope"); code != 200 || !strings.Contains(body, "isn&#39;t in the statistics") {
+		t.Errorf("an unknown query: %d", code)
 	}
 }

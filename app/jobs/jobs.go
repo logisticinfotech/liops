@@ -23,6 +23,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgdump"
 	"github.com/logisticinfotech/liops/app/engines/postgres"
 	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
+	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -80,8 +81,10 @@ type Runner struct {
 	XtraBackup *xtrabackup.Engine
 	Dumps      Dumper
 	Cluster    postgres.Cluster
-	LockPath   string
-	Now        func() time.Time
+	// Monitor is the monitoring service, for the daily summary's server health.
+	Monitor  *monitor.Client
+	LockPath string
+	Now      func() time.Time
 
 	logMu      sync.Mutex
 	Log        io.Writer
@@ -106,6 +109,7 @@ func New(cfg *config.Config, st *state.Store, lockPath string, log io.Writer) (*
 		State:    st,
 		Store:    store,
 		Mail:     notify.SMTP{Cfg: cfg.Email},
+		Monitor:  monitor.NewClient(MonitorSocket),
 		LockPath: lockPath,
 		Now:      time.Now,
 		Log:      log,

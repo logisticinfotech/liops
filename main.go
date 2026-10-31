@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/version"
 	"github.com/logisticinfotech/liops/config"
@@ -52,6 +53,7 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
+	jobs.MonitorSocket = defaultPaths().monitorSocket
 	if len(args) == 0 {
 		fmt.Fprint(out, usage)
 		return nil

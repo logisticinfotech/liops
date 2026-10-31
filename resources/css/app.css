@@ -24,6 +24,7 @@
   body { @apply min-h-screen text-sm leading-6; }
   h1 { @apply mb-4 text-xl font-semibold tracking-tight; }
   h2 { @apply mt-8 mb-3 text-base font-semibold; }
+  h3 { @apply mt-5 mb-2 text-sm font-semibold; }
   a { @apply text-zinc-900 underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-600 dark:text-zinc-100 dark:decoration-zinc-600 dark:hover:decoration-zinc-300; }
   code { @apply rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] dark:bg-zinc-800; }
   pre { @apply overflow-x-auto rounded-md bg-zinc-100 p-3 font-mono text-xs leading-5 whitespace-pre-wrap dark:bg-zinc-900; }
@@ -119,6 +120,10 @@
   .task li { @apply rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900; }
   .cluster { @apply mt-2 flex cursor-pointer items-start gap-3 rounded-md border border-zinc-200 p-3 font-normal hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50; }
   label.check { @apply flex items-center gap-2 font-normal; }
+  .inline-form { @apply mb-4 flex flex-wrap items-end gap-2; }
+  .inline-form label { @apply m-0 flex items-center gap-2 font-normal; }
+  .inline-form select { @apply w-auto; }
+  pre.query { @apply mb-3 text-[0.8rem]; }
   .progress-panel { @apply space-y-2; }
   .progress-label { @apply text-sm; }
 

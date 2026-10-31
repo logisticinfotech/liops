@@ -1,0 +1,119 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Database</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+{{if gt (len .Servers) 1}}<nav class="tabs" aria-label="Database server">{{range .Servers}}<a class="tab{{if eq .Label $.Data.Server.Label}} active{{end}}" href="/monitoring/database?server={{.Label}}&amp;range={{$.Data.Range}}">{{.Title}}</a>{{end}}</nav>{{end}}
+<nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/database?server={{$.Data.Server.Label}}&amp;range={{.}}{{with $.Data.DB}}&amp;db={{.}}{{end}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else}}7 days{{end}}</a>{{end}}</nav>
+{{if gt (len .DBNames) 1}}<form method="get" action="/monitoring/database" class="inline-form">
+  <input type="hidden" name="server" value="{{.Server.Label}}"><input type="hidden" name="range" value="{{.Range}}">
+  <label>Database <select name="db"><option value="">all {{len .DBNames}}</option>{{range .DBNames}}<option{{if eq . $.Data.DB}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <button class="secondary">Show</button>
+</form>{{end}}
+
+{{if not .Server.Statements}}<div class="note">Query statistics aren't collected yet{{with .Server.StatementsError}}: {{.}}{{else}}; they start within 5 minutes.{{end}}</div>{{end}}
+
+<div class="grid">
+  <div class="stat"><div class="label">Connections</div><div class="value">{{printf "%.0f" .Live.Connections}}</div><div class="sub">of {{printf "%.0f" .Live.MaxConnections}} allowed · {{printf "%.0f" .Live.Running}} running</div></div>
+  <div class="stat"><div class="label">Running over 1 s</div><div class="value">{{printf "%.0f" .Live.Slow}}</div><div class="sub">{{printf "%.0f" .Live.LockWaits}} waiting for a lock</div></div>
+  <div class="stat"><div class="label">Open over 1 min</div><div class="value">{{printf "%.0f" .Live.LongTx}}</div><div class="sub">transactions{{if .Live.IdleTx}} · {{printf "%.0f" .Live.IdleTx}} idle in one{{end}}</div></div>
+  <div class="stat"><div class="label">Reads from memory</div><div class="value">{{if .Live.HasCacheHit}}{{printf "%.1f" .Live.CacheHit}}%{{else}}—{{end}}</div><div class="sub">{{printf "%.0f" .Live.PerSecond}} {{if eq .Server.Engine "mysql"}}statements{{else}}transactions{{end}} a second</div></div>
+</div>
+
+<h2>These queries scan whole tables</h2>
+{{if .Scans}}<p class="muted">They read far more rows than they return: no index fits how they filter. Ranked by the database time they took. Each one holds a CPU core while it runs, slowing other requests too.</p>
+{{template "query-table" .Scans}}
+{{else if .Server.Statements}}<p class="muted">None in this range: the queries that ran found their rows through indexes.</p>{{end}}
+
+<h2>Queries by total time</h2>
+{{if .Top}}{{template "query-table" .Top}}{{else}}<p class="muted">No queries recorded in this range yet. Statistics are read every 5 minutes.</p>{{end}}
+
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+
+<h2>Running now</h2>
+{{with .ActivityError}}<div class="note">Couldn't read what's running: <span class="mono">{{.}}</span></div>{{end}}
+{{with .Activity}}
+<div class="table-wrap"><table>
+  <tr><th class="num">PID</th><th>Database</th><th class="num">Running for</th><th>State</th><th>Statement</th></tr>
+  {{range .Statements}}<tr><td class="num">{{.PID}}</td><td class="mono">{{.DB}}</td><td class="num">{{printf "%.0f" .Seconds}} s{{if gt .TxSeconds 60.0}}<div class="muted">transaction {{printf "%.0f" .TxSeconds}} s</div>{{end}}</td>
+    <td>{{.State}}{{if .BlockedBy}}<div><span class="badge failed">waits for {{.BlockedBy}}</span></div>{{else if .Waiting}}<div class="muted">waits: {{.Waiting}}</div>{{end}}</td>
+    <td><details><summary class="mono">{{if gt (len .Query) 90}}{{slice .Query 0 90}}…{{else}}{{.Query}}{{end}}</summary><pre>{{.Query}}</pre></details></td></tr>
+  {{else}}<tr><td colspan="5" class="muted">Nothing is running right now.</td></tr>{{end}}
+</table></div>
+{{if .Transactions}}<h3>Open transactions</h3>
+<div class="table-wrap"><table>
+  <tr><th class="num">PID</th><th class="num">Open for</th><th>State</th><th class="num">Rows changed</th></tr>
+  {{range .Transactions}}<tr><td class="num">{{.PID}}</td><td class="num">{{printf "%.0f" .Seconds}} s</td><td>{{.State}}</td><td class="num">{{count .RowsModified}}</td></tr>{{end}}
+</table></div>
+<p class="muted">A transaction left open holds its locks and stops old row versions from being cleaned up. Usually a request or job that started one and didn't commit.</p>{{end}}
+<p class="muted">Read live when this page opened; statements include their real values and aren't stored.</p>
+{{end}}
+
+<h2>Tables</h2>
+{{with .TablesError}}<p class="muted">{{.}}</p>{{end}}
+{{if .Tables}}
+<div class="table-wrap"><table>
+  <tr><th>Biggest tables</th><th class="num">Rows</th><th class="num">Size</th><th class="num">Last day</th></tr>
+  {{range .Biggest}}<tr><td class="mono">{{.DB}}.{{if .Schema}}{{.Schema}}.{{end}}{{.Name}}</td><td class="num">{{count .Rows}}</td><td class="num">{{bytes (int64 .Bytes)}}</td><td class="num">{{if .HasGrowth}}{{perDay .Growth}}{{else}}<span class="muted">measuring</span>{{end}}</td></tr>{{end}}
+</table></div>
+{{if .Growing}}<div class="table-wrap"><table>
+  <tr><th>Growing fastest</th><th class="num">Size</th><th class="num">Last day</th></tr>
+  {{range .Growing}}<tr><td class="mono">{{.DB}}.{{if .Schema}}{{.Schema}}.{{end}}{{.Name}}</td><td class="num">{{bytes (int64 .Bytes)}}</td><td class="num">{{perDay .Growth}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if .SeqScanned}}<h3>Tables read whole</h3>
+<p class="muted">Big tables PostgreSQL read from start to end many times: a query on them has no index it can use. The queries above show which.</p>
+<div class="table-wrap"><table>
+  <tr><th>Table</th><th class="num">Rows</th><th class="num">Whole reads</th><th class="num">Rows per read</th><th class="num">Index reads</th></tr>
+  {{range .SeqScanned}}<tr><td class="mono">{{.DB}}.{{.Schema}}.{{.Name}}</td><td class="num">{{count .Rows}}</td><td class="num">{{count .SeqScans}}</td><td class="num">{{count .PerScan}}</td><td class="num">{{count .IdxScans}}</td></tr>{{end}}
+</table></div>{{end}}
+
+<h2>Indexes</h2>
+{{if .Unused}}<h3>Never used</h3>
+<p class="muted">No query has read these since {{date .Tables.StatsSince}}. Each one still costs time on every insert and update. Check before you drop one: a monthly report may need it.</p>
+<div class="table-wrap"><table>
+  <tr><th>Table</th><th>Index</th><th>Columns</th></tr>
+  {{range .Unused}}<tr><td class="mono">{{.DB}}.{{if .Schema}}{{.Schema}}.{{end}}{{.Table}}</td><td class="mono">{{.Name}}</td><td class="mono">{{.Definition}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if .Duplicates}}<h3>Duplicates</h3>
+<p class="muted">Another index covers the same columns, so these can go.</p>
+<div class="table-wrap"><table>
+  <tr><th>Table</th><th>Index</th><th>Covered by</th></tr>
+  {{range .Duplicates}}<tr><td class="mono">{{.DB}}.{{if .Schema}}{{.Schema}}.{{end}}{{.Table}}</td><td class="mono">{{.Name}} {{.Definition}}</td><td class="mono">{{.Duplicate}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if .NoPK}}<h3>Tables without a primary key</h3>
+<p class="muted">Updates and deletes on them can't find a row directly, and replication and some tools need one. Add an <code>id</code> column.</p>
+<div class="table-wrap"><table>
+  <tr><th>Table</th><th class="num">Rows</th><th class="num">Size</th></tr>
+  {{range .NoPK}}<tr><td class="mono">{{.DB}}.{{if .Schema}}{{.Schema}}.{{end}}{{.Name}}</td><td class="num">{{count .Rows}}</td><td class="num">{{bytes (int64 .Bytes)}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if not (or .Unused .Duplicates .NoPK)}}<p class="muted">No unused or duplicate indexes, and every table has a primary key.</p>{{end}}
+
+{{if or .Bloated .XIDOld}}<h2>Upkeep</h2>
+{{if .Bloated}}<p class="muted">Tables where many rows are dead (old versions left by updates and deletes) that autovacuum hasn't cleaned up: they make scans slower and the table bigger.</p>
+<div class="table-wrap"><table>
+  <tr><th>Table</th><th class="num">Live rows</th><th class="num">Dead rows</th><th class="num">Dead</th><th>Last vacuum</th></tr>
+  {{range .Bloated}}<tr><td class="mono">{{.DB}}.{{.Schema}}.{{.Name}}</td><td class="num">{{count .Rows}}</td><td class="num">{{count .DeadRows}}</td><td class="num">{{printf "%.0f" .DeadShare}}%</td><td>{{when .LastVacuum}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if .XIDOld}}<div class="note">These databases' transaction ID age is high: {{range $i, $x := .XIDOld}}{{if $i}}, {{end}}<span class="mono">{{$x.DB}}</span> ({{count $x.Age}}){{end}}. At about 2 billion PostgreSQL stops accepting writes until the database is vacuumed. Autovacuum normally handles it; a long-open transaction can stop it. Check with <code>sudo -u postgres vacuumdb --all --freeze --analyze-in-stages</code> at a quiet time.</div>{{end}}
+{{end}}
+
+<h2>Memory</h2>
+<p class="muted">The data is {{bytes (int64 .DataBytes)}}{{if .DB}} in {{.DB}}{{end}}.</p>
+<div class="table-wrap"><table>
+  <tr><th>Setting</th><th class="num">Value</th><th>What it means here</th></tr>
+  {{range .Memory}}<tr><td class="mono">{{.Name}}</td><td class="num">{{bytes (int64 .Bytes)}}</td><td>{{.Advice}}</td></tr>{{end}}
+</table></div>
+<p class="muted">Tables and indexes read {{when .Tables.At}}.</p>
+{{end}}
+{{end}}
+{{end}}{{end}}
+
+{{define "query-table"}}
+<div class="table-wrap"><table>
+  <tr><th>Query</th><th>Database</th><th class="num">Calls</th><th class="num">Total time</th><th class="num">Per call</th><th class="num">Read per row returned</th></tr>
+  {{range .}}<tr>
+    <td><a class="mono" href="{{.Link}}">{{.Short}}</a>{{range .Flags}}<div><span class="badge waiting">{{.Name}}</span></div>{{end}}</td>
+    <td class="mono">{{.DB}}</td><td class="num">{{count .Calls}}</td><td class="num">{{ms .TimeMS}}</td><td class="num">{{ms .PerCallMS}}</td>
+    <td class="num">{{if gt .Eff.Ratio 0.0}}{{count .Eff.Ratio}}{{if eq .Engine "postgres"}} blocks{{else}} rows{{end}}{{else}}{{count .Eff.PerCall}}{{if eq .Engine "postgres"}} blocks{{else}} rows{{end}}, none returned{{end}}{{if .Eff.Scans}} <span class="badge failed">scans</span>{{end}}</td>
+  </tr>{{end}}
+</table></div>
+{{end}}
