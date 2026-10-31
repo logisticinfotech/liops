@@ -316,7 +316,7 @@ func (s *Server) databases(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, errors.New("couldn't list the dumps in storage: "+err.Error()))
 		return
 	}
-	s.render(w, r, "databases", page{Title: "Databases", Nav: "databases", Data: d})
+	s.render(w, r, "databases", page{Title: "Database dumps", Nav: "databases", Data: d})
 }
 
 type databaseData struct {

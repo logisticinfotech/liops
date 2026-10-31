@@ -477,7 +477,7 @@ func TestMySQLWizard(t *testing.T) {
 
 func TestMySQLScheduleSettings(t *testing.T) {
 	h := newHarness(t, mysqlWizardConfig(t), true)
-	_, _, body := h.get("/settings")
+	_, _, body := h.get("/settings?tab=backups")
 	if !strings.Contains(body, `name="binlog_interval"`) || strings.Contains(body, `name="archive_timeout"`) {
 		t.Fatalf("a MySQL server's schedules form has the binlog interval, not WAL:\n%s", body)
 	}
@@ -494,5 +494,39 @@ func TestMySQLScheduleSettings(t *testing.T) {
 	}
 	if cfg.PgBackRest.RetentionDays != 30 {
 		t.Errorf("PostgreSQL settings must be left alone: %+v", cfg.PgBackRest)
+	}
+}
+
+func TestSettingsTabs(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	for tab, want := range map[string]string{
+		"":        `action="/settings/server"`,
+		"server":  `action="/settings/server"`,
+		"storage": `action="/settings/storage"`,
+		"email":   `action="/settings/email"`,
+		"backups": `action="/settings/schedules"`,
+		"dumps":   `action="/settings/labels"`,
+		"nope":    `action="/settings/server"`,
+	} {
+		_, _, body := h.get("/settings?tab=" + tab)
+		if !strings.Contains(body, want) || strings.Count(body, `<form method="post" action="/settings/`) > 2 {
+			t.Errorf("tab %q should show only its own forms, with %s", tab, want)
+		}
+	}
+	code, loc, _ := h.post("/settings?tab=email", "/settings/email", url.Values{
+		"smtp_host": {"smtp.example.com"}, "smtp_port": {"587"}, "tls": {"starttls"},
+		"username": {"alerts@example.com"}, "from": {"alerts@example.com"}, "to": {"dev@example.com"}, "action": {"save"},
+	})
+	if code != 303 || loc != "/settings?tab=email" {
+		t.Errorf("a save should return to its tab: %d %q", code, loc)
+	}
+}
+
+func TestErrorPageLeadsWithTheReason(t *testing.T) {
+	h := newHarness(t, validConfig(), true)
+	h.store.FailList = "dumps/"
+	_, _, body := h.get("/databases")
+	if !strings.Contains(body, "Likely reason:") || !strings.Contains(body, "Technical details") || strings.Contains(body, "javascript:") {
+		t.Errorf("error page:\n%s", body)
 	}
 }

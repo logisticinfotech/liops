@@ -14,6 +14,7 @@ document.addEventListener("click", (e) => {
       setTimeout(() => (copy.textContent = old), 1500);
     });
   }
+  if (e.target.closest("[data-back]")) history.back();
   // The sidebar is a slide-in menu on small screens.
   if (e.target.closest("[data-nav-toggle]") || e.target.closest("[data-nav-close]")) {
     document.getElementById("sidebar")?.classList.toggle("open");

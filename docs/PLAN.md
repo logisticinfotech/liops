@@ -360,6 +360,7 @@ Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 | Templates / assets | `html/template` + `embed` |
 | Styles | Tailwind CSS 4, built by its **standalone CLI** (`make css`, pinned and checksum-checked; no Node or npm); the generated `resources/static/app.css` is committed and CI checks it's current (`make css-check`) |
 | Charts | **uPlot** 1.6.32 (MIT, ~50 KB), vendored in `resources/static/vendor/uplot/`; never from a CDN |
+| Node / npm | **Not used today.** If front-end work ever needs it (e.g. bundling many JS modules), it's allowed for **building assets only**: pinned with a lockfile, the built `app.js` / `app.css` committed and checked by CI like `app.css` is, and nothing from npm runs on servers or ships in the binary except those built files (decided November 2026). |
 | Scheduler | `github.com/robfig/cron/v3` (with location) |
 | Object storage | `github.com/minio/minio-go/v7` |
 | SMTP | `github.com/wneessen/go-mail` |

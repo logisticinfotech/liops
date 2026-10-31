@@ -1,39 +1,40 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
 <h1>Settings</h1>
+<nav class="tabs" aria-label="Settings">{{range .Tabs}}<a class="tab{{if eq .ID $.Data.Tab}} active{{end}}" href="/settings?tab={{.ID}}">{{.Title}}</a>{{end}}</nav>
 <p class="muted">Saved settings are used straight away.{{if not $.MySQL}} pgBackRest's config is rewritten with them.{{end}}</p>
 {{$errs := .Errors}}{{$res := .Result}}
-<form method="post" action="/settings/server" class="panel" id="server">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Server</h2>
+{{if eq $.Data.Tab "server"}}<form method="post" action="/settings/server" class="panel" id="server">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Server</h2>
   {{template "errors" index $errs "server"}}{{template "fields-server" .Cfg}}
   <div class="actions"><button name="action" value="save">Save</button></div>
-</form>
-<form method="post" action="/settings/storage" class="panel" id="storage">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Storage</h2>
+</form>{{end}}
+{{if eq $.Data.Tab "storage"}}<form method="post" action="/settings/storage" class="panel" id="storage">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Storage</h2>
   {{template "errors" index $errs "storage"}}{{if $res}}{{if eq $res.Section "storage"}}{{template "result" $res}}{{end}}{{end}}
   {{template "fields-storage" .Cfg}}
   <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
-</form>
-<form method="post" action="/settings/email" class="panel" id="email">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Email</h2>
+</form>{{end}}
+{{if eq $.Data.Tab "email"}}<form method="post" action="/settings/email" class="panel" id="email">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Email</h2>
   {{template "errors" index $errs "email"}}{{if $res}}{{if eq $res.Section "email"}}{{template "result" $res}}{{end}}{{end}}
   {{template "fields-email" .Cfg}}
   <div class="actions"><button name="action" value="test" class="secondary">Send a test email</button><button name="action" value="save">Save</button></div>
-</form>
-<form method="post" action="/settings/schedules" class="panel" id="schedules">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Schedules and point-in-time retention</h2>
+</form>{{end}}
+{{if eq $.Data.Tab "backups"}}<form method="post" action="/settings/schedules" class="panel" id="schedules">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Schedules and point-in-time retention</h2>
   {{template "errors" index $errs "schedules"}}{{template "fields-schedules" .Cfg}}
   <div class="actions"><button name="action" value="save">Save</button></div>
-</form>
-<form method="post" action="/settings/dumps" class="panel" id="dumps">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Database dumps</h2>
+</form>{{end}}
+{{if eq $.Data.Tab "dumps"}}<form method="post" action="/settings/dumps" class="panel" id="dumps">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Database dumps</h2>
   {{template "errors" index $errs "dumps"}}{{template "fields-dumps" .Cfg}}
   <div class="actions"><button name="action" value="save">Save</button></div>
-</form>
-<form method="post" action="/settings/labels" class="panel" id="labels">
-  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2 style="margin-top:0">Labels</h2>
+</form>{{end}}
+{{if eq $.Data.Tab "dumps"}}<form method="post" action="/settings/labels" class="panel" id="labels">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}"><h2>Labels</h2>
   {{template "errors" index $errs "labels"}}{{if $res}}{{if eq $res.Section "labels"}}{{template "result" $res}}{{end}}{{end}}
   {{template "fields-labels" .Cfg}}
   <div class="actions"><button name="action" value="test" class="secondary">Test</button><button name="action" value="save">Save</button></div>
-</form>
+</form>{{end}}
 {{end}}{{end}}

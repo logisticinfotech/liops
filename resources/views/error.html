@@ -1,2 +1,9 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
-{{define "content"}}<h1>{{.Title}}</h1><p><a href="javascript:history.back()">Go back</a> or <a href="/">open the dashboard</a>.</p>{{end}}
+{{define "content"}}{{with .Data}}
+<h1>{{.What}}</h1>
+<div class="error">
+  {{if .Reason}}<p><strong>Likely reason:</strong> {{.Reason}}.</p>{{end}}
+  <details><summary>Technical details</summary><pre>{{.Detail}}</pre></details>
+</div>
+<p><button type="button" class="secondary" data-back>Go back</button> or <a href="/">open the status page</a>.</p>
+{{end}}{{end}}

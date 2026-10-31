@@ -1,6 +1,6 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{define "content"}}{{with .Data}}
-<h1>Databases</h1>
+<h1>Database dumps</h1>
 <p class="muted">Each database is dumped every night after the backup. {{if $.MySQL}}Dumps are gzipped SQL: restore with <code>gunzip -c … | mysql</code>.{{else}}Dumps restore with <code>pg_restore</code>.{{end}} Download links work for 10 minutes and every download is in the audit log.</p>
 <div class="table-wrap"><table>
   <tr><th>Database</th><th>Last dump</th><th class="num">Size</th><th class="num">Kept</th><th>Status</th><th></th></tr>

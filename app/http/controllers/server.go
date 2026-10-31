@@ -229,9 +229,25 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
+// errorData is the error page: what failed and the likely reason in plain words first, the
+// raw error under "Technical details".
+type errorData struct {
+	What, Reason, Detail string
+}
+
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	s.logf("%s %s: %v", r.Method, r.URL.Path, err)
-	s.render(w, r, "error", page{Title: "Something went wrong", Error: err.Error()})
+	msg := err.Error()
+	// Errors read "what failed: cause: cause…": the first part says what failed.
+	what, _, _ := strings.Cut(msg, ": ")
+	if len(what) > 120 {
+		what = "Something went wrong"
+	}
+	reason := notify.LikelyReason(msg)
+	if strings.HasPrefix(reason, "unknown") {
+		reason = ""
+	}
+	s.render(w, r, "error", page{Title: "Something went wrong", Data: errorData{What: capitalize(what), Reason: reason, Detail: msg}})
 }
 
 func capitalize(s string) string {

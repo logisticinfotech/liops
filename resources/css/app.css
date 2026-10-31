@@ -38,7 +38,13 @@
       focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 focus:outline-none
       dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-zinc-400;
   }
-  textarea, input.code { @apply font-mono; }
+  input.code, textarea.code { @apply font-mono; }
+  main ol { @apply mb-3 list-decimal space-y-1 pl-5; }
+  main ul { @apply mb-3 list-disc space-y-1 pl-5; }
+  p { @apply mb-3; }
+  p:last-child { @apply mb-0; }
+  details > summary { @apply cursor-pointer text-sm font-medium select-none; }
+  details[open] > summary { @apply mb-2; }
   button, .button {
     @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white no-underline shadow-xs
       hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50
@@ -64,6 +70,10 @@
 
   /* Surfaces */
   .panel { @apply mb-5 rounded-lg border border-zinc-200 bg-white p-5 shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
+  .panel h2 { @apply mt-0; }
+  .tabs { @apply mb-6 flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800; }
+  .tab { @apply -mb-px border-b-2 border-transparent px-3 py-2 text-sm whitespace-nowrap text-zinc-600 no-underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100; }
+  .tab.active { @apply border-zinc-900 font-medium text-zinc-900 dark:border-zinc-100 dark:text-zinc-100; }
   .table-wrap { @apply mb-5 overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
   .grid { @apply mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4; }
   .stat { @apply rounded-lg border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
@@ -103,9 +113,9 @@
   .badge.pending, .badge.deleted { @apply border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300; }
 
   /* Setup wizard */
-  .steps { @apply mb-6 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400; }
+  .steps { @apply mb-6 flex list-none flex-wrap gap-x-4 gap-y-1 pl-0 text-xs text-zinc-500 dark:text-zinc-400; }
   .steps li.current { @apply font-semibold text-zinc-900 dark:text-zinc-100; }
-  .task { @apply mb-5 space-y-3; }
+  .task { @apply mb-5 list-none space-y-3 pl-0; }
   .task li { @apply rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900; }
   .cluster { @apply mt-2 flex cursor-pointer items-start gap-3 rounded-md border border-zinc-200 p-3 font-normal hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50; }
   label.check { @apply flex items-center gap-2 font-normal; }

@@ -22,6 +22,9 @@ type Memory struct {
 	Now func() time.Time
 	// FailPut, when set, makes Put fail for keys with this prefix.
 	FailPut string
+	// FailList, when set, makes List fail for prefixes starting with it, as an unreachable
+	// S3 server would.
+	FailList string
 }
 
 type memObject struct {
@@ -75,6 +78,9 @@ func (m *Memory) Read(ctx context.Context, key string) (io.ReadCloser, error) {
 func (m *Memory) List(ctx context.Context, prefix string) ([]Object, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.FailList != "" && strings.HasPrefix(prefix, m.FailList) {
+		return nil, fmt.Errorf("list %s: dial tcp 127.0.0.1:9: connect: connection refused", prefix)
+	}
 	var objs []Object
 	for k, o := range m.objects {
 		if strings.HasPrefix(k, prefix) {
