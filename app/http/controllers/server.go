@@ -157,9 +157,10 @@ type page struct {
 	Error   string
 	Server  string
 	Version string
-	Wizard  bool // hide the nav
-	Refresh int  // seconds; reload the page while something runs
-	MySQL   bool // a MySQL server: no point-in-time backups yet, MySQL restore commands
+	Wizard  bool   // hide the nav
+	Refresh int    // seconds; reload the page while something runs
+	MySQL   bool   // a MySQL server: MySQL restore commands, binlogs instead of WAL
+	Health  string // overall backup health for the top bar (HealthOK, …); empty in the wizard
 	Data    any
 }
 
@@ -178,6 +179,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p p
 	p.Server = s.serverName()
 	p.Version = version.Version
 	p.MySQL = s.Svc.Config().IsMySQL()
+	if !p.Wizard && p.Health == "" {
+		if h := s.Svc.Health(r.Context()); h != nil {
+			p.Health, _, _ = s.backupHealth(h)
+		}
+	}
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", p); err != nil {
 		s.logf("render %s: %v", name, err)

@@ -88,13 +88,17 @@ func TestFailureEmail(t *testing.T) {
 
 func TestLikelyReason(t *testing.T) {
 	cases := map[string]string{
-		"ERROR: [047]: unable to write '/var/lib/x': No space left on device":                               "disk is full",
-		"WAL segment 000000010000000000000003 was not archived before the 60000ms timeout":                  "WAL upload is stuck",
-		"HTTP 403 Forbidden <Code>SignatureDoesNotMatch</Code>":                                             "storage key was rejected",
-		"dial tcp: lookup example.r2.cloudflarestorage.com: no such host":                                   "couldn't reach storage",
-		"ERROR: [055]: unable to load info file '/pgbackrest/archive/main/archive.info' ... missing stanza": "stanza",
-		"ERROR: [028]: backup and archive info files exist but do not match the database":                   "different PostgreSQL server",
-		"ERROR: [044]: WAL file system-id 7683116411252273504 do not match stanza system-id 7000":           "different PostgreSQL server",
+		"ERROR: [047]: unable to write '/var/lib/x': No space left on device":                                  "disk is full",
+		"WAL segment 000000010000000000000003 was not archived before the 60000ms timeout":                     "WAL upload is stuck",
+		"HTTP 403 Forbidden <Code>SignatureDoesNotMatch</Code>":                                                "storage key was rejected",
+		"dial tcp: lookup example.r2.cloudflarestorage.com: no such host":                                      "couldn't reach storage",
+		"ERROR: [055]: unable to load info file '/pgbackrest/archive/main/archive.info' ... missing stanza":    "stanza",
+		"ERROR: [028]: backup and archive info files exist but do not match the database":                      "different PostgreSQL server",
+		"ERROR: [044]: WAL file system-id 7683116411252273504 do not match stanza system-id 7000":              "different PostgreSQL server",
+		`psql: error: connection to server at "127.0.0.1", port 5432 failed: Connection refused`:               "is PostgreSQL running",
+		"psql: error: connection to server on socket \"/var/run/postgresql/.s.PGSQL.5432\" failed":             "is PostgreSQL running",
+		"ERROR 2002 (HY000): Can't connect to local MySQL server through socket '/var/run/mysqld/mysqld.sock'": "MySQL refused",
+		"list : Get \"https://127.0.0.1:9/bucket/\": dial tcp 127.0.0.1:9: connect: connection refused":        "couldn't reach storage",
 		"something new and strange":                           "unknown",
 		"archived 000000010000000000000403 then failed oddly": "unknown", // a WAL name is not an HTTP 403
 	}

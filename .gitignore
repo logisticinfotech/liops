@@ -1,5 +1,6 @@
 # Build output
 /liops
+/bin/
 /dist/
 /test/.liops-linux
 

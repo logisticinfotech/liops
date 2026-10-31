@@ -358,6 +358,8 @@ Restores use `pgbackrest` and `pg_restore` directly (see `docs/restore.md`).
 | Language | Go (see `go.mod`), `CGO_ENABLED=0`, static linux/amd64 binary |
 | HTTP / routing | Standard library `net/http` (method + path patterns) |
 | Templates / assets | `html/template` + `embed` |
+| Styles | Tailwind CSS 4, built by its **standalone CLI** (`make css`, pinned and checksum-checked; no Node or npm); the generated `resources/static/app.css` is committed and CI checks it's current (`make css-check`) |
+| Charts | **uPlot** 1.6.32 (MIT, ~50 KB), vendored in `resources/static/vendor/uplot/`; never from a CDN |
 | Scheduler | `github.com/robfig/cron/v3` (with location) |
 | Object storage | `github.com/minio/minio-go/v7` |
 | SMTP | `github.com/wneessen/go-mail` |

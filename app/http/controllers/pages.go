@@ -3,6 +3,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -65,6 +66,81 @@ type dashboardData struct {
 	DumpsOK    int
 	Next       []jobs.Next
 	FailedRuns []state.Run
+	Chart      string // backup sizes over time, for the chart (JSON)
+}
+
+// backupHealth is the overall backup health: FAILED when the newest backup run or the
+// newest dumps run failed, ATTENTION when the health check found problems, OK otherwise.
+// It also returns the failed runs and the newest dumps run.
+func (s *Server) backupHealth(h *jobs.Health) (level string, failed []state.Run, dumps *state.Run) {
+	level = HealthOK
+	if len(h.Summary.Problems) > 0 {
+		level = HealthAttention
+	}
+	var newestBackup *state.Run
+	for _, job := range []string{jobs.Full, jobs.Diff} {
+		if run, err := s.Svc.State.LastRun(job, ""); err == nil && run != nil && run.Status != state.StatusRunning {
+			if newestBackup == nil || run.Start.After(newestBackup.Start) {
+				newestBackup = run
+			}
+		}
+	}
+	dumps, _ = s.Svc.State.LastRun(jobs.Dumps, "")
+	for _, run := range []*state.Run{newestBackup, dumps} {
+		if run != nil && (run.Status == state.StatusFailed || run.Status == state.StatusInterrupted) {
+			level = HealthFailed
+			failed = append(failed, *run)
+		}
+	}
+	return level, failed, dumps
+}
+
+// chartSpec is what app.js draws: x as Unix seconds, one value per x per series (null for
+// none).
+type chartSpec struct {
+	Unit   string        `json:"unit"`
+	X      []int64       `json:"x"`
+	Series []chartSeries `json:"series"`
+}
+
+type chartSeries struct {
+	Label  string     `json:"label"`
+	Values []*float64 `json:"values"`
+}
+
+// backupChart is the size stored by each full, diff and dumps run of the last 90 days.
+func (s *Server) backupChart() string {
+	runs, err := s.Svc.State.Runs("", 2000)
+	if err != nil {
+		return ""
+	}
+	labels := map[string]int{jobs.Full: 0, jobs.Diff: 1, jobs.Dumps: 2}
+	spec := chartSpec{Unit: "bytes", Series: []chartSeries{{Label: "Full backup"}, {Label: "Differential"}, {Label: "Dumps"}}}
+	cutoff := time.Now().Add(-90 * 24 * time.Hour)
+	slices.Reverse(runs) // oldest first
+	for _, run := range runs {
+		i, ok := labels[run.Job]
+		if !ok || run.Status != state.StatusOK || run.Start.Before(cutoff) || run.Size <= 0 {
+			continue
+		}
+		spec.X = append(spec.X, run.Start.Unix())
+		size := float64(run.Size)
+		for j := range spec.Series {
+			var v *float64
+			if j == i {
+				v = &size
+			}
+			spec.Series[j].Values = append(spec.Series[j].Values, v)
+		}
+	}
+	if len(spec.X) < 2 {
+		return "" // nothing worth a chart yet
+	}
+	data, err := json.Marshal(spec)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -89,26 +165,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		d.LastDiff = fromXtraBackup(xtrabackup.Last(h.MySQLBackups, xtrabackup.Diff))
 	}
 
-	// FAILED when the newest backup run or the newest dumps run failed.
-	d.Health = HealthOK
-	if len(d.Problems) > 0 {
-		d.Health = HealthAttention
-	}
-	var newestBackup *state.Run
-	for _, job := range []string{jobs.Full, jobs.Diff} {
-		if run, err := s.Svc.State.LastRun(job, ""); err == nil && run != nil && run.Status != state.StatusRunning {
-			if newestBackup == nil || run.Start.After(newestBackup.Start) {
-				newestBackup = run
-			}
-		}
-	}
-	dumps, _ := s.Svc.State.LastRun(jobs.Dumps, "")
-	for _, run := range []*state.Run{newestBackup, dumps} {
-		if run != nil && (run.Status == state.StatusFailed || run.Status == state.StatusInterrupted) {
-			d.Health = HealthFailed
-			d.FailedRuns = append(d.FailedRuns, *run)
-		}
-	}
+	var dumps *state.Run
+	d.Health, d.FailedRuns, dumps = s.backupHealth(h)
+	d.Chart = s.backupChart()
 	if len(d.FailedRuns) > 0 {
 		// The failed run is listed already; don't repeat it as a problem.
 		d.Problems = slices.DeleteFunc(slices.Clone(d.Problems), func(p string) bool { return strings.HasPrefix(p, "the last database dumps") })

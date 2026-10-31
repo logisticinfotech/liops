@@ -29,6 +29,7 @@ make vm-test-mysql  # the same test in a fresh Ubuntu 26.04 Multipass VM, no Doc
 make testenv-down   # tear down and delete volumes
 make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
 make dev            # serve against it (LIOPS_DEV=1); see docs/development.md
+make css            # rebuild resources/static/app.css (Tailwind standalone CLI, no npm); commit it
 
 go test -run TestUIMustListenOnLoopback ./config   # single test
 ```
@@ -81,7 +82,11 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   saves and the wizard go through it; the scheduler only runs once the config is valid and
   `state` meta `setup_complete` is set (by `liops setup` or the wizard). Templates are
   `resources/views/layout.html` + `partials/*.html` + one page each, embedded with `embed`.
-  The strict CSP means no inline scripts or styles. Controller tests
+  The strict CSP means no inline scripts or styles. Styles are Tailwind (`resources/css/app.css`
+  → `make css` → the committed `resources/static/app.css`; component classes there keep the
+  templates' class names short), light and dark (`static/theme.js` sets `class="dark"` before
+  the page draws). Charts are uPlot, vendored (no CDN): a page passes its data as JSON in a
+  `data-chart` attribute and `static/app.js` draws it. The layout is a sidebar app shell. Controller tests
   (`controllers_test.go`) drive the real handler through `httptest` with a cookie jar and
   fake runners. Use that harness for new pages.
 - **No login** in the UI, by decision (PLAN.md §5.2): the SSH tunnel is the access control.

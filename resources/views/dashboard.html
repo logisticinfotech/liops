@@ -19,6 +19,7 @@
   <div class="stat"><div class="label">Storage used</div><div class="value">{{bytes .Storage}}</div><div class="sub">both layers</div></div>
   <div class="stat"><div class="label">Server disk</div><div class="value">{{if ge .Disk 0}}{{.Disk}}% used{{else}}unknown{{end}}</div></div>
 </div>
+{{with .Chart}}<div class="chart" data-chart="{{.}}"><div class="chart-title">Backup sizes, last 90 days</div></div>{{end}}
 <h2>Next scheduled jobs</h2>
 <div class="table-wrap"><table>
   <tr><th>Job</th><th>When</th></tr>

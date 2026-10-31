@@ -28,6 +28,9 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: UI stylesheet is up to date
+        run: make css-check
+
       - name: Unit tests
         run: go test -race -count=1 ./...
 

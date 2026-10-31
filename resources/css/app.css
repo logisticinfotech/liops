@@ -1,0 +1,143 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * The UI's styles: Tailwind CSS, built by `make css` into resources/static/app.css (which is
+ * committed, so a plain `go build` needs no tools). Templates can use Tailwind's utility
+ * classes directly; the component classes below keep the pages' own class names short.
+ *
+ * Neutral palette (zinc), with light and dark themes: the theme follows the system unless the
+ * user picks one, which sets class="dark" or "light" on <html> (static/theme.js).
+ */
+@import "tailwindcss";
+
+@source "../views";
+@source "../static/app.js";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html { @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100; }
+  body { @apply min-h-screen text-sm leading-6; }
+  h1 { @apply mb-4 text-xl font-semibold tracking-tight; }
+  h2 { @apply mt-8 mb-3 text-base font-semibold; }
+  a { @apply text-zinc-900 underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-600 dark:text-zinc-100 dark:decoration-zinc-600 dark:hover:decoration-zinc-300; }
+  code { @apply rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] dark:bg-zinc-800; }
+  pre { @apply overflow-x-auto rounded-md bg-zinc-100 p-3 font-mono text-xs leading-5 whitespace-pre-wrap dark:bg-zinc-900; }
+  table { @apply w-full border-collapse text-left; }
+  th { @apply border-b border-zinc-200 px-3 py-2 text-xs font-medium tracking-wide text-zinc-500 uppercase dark:border-zinc-800 dark:text-zinc-400; }
+  td { @apply border-b border-zinc-100 px-3 py-2 align-top dark:border-zinc-800/70; }
+  tr:last-child td { @apply border-b-0; }
+  th.num, td.num { @apply text-right tabular-nums; }
+  label { @apply mt-3 mb-1 block text-sm font-medium; }
+  input[type=text], input[type=email], input[type=password], input[type=number], input[type=time], select, textarea {
+    @apply block w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm shadow-xs
+      focus:border-zinc-500 focus:ring-2 focus:ring-zinc-500/20 focus:outline-none
+      dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-zinc-400;
+  }
+  textarea, input.code { @apply font-mono; }
+  button, .button {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white no-underline shadow-xs
+      hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50
+      dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300;
+  }
+  progress { @apply h-2 w-full appearance-none overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800; }
+  progress::-webkit-progress-bar { @apply bg-zinc-200 dark:bg-zinc-800; }
+  progress::-webkit-progress-value { @apply bg-zinc-900 dark:bg-zinc-100; }
+  progress::-moz-progress-bar { @apply bg-zinc-900 dark:bg-zinc-100; }
+}
+
+@layer components {
+  /* Buttons */
+  button.secondary, .button.secondary {
+    @apply border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-100
+      dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800;
+  }
+  button.danger { @apply bg-red-600 text-white hover:bg-red-500 dark:bg-red-500 dark:text-white dark:hover:bg-red-400; }
+  button.small, .button.small { @apply px-2 py-1 text-xs; }
+  button.link { @apply bg-transparent p-0 text-zinc-600 underline shadow-none hover:bg-transparent hover:text-zinc-900 dark:bg-transparent dark:text-zinc-400 dark:hover:text-zinc-100; }
+  form.inline { @apply inline; }
+  .actions { @apply mt-5 flex flex-wrap items-center gap-2; }
+
+  /* Surfaces */
+  .panel { @apply mb-5 rounded-lg border border-zinc-200 bg-white p-5 shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
+  .table-wrap { @apply mb-5 overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
+  .grid { @apply mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4; }
+  .stat { @apply rounded-lg border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
+  .stat .label { @apply text-xs font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-400; }
+  .stat .value { @apply mt-1 text-lg font-semibold tabular-nums; }
+  .stat .sub { @apply text-xs text-zinc-500 dark:text-zinc-400; }
+  .row { @apply grid grid-cols-1 gap-4 sm:grid-cols-2; }
+  .chart { @apply mb-6 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900; }
+  .chart-title { @apply mb-2 text-sm font-medium; }
+
+  /* Text */
+  .muted { @apply text-zinc-500 dark:text-zinc-400; }
+  .hint { @apply mt-1 text-xs text-zinc-500 dark:text-zinc-400; }
+  .mono { @apply font-mono text-xs; }
+
+  /* Messages */
+  .flash { @apply mb-5 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200; }
+  .error { @apply mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200; }
+  .error pre, .flash pre { @apply mt-2 bg-transparent p-0; }
+  .note { @apply mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200; }
+  .result-ok { @apply mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200; }
+  .result-bad { @apply mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200; }
+
+  /* The dashboard's overall health */
+  .health { @apply mb-6 rounded-lg border px-5 py-4 text-base font-medium; }
+  .health ul { @apply mt-2 list-disc pl-5 text-sm font-normal; }
+  .health.OK { @apply border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200; }
+  .health.ATTENTION { @apply border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200; }
+  .health.FAILED { @apply border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200; }
+
+  /* Badges: job and step statuses */
+  .badge { @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap; }
+  .badge.ok, .badge.done { @apply border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300; }
+  .badge.failed, .badge.interrupted { @apply border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300; }
+  .badge.running, .badge.queued { @apply border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/60 dark:text-sky-300; }
+  .badge.waiting { @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-300; }
+  .badge.pending, .badge.deleted { @apply border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300; }
+
+  /* Setup wizard */
+  .steps { @apply mb-6 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400; }
+  .steps li.current { @apply font-semibold text-zinc-900 dark:text-zinc-100; }
+  .task { @apply mb-5 space-y-3; }
+  .task li { @apply rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900; }
+  .cluster { @apply mt-2 flex cursor-pointer items-start gap-3 rounded-md border border-zinc-200 p-3 font-normal hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50; }
+  label.check { @apply flex items-center gap-2 font-normal; }
+  .progress-panel { @apply space-y-2; }
+  .progress-label { @apply text-sm; }
+
+  /* The app shell: sidebar, top bar, content */
+  .shell { @apply min-h-screen lg:grid lg:grid-cols-[15rem_1fr]; }
+  .sidebar { @apply hidden border-r border-zinc-200 bg-white lg:sticky lg:top-0 lg:block lg:h-screen lg:overflow-y-auto dark:border-zinc-800 dark:bg-zinc-900; }
+  .sidebar.open { @apply fixed inset-y-0 left-0 z-40 block w-64 shadow-xl lg:static lg:w-auto lg:shadow-none; }
+  .sidebar .brand { @apply flex h-14 items-center gap-2 border-b border-zinc-200 px-5 text-base font-semibold no-underline dark:border-zinc-800; }
+  .nav-group { @apply px-3 pt-5 pb-1 text-[0.7rem] font-semibold tracking-wider text-zinc-400 uppercase dark:text-zinc-500; }
+  .nav-link { @apply mx-2 flex items-center justify-between rounded-md px-3 py-1.5 text-sm text-zinc-700 no-underline hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800; }
+  .nav-link.active { @apply bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100; }
+  .nav-count { @apply rounded-full bg-zinc-200 px-1.5 text-xs text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200; }
+  .topbar { @apply sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-zinc-200 bg-white/80 px-4 backdrop-blur sm:px-6 dark:border-zinc-800 dark:bg-zinc-950/80; }
+  .topbar .server { @apply font-medium; }
+  .topbar .spacer { @apply flex-1; }
+  .icon-button { @apply inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-transparent p-0 text-zinc-600 shadow-none hover:bg-zinc-100 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800; }
+  .status-dot { @apply inline-flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300; }
+  .status-dot::before { @apply inline-block h-2 w-2 rounded-full bg-zinc-400 content-['']; }
+  .status-dot.OK::before { @apply bg-emerald-500; }
+  .status-dot.ATTENTION::before { @apply bg-amber-500; }
+  .status-dot.FAILED::before { @apply bg-red-500; }
+  .content { @apply mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8; }
+  .content.narrow { @apply max-w-2xl; }
+  .backdrop { @apply fixed inset-0 z-30 hidden bg-black/30 lg:hidden; }
+  .backdrop.open { @apply block; }
+  footer { @apply px-4 py-6 text-center text-xs text-zinc-400 sm:px-6 dark:text-zinc-500; }
+
+  /* uPlot, themed */
+  .uplot { @apply font-sans; }
+  .u-legend { @apply text-xs whitespace-normal text-zinc-600 dark:text-zinc-300; }
+  .u-legend th, .u-legend td { @apply border-0 px-1 py-0 text-xs font-normal tracking-normal normal-case text-zinc-600 dark:text-zinc-300; }
+}

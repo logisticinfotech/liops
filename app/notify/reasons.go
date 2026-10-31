@@ -18,8 +18,11 @@ var reasons = []struct {
 	{[]string{"do not match the database", "do not match stanza", "system-id"}, "the backups in this folder belong to a different PostgreSQL server (each server needs its own backup name; see docs/restore.md section 3)"},
 	{[]string{"does not exist in repo", "missing stanza", "stanza-create"}, "the pgBackRest stanza hasn't been created (run: liops setup)"},
 	{[]string{"unable to acquire lock"}, "another pgBackRest command was already running"},
-	{[]string{"could not connect to server", "connection to server on socket", "connection refused", "the database system is starting up", "the database system is shutting down"}, "the database refused the connection (is PostgreSQL running?)"},
-	{[]string{"no such host", "i/o timeout", "timed out", "timeout", "connection reset", "network is unreachable"}, "couldn't reach storage"},
+	// psql's and MySQL's own wording, so a plain "connection refused" from storage isn't
+	// blamed on the database.
+	{[]string{"could not connect to server", "connection to server on socket", "connection to server at", "the database system is starting up", "the database system is shutting down"}, "the database refused the connection (is PostgreSQL running?)"},
+	{[]string{"can't connect to local mysql server", "can't connect to mysql server", "mysqld.sock"}, "MySQL refused the connection (is it running?)"},
+	{[]string{"no such host", "i/o timeout", "timed out", "timeout", "connection reset", "connection refused", "network is unreachable"}, "couldn't reach storage"},
 	{[]string{"permission denied"}, "a file or directory has the wrong permissions"},
 	{[]string{"out of memory", "cannot allocate memory"}, "the server ran out of memory"},
 }

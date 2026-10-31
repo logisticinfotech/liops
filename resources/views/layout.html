@@ -6,29 +6,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
 <title>{{.Title}} · liops · {{.Server}}</title>
+<script src="/static/theme.js"></script>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/">liops</a>
-  <span class="server">{{.Server}}</span>
-  {{if not .Wizard}}
-  <nav>
-    <a href="/" {{if eq .Nav "dashboard"}}class="active"{{end}}>Dashboard</a>
-    <a href="/backups" {{if eq .Nav "backups"}}class="active"{{end}}>Point-in-time backups</a>
-    <a href="/databases" {{if eq .Nav "databases"}}class="active"{{end}}>Databases</a>
-    <a href="/jobs" {{if eq .Nav "jobs"}}class="active"{{end}}>Jobs</a>
-    <a href="/settings" {{if eq .Nav "settings"}}class="active"{{end}}>Settings</a>
-    <a href="/audit" {{if eq .Nav "audit"}}class="active"{{end}}>Audit log</a>
-  </nav>
-  {{end}}
+{{if .Wizard}}
+<header class="topbar">
+  <span class="text-base font-semibold">liops</span>
+  <span class="server muted">{{.Server}}</span>
+  <span class="spacer"></span>
+  {{template "theme-button"}}
 </header>
-<main {{if .Wizard}}class="narrow"{{end}}>
-  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+<main class="content narrow">
+  {{template "messages" .}}
   {{template "content" .}}
 </main>
-<footer>liops {{.Version}} · reached through your SSH tunnel</footer>
+{{else}}
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="/">liops</a>
+    <nav aria-label="Main">
+      <div class="nav-group">Backups</div>
+      <a class="nav-link{{if eq .Nav "dashboard"}} active{{end}}" href="/">Status</a>
+      <a class="nav-link{{if eq .Nav "backups"}} active{{end}}" href="/backups">Point-in-time</a>
+      <a class="nav-link{{if eq .Nav "databases"}} active{{end}}" href="/databases">Dumps</a>
+      <a class="nav-link{{if eq .Nav "jobs"}} active{{end}}" href="/jobs">Jobs</a>
+      <div class="nav-group">Server</div>
+      <a class="nav-link{{if eq .Nav "settings"}} active{{end}}" href="/settings">Settings</a>
+      <a class="nav-link{{if eq .Nav "audit"}} active{{end}}" href="/audit">Audit log</a>
+    </nav>
+  </aside>
+  <div class="backdrop" data-nav-close></div>
+  <div class="min-w-0">
+    <header class="topbar">
+      <button type="button" class="icon-button lg:hidden" data-nav-toggle aria-label="Menu">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+      </button>
+      <span class="server">{{.Server}}</span>
+      {{with .Health}}<a href="/" class="status-dot {{.}} no-underline">{{if eq . "OK"}}Backups healthy{{else if eq . "ATTENTION"}}Backups need attention{{else}}A backup job failed{{end}}</a>{{end}}
+      <span class="spacer"></span>
+      {{template "theme-button"}}
+    </header>
+    <main class="content">
+      {{template "messages" .}}
+      {{template "content" .}}
+    </main>
+    <footer>liops {{.Version}} · reached through your SSH tunnel</footer>
+  </div>
+</div>
+{{end}}
 </body>
 </html>{{end}}
+
+{{define "messages"}}
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{end}}
+
+{{define "theme-button"}}
+<button type="button" class="icon-button" data-theme-toggle aria-label="Switch theme" title="Switch theme">
+  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 3a7 7 0 0 0 0 14z" fill="currentColor"/></svg>
+</button>
+{{end}}
