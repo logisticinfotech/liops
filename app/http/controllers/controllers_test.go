@@ -566,7 +566,7 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 		QueryCounters: monitor.QueryCounters{Calls: 40, TimeMS: 106000, RowsExamined: 40 * 1.65e6, RowsSent: 40},
 	}
 	filter := monitor.QueryTotal{
-		QueryShape:    monitor.QueryShape{Server: "mysql", DB: "tenant_a", ID: strings.Repeat("cd", 32), Text: "SELECT `id` FROM `readings` WHERE DATE ( `created_at` ) = ?"},
+		QueryShape:    monitor.QueryShape{Server: "mysql", DB: "tenant_a", ID: strings.Repeat("cd", 32), FirstSeen: now.Add(-2 * time.Hour), Text: "SELECT `id` FROM `readings` WHERE DATE ( `created_at` ) = ?"},
 		QueryCounters: monitor.QueryCounters{Calls: 30, TimeMS: 54000, RowsExamined: 30 * 900000, RowsSent: 30 * 50, NoIndex: 30},
 	}
 	lookup := monitor.QueryTotal{
@@ -742,7 +742,7 @@ func TestDatabasePages(t *testing.T) {
 	}
 	for _, want := range []string{`href="/monitoring/database">Database`, "These queries scan whole tables", "LOWER(name) in a filter",
 		"DATE(created_at) in a filter", "1.65M rows", "1.8 min", "waits for 41", "Open transactions", "tenant_a.readings",
-		"&#43;29 MB", "Never used", "old_idx", "Duplicates", "Tables without a primary key", "128 MB is Ubuntu&#39;s default", "About 13% of the data fits"} {
+		"&#43;29 MB", "New in this range", "Never used", "old_idx", "Duplicates", "Tables without a primary key", "128 MB is Ubuntu&#39;s default", "About 13% of the data fits"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the Database page should contain %q", want)
 		}

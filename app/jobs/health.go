@@ -66,7 +66,10 @@ func (r *Runner) serverHealth(ctx context.Context) []string {
 		for _, q := range scans[:min(3, len(scans))] {
 			e := monitor.QueryEfficiency(d.Engine, q.QueryCounters)
 			read := notify.Count(e.PerCall) + " " + unit + " read per call"
-			if e.Ratio > 0 {
+			switch {
+			case d.Engine == monitor.EnginePostgres:
+				read = notify.Bytes(int64(e.BytesPerCall)) + " read per call"
+			case e.Ratio > 0:
 				read = notify.Count(e.Ratio) + " " + unit + " read per row returned"
 			}
 			text := strings.Join(strings.Fields(q.Text), " ")

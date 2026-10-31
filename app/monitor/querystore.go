@@ -137,7 +137,10 @@ func (s *Store) AddQueries(at time.Time, rows []QueryTotal) error {
 				rec = binary.AppendUvarint(rec, uint64(math.Max(0, math.Round(v))))
 			}
 		}
-		return tx.Bucket(bucketQueries).Put(binary.BigEndian.AppendUint32(nil, uint32(at.Unix()/300)), rec)
+		// Several servers' snapshots share a 5-minute record: add to it, don't replace it.
+		queries := tx.Bucket(bucketQueries)
+		key := binary.BigEndian.AppendUint32(nil, uint32(at.Unix()/300))
+		return queries.Put(key, append(append([]byte(nil), queries.Get(key)...), rec...))
 	})
 }
 

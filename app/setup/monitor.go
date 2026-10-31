@@ -43,7 +43,7 @@ END $$; GRANT pg_monitor TO "`+MonitorUser+`"`); err != nil {
 	if _, err := c.Query(ctx, "postgres", "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"); err != nil {
 		return false, fmt.Errorf("create the extension pg_stat_statements (it comes with PostgreSQL; on Ubuntu in the postgresql-%d package): %w", c.Cfg.Version, err)
 	}
-	libs, err := c.Setting(ctx, "shared_preload_libraries")
+	libs, err := preloadLibraries(ctx, c)
 	if err != nil {
 		return false, err
 	}
@@ -80,12 +80,25 @@ FROM pg_settings WHERE name = 'shared_preload_libraries'`)
 				return false, fmt.Errorf("shared_preload_libraries is also set in postgresql.auto.conf (ALTER SYSTEM), which wins over %s: add pg_stat_statements there, or ALTER SYSTEM RESET shared_preload_libraries", monitorConfName)
 			}
 		}
-		if libs, _ = c.Setting(ctx, "shared_preload_libraries"); slices.Contains(splitLibraries(libs), "pg_stat_statements") {
+		if libs, _ = preloadLibraries(ctx, c); slices.Contains(splitLibraries(libs), "pg_stat_statements") {
 			return false, nil
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
 	return false, fmt.Errorf("PostgreSQL didn't pick up %s after a reload", monitorConfName)
+}
+
+// preloadLibraries reads shared_preload_libraries, which is empty by default: a prefix
+// keeps that from being an empty (dropped) line.
+func preloadLibraries(ctx context.Context, c postgres.Cluster) (string, error) {
+	rows, err := c.Query(ctx, "postgres", "SELECT 'libs:' || current_setting('shared_preload_libraries')")
+	if err != nil {
+		return "", err
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 || !strings.HasPrefix(rows[0][0], "libs:") {
+		return "", fmt.Errorf("shared_preload_libraries: unexpected output %q", rows)
+	}
+	return strings.TrimPrefix(rows[0][0], "libs:"), nil
 }
 
 func splitLibraries(s string) []string {

@@ -24,8 +24,8 @@ func TestPostgresMonitorAccess(t *testing.T) {
 		sql := c.Args[len(c.Args)-1]
 		sqls = append(sqls, sql)
 		switch {
-		case strings.HasPrefix(sql, "SHOW shared_preload_libraries"):
-			return []byte(libs + "\n"), nil
+		case strings.Contains(sql, "current_setting('shared_preload_libraries')"):
+			return []byte("libs:" + libs + "\n"), nil
 		case strings.Contains(sql, "pg_reload_conf"):
 			reloaded = true
 			return []byte("t\n"), nil
@@ -56,8 +56,8 @@ func TestPostgresMonitorAccess(t *testing.T) {
 	fake.Handle = func(_ string, c command.Cmd) ([]byte, error) {
 		sql := c.Args[len(c.Args)-1]
 		switch {
-		case strings.HasPrefix(sql, "SHOW shared_preload_libraries"):
-			return []byte(libs + "\n"), nil
+		case strings.Contains(sql, "current_setting('shared_preload_libraries')"):
+			return []byte("libs:" + libs + "\n"), nil
 		case strings.Contains(sql, "pg_reload_conf"):
 			reloaded = true
 		case strings.Contains(sql, "pending_restart"):

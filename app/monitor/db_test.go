@@ -245,3 +245,22 @@ func TestFindDBServers(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestTwoServersInOneSnapshot(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "metrics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	at := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	for _, server := range []string{"postgres", "mysql"} {
+		if err := store.AddQueries(at, []QueryTotal{{QueryShape: QueryShape{Server: server, DB: "app", ID: "1", Text: "SELECT 1"},
+			QueryCounters: QueryCounters{Calls: 3, TimeMS: 10}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	top, err := store.TopQueries(at.Add(-time.Hour), at.Add(time.Minute), "", "", 10)
+	if err != nil || len(top) != 2 {
+		t.Errorf("both servers' queries should be kept: %+v %v", top, err)
+	}
+}

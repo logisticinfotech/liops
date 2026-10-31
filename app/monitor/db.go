@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -34,6 +35,9 @@ type DBServer struct {
 	Engine string
 	Socket string // PostgreSQL: the socket directory; MySQL: the socket file
 	Port   int    // PostgreSQL only
+	// User is the login: the monitor's own OS user (the clients would otherwise take
+	// it from $USER, which isn't always right).
+	User string
 	// Exec runs a client program; tests replace it.
 	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -68,13 +72,21 @@ func FindDBServers(pgDir, mysqlSocket string) []DBServer {
 			continue
 		}
 		if port, err := strconv.Atoi(strings.TrimPrefix(filepath.Base(m), ".s.PGSQL.")); err == nil {
-			out = append(out, DBServer{Engine: EnginePostgres, Socket: pgDir, Port: port, Exec: execOutput})
+			out = append(out, DBServer{Engine: EnginePostgres, Socket: pgDir, Port: port, User: osUser(), Exec: execOutput})
 		}
 	}
 	if _, err := os.Stat(mysqlSocket); err == nil {
-		out = append(out, DBServer{Engine: EngineMySQL, Socket: mysqlSocket, Exec: execOutput})
+		out = append(out, DBServer{Engine: EngineMySQL, Socket: mysqlSocket, User: osUser(), Exec: execOutput})
 	}
 	return out
+}
+
+// osUser is the name of the user the monitor runs as.
+func osUser() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
 }
 
 func execOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -95,6 +107,9 @@ func (d DBServer) Query(ctx context.Context, db, sql string) ([][]string, error)
 	var err error
 	if d.Engine == EngineMySQL {
 		args := []string{"--no-defaults", "--socket=" + d.Socket, "--batch", "--skip-column-names", "--raw"}
+		if d.User != "" {
+			args = append(args, "--user="+d.User)
+		}
 		if db != "" {
 			args = append(args, "--database="+db)
 		}
@@ -104,8 +119,11 @@ func (d DBServer) Query(ctx context.Context, db, sql string) ([][]string, error)
 			db = "postgres"
 		}
 		conn := "dbname='" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(db) + "'"
-		out, err = d.Exec(ctx, "psql", "-X", "-q", "-A", "-t", "-F", "\t", "-v", "ON_ERROR_STOP=1",
-			"-h", d.Socket, "-p", strconv.Itoa(d.Port), "-d", conn, "-c", sql)
+		args := []string{"-X", "-q", "-A", "-t", "-F", "\t", "-v", "ON_ERROR_STOP=1", "-h", d.Socket, "-p", strconv.Itoa(d.Port), "-d", conn}
+		if d.User != "" {
+			args = append(args, "-U", d.User)
+		}
+		out, err = d.Exec(ctx, "psql", append(args, "-c", sql)...)
 	}
 	if err != nil {
 		return nil, err

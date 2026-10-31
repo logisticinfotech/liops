@@ -16,6 +16,8 @@ func TestQueryFlags(t *testing.T) {
 		// MySQL digests, as performance_schema prints them.
 		{"SELECT `id` FROM `readings` WHERE DATE ( `created_at` ) = ?", []string{"DATE(created_at)"}},
 		{"SELECT * FROM `customers` WHERE LOWER ( `name` ) LIKE ? OR LOWER ( `email` ) LIKE ?", []string{"LOWER(name)"}},
+		// MySQL 8.4's own text for the query above.
+		{"SELECT * FROM `customers` WHERE `LOWER` ( NAME ) LIKE ? OR `LOWER` ( `email` ) LIKE ?", []string{"LOWER(NAME)"}},
 		{"SELECT `id` FROM `users` WHERE `email` = ? OR `phone` = ?", []string{"OR across columns (email, phone)"}},
 		{"SELECT `id` FROM `users` WHERE `status` = ? OR `status` = ?", nil},
 		{"SELECT `id` FROM `users` WHERE `email` = ?", nil},
@@ -66,8 +68,16 @@ func TestQueryEfficiency(t *testing.T) {
 	if e := QueryEfficiency(EnginePostgres, QueryCounters{Calls: 3, RowsExamined: 3 * 8000, RowsSent: 3}); !e.Scans {
 		t.Errorf("postgres scan: %+v", e)
 	}
-	if e := QueryEfficiency(EnginePostgres, QueryCounters{Calls: 3, RowsExamined: 3 * 8000, RowsSent: 3 * 5000}); e.Scans {
-		t.Errorf("a report that returns what it reads: %+v", e)
+	// Seen in the VM: DATE(created_at) = $1 on 500,000 rows reads 3,355 blocks to return
+	// 1,440 rows; a primary key lookup reads 4 blocks for its row.
+	if e := QueryEfficiency(EnginePostgres, QueryCounters{Calls: 189, RowsExamined: 189 * 3355, RowsSent: 189 * 1440}); !e.Scans || e.BytesPerCall != 3355*8192 {
+		t.Errorf("postgres DATE() filter: %+v", e)
+	}
+	if e := QueryEfficiency(EnginePostgres, QueryCounters{Calls: 34500, RowsExamined: 34500 * 4, RowsSent: 34500}); e.Scans {
+		t.Errorf("postgres lookup: %+v", e)
+	}
+	if e := QueryEfficiency(EnginePostgres, QueryCounters{Calls: 3, RowsExamined: 3 * 8000, RowsSent: 3 * 400000}); e.Scans {
+		t.Errorf("an export that returns what it reads: %+v", e)
 	}
 }
 

@@ -23,6 +23,22 @@ func (m *Monitor) servers() []DBServer {
 // QueryInterval, tables hourly. A slow or stuck database never delays the machine's
 // samples, which run apart.
 func (m *Monitor) dbLoop(ctx context.Context) {
+	// Each problem is logged when it starts or changes, not every round.
+	logged := map[string]string{}
+	logChange := func(key string, err error) {
+		msg := ""
+		if err != nil {
+			msg = err.Error()
+		}
+		if logged[key] != msg {
+			if msg == "" {
+				m.logf("%s: working again", key)
+			} else {
+				m.logf("%s: %s", key, msg)
+			}
+			logged[key] = msg
+		}
+	}
 	rediscover := func() {
 		if m.FindDBs == nil {
 			return
@@ -36,9 +52,7 @@ func (m *Monitor) dbLoop(ctx context.Context) {
 	queries := func() {
 		for _, d := range m.servers() {
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
-			if err := m.snapshotQueries(ctx, d); err != nil {
-				m.logf("%s statements: %v", d.Label(), err)
-			}
+			logChange(d.Label()+" statements", m.snapshotQueries(ctx, d))
 			cancel()
 		}
 	}
@@ -47,9 +61,7 @@ func (m *Monitor) dbLoop(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			err := m.readTables(ctx, d)
 			cancel()
-			if err != nil {
-				m.logf("%s tables: %v", d.Label(), err)
-			}
+			logChange(d.Label()+" tables", err)
 		}
 	}
 	rediscover()

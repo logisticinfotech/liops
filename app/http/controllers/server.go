@@ -98,6 +98,12 @@ func (s *Server) funcs() template.FuncMap {
 		"perDay": formatPerDay,
 		"ms":     notify.MS,
 		"count":  notify.Count,
+		"perCallOf": func(n, calls float64) float64 {
+			if calls <= 0 {
+				return 0
+			}
+			return n / calls
+		},
 		"int64": func(v any) int64 {
 			switch n := v.(type) {
 			case float64:

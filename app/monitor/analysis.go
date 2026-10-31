@@ -16,8 +16,9 @@ type Flag struct {
 
 var (
 	// A column inside a function in a comparison: DATE(created_at) = ?, LOWER(name) LIKE ?.
-	// MySQL's digests put spaces around parentheses and quote names with backticks.
-	funcOnColumnRE = regexp.MustCompile("(?i)\\b(DATE|LOWER|UPPER|YEAR|MONTH|DAY|DATE_FORMAT|SUBSTRING|SUBSTR|LEFT|TRIM|CAST|CONVERT|COALESCE|IFNULL|CONCAT|UNIX_TIMESTAMP|TO_CHAR)\\s*\\(\\s*((?:[`\"]?\\w+[`\"]?\\s*\\.\\s*)?[`\"]?[A-Za-z_]\\w*[`\"]?)\\s*(?:,[^()]*)?\\)\\s*(?:::\\s*\\w+\\s*)?(=|<=|>=|<>|!=|<|>|NOT\\s+LIKE|LIKE|ILIKE|IN\\b|BETWEEN)")
+	// MySQL's digests put spaces around parentheses and quote names with backticks, some
+	// function names too (`LOWER` ( NAME )).
+	funcOnColumnRE = regexp.MustCompile("(?i)`?\\b(DATE|LOWER|UPPER|YEAR|MONTH|DAY|DATE_FORMAT|SUBSTRING|SUBSTR|LEFT|TRIM|CAST|CONVERT|COALESCE|IFNULL|CONCAT|UNIX_TIMESTAMP|TO_CHAR)`?\\s*\\(\\s*((?:[`\"]?\\w+[`\"]?\\s*\\.\\s*)?[`\"]?[A-Za-z_]\\w*[`\"]?)\\s*(?:,[^()]*)?\\)\\s*(?:::\\s*\\w+\\s*)?(=|<=|>=|<>|!=|<|>|NOT\\s+LIKE|LIKE|ILIKE|IN\\b|BETWEEN)")
 	// col = ? OR other = ?
 	orAcrossRE    = regexp.MustCompile("(?i)([`\"\\w.]+)\\s*(?:=|LIKE|ILIKE)\\s*(?:\\?|\\$\\d+)\\s*\\)?\\s+OR\\s+\\(?\\s*([`\"\\w.]+)\\s*(?:=|LIKE|ILIKE)")
 	selectStarRE  = regexp.MustCompile("(?i)^\\s*SELECT\\s+(?:[`\"\\w]+\\s*\\.\\s*)?\\*\\s+FROM")
@@ -74,6 +75,8 @@ type Efficiency struct {
 	Ratio float64 `json:"ratio"`
 	// PerCall is rows examined (MySQL) or blocks read (PostgreSQL) per call.
 	PerCall float64 `json:"per_call"`
+	// BytesPerCall is what a PostgreSQL call read, from memory or disk (8 KB blocks).
+	BytesPerCall float64 `json:"bytes_per_call,omitempty"`
 	// Scans: it reads far more than it returns, the mark of a scan with no usable index.
 	Scans bool `json:"scans"`
 }
@@ -92,8 +95,11 @@ func QueryEfficiency(engine string, c QueryCounters) Efficiency {
 		noIndex := c.NoIndex / c.Calls
 		e.Scans = e.PerCall >= 10000 && (c.RowsSent == 0 || e.Ratio >= 100) || noIndex >= 0.5 && e.PerCall >= 1000
 	} else {
-		// 1,250 blocks is 10 MB read per call.
-		e.Scans = e.PerCall >= 1250 && (c.RowsSent == 0 || e.Ratio >= 10)
+		// Blocks per row can't tell a scan from a lookup (an index lookup reads about 4
+		// blocks for its row); what it read per call can. A scan reads 8 MB or more and
+		// returns under 5 rows per block read, when a block holds 50 to 100.
+		e.BytesPerCall = e.PerCall * 8192
+		e.Scans = e.PerCall >= 1000 && (c.RowsSent == 0 || e.Ratio >= 0.2)
 	}
 	return e
 }

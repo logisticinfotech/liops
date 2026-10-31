@@ -27,6 +27,10 @@
 <h2>Queries by total time</h2>
 {{if .Top}}{{template "query-table" .Top}}{{else}}<p class="muted">No queries recorded in this range yet. Statistics are read every 5 minutes.</p>{{end}}
 
+{{if .New}}<h2>New in this range</h2>
+<p class="muted">Query shapes first seen in this range: usually what the last deploy added. Most time first.</p>
+{{template "query-table" .New}}{{end}}
+
 {{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
 
 <h2>Running now</h2>
@@ -109,11 +113,11 @@
 
 {{define "query-table"}}
 <div class="table-wrap"><table>
-  <tr><th>Query</th><th>Database</th><th class="num">Calls</th><th class="num">Total time</th><th class="num">Per call</th><th class="num">Read per row returned</th></tr>
+  <tr><th>Query</th><th>Database</th><th class="num">Calls</th><th class="num">Total time</th><th class="num">Per call</th><th class="num">{{if eq (index . 0).Engine "postgres"}}Read{{else}}Read per row returned{{end}}</th></tr>
   {{range .}}<tr>
     <td><a class="mono" href="{{.Link}}">{{.Short}}</a>{{range .Flags}}<div><span class="badge waiting">{{.Name}}</span></div>{{end}}</td>
     <td class="mono">{{.DB}}</td><td class="num">{{count .Calls}}</td><td class="num">{{ms .TimeMS}}</td><td class="num">{{ms .PerCallMS}}</td>
-    <td class="num">{{if gt .Eff.Ratio 0.0}}{{count .Eff.Ratio}}{{if eq .Engine "postgres"}} blocks{{else}} rows{{end}}{{else}}{{count .Eff.PerCall}}{{if eq .Engine "postgres"}} blocks{{else}} rows{{end}}, none returned{{end}}{{if .Eff.Scans}} <span class="badge failed">scans</span>{{end}}</td>
+    <td class="num">{{if eq .Engine "postgres"}}{{bytes (int64 .Eff.BytesPerCall)}} per call{{if gt .Calls 0.0}}<div class="muted">for {{count (perCallOf .RowsSent .Calls)}} rows</div>{{end}}{{else if gt .Eff.Ratio 0.0}}{{count .Eff.Ratio}} rows{{else}}{{count .Eff.PerCall}} rows, none returned{{end}}{{if .Eff.Scans}} <span class="badge failed">scans</span>{{end}}</td>
   </tr>{{end}}
 </table></div>
 {{end}}

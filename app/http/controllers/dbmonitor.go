@@ -30,6 +30,7 @@ type dbMonData struct {
 
 	Scans []queryRow // the headline: queries that scan whole tables
 	Top   []queryRow
+	New   []queryRow // first seen in this range: what a deploy brought
 	Live  dbLive
 
 	Charts        []chartBox
@@ -164,6 +165,9 @@ func (s *Server) dbMonitor(w http.ResponseWriter, r *http.Request) {
 			}
 			if len(d.Top) < 25 {
 				d.Top = append(d.Top, row)
+			}
+			if since := time.Now().Add(-monitor.Ranges[d.Range]); qt.FirstSeen.After(since) && len(d.New) < 10 {
+				d.New = append(d.New, row)
 			}
 		}
 		for n := range names {

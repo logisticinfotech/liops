@@ -65,7 +65,7 @@ Not in scope (decided October 2026):
 | Data path | The monitor process collects and stores; the existing UI (root) asks it for data over a **Unix socket** (`/run/liops-monitor/monitor.sock`). The monitor never gets the backup service's config or secrets. |
 | Measuring requests | **At the front web server**, from its access log: one place that sees every request, whatever language is behind it. No agent inside apps. |
 | Asking first | Changes to web server, PHP-FPM or database settings (a log format, a status page, `pg_stat_statements`) are **listed and applied only after a person approves**, like the PostgreSQL restart and MySQL GTIDs. Config is checked (`nginx -t`, `apachectl configtest`, `php-fpm -t`) before a **reload**; nothing is restarted without asking. |
-| Database access | Read-only accounts with no password, and **no access to the app's data**: PostgreSQL role `liops_monitor` with `pg_monitor`, by peer authentication; MySQL `'liops_monitor'@'localhost'` `IDENTIFIED WITH auth_socket AS 'liops-monitor'`, with `PROCESS`, `SELECT` on `performance_schema` and `sys`, and `REFERENCES` on `*.*` (lets it see tables and indexes in `information_schema`, not read rows). Nothing to store. |
+| Database access | Read-only accounts with no password, and **no access to the app's data**: PostgreSQL role `liops-monitor` (named like the OS user, so peer authentication needs no `pg_hba.conf` change) in `pg_monitor`; MySQL `'liops-monitor'@'localhost'` `IDENTIFIED WITH auth_socket`, with `PROCESS`, `SELECT` on `performance_schema` and `sys`, and `REFERENCES` on `*.*` (lets it see tables and indexes in `information_schema`, not read rows). Nothing to store. |
 | Query statistics | **From the databases' own summaries, never from a slow log**: `performance_schema` digests and `pg_stat_statements` are always on, cheap and already normalised. Snapshots **every 5 minutes**, stored as differences. A slow log with `long_query_time=0` is fine for a one-minute test, too heavy to leave on. |
 | Real query values | MySQL keeps one **sample statement** per query shape, with real values (search terms, names). It is **read live when a person opens that query in the UI, never stored, logged or emailed**. Stored and emailed: only the normalised shape (`?` / `$1`). |
 | History | Raw samples (every 15 s) in memory for the last hour; **1-minute rollups for 7 days** and **hourly rollups for 90 days** on disk. 7 days to diagnose, 90 days for trends ("disk full in 40 days", "memory has grown 30% since August"). |
@@ -445,6 +445,28 @@ shows up correctly, a failing unit and a pending restart are reported, liops's s
 run on both databases, and the socket refuses other users and names it doesn't allow. The
 push from a running `serve` is covered by unit tests; the VM pushed the same values by hand.
 
+**MO1 status (November 2026).** Built: database access (Settings → Monitoring → Set up
+database access: the `liops-monitor` role in `pg_monitor` and `pg_stat_statements`, merged
+into the existing `shared_preload_libraries` in `conf.d/20-liops-monitor.conf`, the restart
+only on a button; the MySQL account through root's socket login); live numbers every 15 s;
+statement statistics every 5 minutes (7 days); tables, indexes, upkeep and memory hourly; the
+Database page and a query page with MySQL's live sample; new query shapes; the Server health
+section of the daily email. Checked in an Ubuntu 26.04 VM with PostgreSQL 18.6 and MySQL
+8.4.11 running §1.1's workload: the search (`LOWER(col) LIKE '%…%'`, 500K rows read per
+call, none returned, no index) and the `DATE(col) =` filter lead the headline with their
+flags and the real sample; a small tenant's same query reads 5K rows; lookups by key aren't
+flagged; a held row lock shows as "waits for"; duplicate and unused indexes and a table
+without a primary key are found; and the monitor's login can't read a row.
+
+Two rules came from the VM: PostgreSQL's blocks per row can't tell a scan from a lookup (an
+index lookup reads about 4 blocks for its row), so a PostgreSQL scan is one reading 8 MB or
+more per call and returning under 5 rows per block read; and MySQL quotes some function names
+(`` `LOWER` ( NAME ) ``).
+
+Not in MO1: queries per request (N+1) needs the request counts from MO2, and MySQL's latest
+deadlock report (deadlocks are counted). Real values (running statements, the sample) are only
+read live for a page.
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the
@@ -464,17 +486,16 @@ Answered (November 2026):
   created.
 - **The PostgreSQL restart** for `pg_stat_statements` is fine, once per server, scheduled by a
   person.
+- **`REFERENCES` on `*.*` for MySQL** is enough (checked on 8.4.11 in MO1): the monitor sees
+  every table and index in `information_schema` and the `sys` views, and `SELECT` on a table
+  is refused.
 
 Still open:
 
-- **`REFERENCES` on `*.*` for MySQL** (§2) is the least privilege that lets the monitor list
-  every table's indexes without reading rows. Check on MySQL 8.4 in MO1 that it is enough
-  for `information_schema.STATISTICS` and `TABLES`; if not, the index list comes from the root
-  service instead.
 - **Reading `.env`** (§4.6) needs the root service and touches a file full of secrets; only the
   named keys are parsed, in memory, and only true/false results leave the function.
 - **Many tenant databases** (hundreds): the hourly per-table pass on PostgreSQL connects to
-  each database; it's spread over the hour and capped, measured in MO1.
+  each database in turn, capped at 300; not yet measured with hundreds.
 
 - **Some sites may have their own `access_log` lines**; setup lists each change per site.
 - **Busy logs** (millions of lines a day): parsing is cheap in Go, but the budget in §2 is

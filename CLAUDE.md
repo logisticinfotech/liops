@@ -9,7 +9,7 @@ and manages two backup layers to S3-compatible storage: pgBackRest point-in-time
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
 plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2), with the same installer,
-wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0, machine resources, is in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0 machine resources and MO1 databases are in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -112,6 +112,16 @@ touches the live server.
   a root directory, so tests use a fake `/proc` tree. What the monitor's user can't read
   (database sizes) root `serve` pushes hourly (`Service.PushDiskUsage` → `POST /v1/push`,
   only `db.size:`/`disk.use:` names); keep that the only write path.
+- **Database monitoring** (`app/monitor/db*.go`, `digests.go`, `tables.go`, `analysis.go`): the
+  monitor finds PostgreSQL/MySQL by their sockets and runs `psql`/`mysql` as itself
+  (`liops-monitor`: peer auth / auth_socket, `pg_monitor` / PROCESS + REFERENCES +
+  performance_schema + sys; never the apps' rows). Root creates those logins only when asked
+  (`setup.PostgresMonitorAccess`, `setup.MySQLMonitorAccess`, Settings → Monitoring); the
+  PostgreSQL restart for `pg_stat_statements` only on a button click. Statement statistics
+  are 5-minute differences (shapes only, `?`/`$1`); text that may hold tabs or new lines is
+  hex-encoded in SQL. **Real values** (running statements, MySQL's sample statement) are
+  read live for a page and never stored, logged or emailed. Pages: `dbmonitor.go`
+  (`/monitoring/database`); the daily summary's Server health comes from `jobs.serverHealth`.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`
