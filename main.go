@@ -36,6 +36,7 @@ Usage:
   liops restore-files   --dir DIR [--to TIME]       MySQL: prepare a point-in-time restore in DIR (docs/restore-mysql.md)
   liops monitor         [--socket PATH] [--data DIR] the monitoring service (liops-monitor.service runs this)
                         [--pg-socket-dir DIR] [--mysql-socket PATH]  where the databases' sockets are
+                        [--nginx-log PATH] [--caddyfile PATH]       where the access logs are
   liops install-system                              install the systemd service (install.sh runs this)
   liops uninstall       [--purge] [--yes]           remove liops; backups in storage are kept
 

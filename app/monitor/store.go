@@ -40,6 +40,9 @@ type Store struct {
 	hour   rollup
 
 	shapeIDs map[string]uint32 // query shape key → id, loaded on first use
+
+	routeIDs   map[routeKey]uint32 // request routes, loaded on first use
+	routeNames map[uint32]routeKey
 }
 
 // rollup gathers the samples of one minute or hour.
@@ -70,7 +73,8 @@ func OpenStore(path string) (*Store, error) {
 	}
 	s := &Store{db: db, ids: map[string]uint16{}, names: map[uint16]string{}}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketSeries, bucketMinute, bucketHour, bucketShapes, bucketQueries, bucketBlobs} {
+		for _, b := range [][]byte{bucketSeries, bucketMinute, bucketHour, bucketShapes, bucketQueries, bucketBlobs,
+			bucketRoutes, bucketReqMinute, bucketReqHour, bucketReqSlow, bucketReqClients} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -178,7 +182,10 @@ func (s *Store) Prune(now time.Time) error {
 				}
 			}
 		}
-		return pruneQueries(tx, now)
+		if err := pruneQueries(tx, now); err != nil {
+			return err
+		}
+		return pruneRequests(tx, now)
 	})
 }
 

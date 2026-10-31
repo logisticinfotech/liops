@@ -601,6 +601,23 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 			Memory: map[string]float64{"innodb_buffer_pool_size": 128 << 20},
 			Growth: map[string]float64{"tenant_a/readings": 30e6}})
 	})
+	mux.HandleFunc("GET /v1/requests", func(w http.ResponseWriter, r *http.Request) {
+		var slow, fast monitor.RouteStats
+		slow.Count, slow.TimeMS, slow.C5xx, slow.UpMS, slow.UpCount = 40, 40*2400, 3, 40*2300, 40
+		slow.Hist[13] = 40 // 2–3 s
+		fast.Count, fast.TimeMS = 9000, 9000*35
+		fast.Hist[2] = 9000
+		res := monitor.RequestsResponse{
+			Sources: []monitor.LogSource{{Format: monitor.FormatNginx, Path: monitor.NginxLogPath}},
+			Routes: []monitor.RouteTotal{{Host: "b.example.com", Route: "GET /dashboard", RouteStats: slow},
+				{Host: "a.example.com", Route: "GET /api/readings/{n}", RouteStats: fast}},
+			Hosts:   []monitor.RouteTotal{{Host: "b.example.com", RouteStats: slow}, {Host: "a.example.com", RouteStats: fast}},
+			Slowest: []monitor.SlowRequest{{At: now, Host: "b.example.com", Route: "GET /dashboard", Status: 200, MS: 2950, UpstreamMS: 2900}},
+			Clients: []monitor.ClientStats{{IP: "203.0.113.50", Class: "script or app", Count: 7000, TimeMS: 245000}},
+			Heatmap: []monitor.HeatCell{{At: now.Truncate(time.Hour).Unix(), Count: 9040, Slow: 40}},
+		}
+		json.NewEncoder(w).Encode(res)
+	})
 	mux.HandleFunc("GET /v1/series", func(w http.ResponseWriter, r *http.Request) {
 		// Twelve hours in which everything grew by 1 GB: 2 GB a day.
 		zero, gb := 0.0, 1e9
@@ -764,5 +781,61 @@ func TestDatabasePages(t *testing.T) {
 	}
 	if code, _, body := h.get("/monitoring/database/query?server=mysql&db=tenant_a&id=nope"); code != 200 || !strings.Contains(body, "isn&#39;t in the statistics") {
 		t.Errorf("an unknown query: %d", code)
+	}
+}
+
+func TestRequestsPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	code, _, body := h.get("/monitoring/requests?range=24h")
+	if code != 200 {
+		t.Fatalf("GET: %d\n%s", code, body)
+	}
+	for _, want := range []string{`href="/monitoring/requests">Requests`, "Sites", "b.example.com", "GET /dashboard", "GET /api/readings/{n}",
+		"3 5xx", "2.9 s", "203.0.113.50", "script or app", `class="heat-5"`, "liops-access.log", "Routes by total time"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Requests page should contain %q", want)
+		}
+	}
+	if strings.Index(body, "GET /dashboard") > strings.Index(body, "GET /api/readings") {
+		t.Error("routes should be ranked by total time")
+	}
+}
+
+func TestWebServerSettings(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	dir := t.TempDir()
+	h.ui.NginxDir, h.ui.Caddyfile, h.ui.WebBackupDir = dir, filepath.Join(dir, "no-Caddyfile"), filepath.Join(dir, "backup")
+	os.MkdirAll(filepath.Join(dir, "sites-enabled"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sites-enabled", "shop"), []byte("server {\n  server_name shop.example.com;\n  access_log /var/log/nginx/shop.log;\n}\n"), 0o644)
+
+	_, _, body := h.get("/settings?tab=monitoring")
+	for _, want := range []string{"Web servers", "Apply the nginx changes", "shop.example.com", "liops-monitor.conf", "nginx -t"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the panel should show %q", want)
+		}
+	}
+	code, loc, body := h.post("/settings?tab=monitoring", "/settings/monitor/weblogs", url.Values{"server": {"nginx"}})
+	if code != 303 || loc != "/settings?tab=monitoring" {
+		t.Fatalf("apply: %d %q\n%s", code, loc, body)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "sites-enabled", "shop")); !strings.Contains(string(data), "liops-access.log liops;") {
+		t.Errorf("site:\n%s", data)
+	}
+	if _, _, body := h.get("/settings?tab=monitoring"); !strings.Contains(body, "badge ok\">ready") {
+		t.Error("after applying, nginx should show as ready")
+	}
+	var ran []string
+	for _, c := range h.ui.Cmd.(*command.Fake).Calls {
+		ran = append(ran, c.Name+" "+strings.Join(c.Args, " "))
+	}
+	if !slices.Contains(ran, "nginx -t") || !slices.Contains(ran, "systemctl reload nginx") {
+		t.Errorf("ran %q", ran)
 	}
 }

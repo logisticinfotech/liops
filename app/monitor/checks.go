@@ -30,7 +30,7 @@ const (
 var DiskUseDirs = []string{"/var/log"}
 
 // PushPrefixes are the only series the root service may push.
-var PushPrefixes = []string{"db.size:", "disk.use:"}
+var PushPrefixes = []string{"db.size:", "disk.use:", "fpm.", "opcache."}
 
 // Checks are the slower yes/no checks.
 type Checks struct {
@@ -129,8 +129,9 @@ func (m *Monitor) measureDirs() {
 	m.hold(values, 2*DiskUseInterval)
 }
 
-// Push records values from the root service (database sizes), keeping them for PushKeep.
-func (m *Monitor) Push(values map[string]float64) error {
+// Push records values from the root service (database sizes, PHP-FPM and OPcache),
+// keeping them for keep (PushKeep when 0; at least 30 seconds).
+func (m *Monitor) Push(values map[string]float64, keep time.Duration) error {
 	if len(values) > 1000 {
 		return errors.New("too many values (at most 1000)")
 	}
@@ -140,10 +141,13 @@ func (m *Monitor) Push(values map[string]float64) error {
 			ok = ok || (strings.HasPrefix(n, p) && len(n) > len(p) && len(n) <= 200)
 		}
 		if !ok {
-			return errors.New("only db.size:… and disk.use:… can be pushed, not " + n)
+			return errors.New("only " + strings.Join(PushPrefixes, "…, ") + "… can be pushed, not " + n)
 		}
 	}
-	m.hold(values, PushKeep)
+	if keep <= 0 || keep > PushKeep {
+		keep = PushKeep
+	}
+	m.hold(values, max(keep, 30*time.Second))
 	return nil
 }
 

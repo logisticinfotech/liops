@@ -34,7 +34,7 @@ func TestChecksAndHeldValues(t *testing.T) {
 	}
 	m.runChecks(context.Background())
 	m.measureDirs()
-	if err := m.Push(map[string]float64{"db.size:shop": 5e9, "disk.use:pg_wal": 1e9}); err != nil {
+	if err := m.Push(map[string]float64{"db.size:shop": 5e9, "disk.use:pg_wal": 1e9}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.collect(); err != nil {
@@ -75,11 +75,11 @@ func TestChecksAndHeldValues(t *testing.T) {
 func TestPushIsLimited(t *testing.T) {
 	m := New(NewCollector(t.TempDir()), nil, nil)
 	for _, bad := range []map[string]float64{{"cpu.busy": 1}, {"db.size:": 1}, {"svc.mem:x": 1}} {
-		if err := m.Push(bad); err == nil {
+		if err := m.Push(bad, 0); err == nil {
 			t.Errorf("Push(%v) should be refused", bad)
 		}
 	}
-	if err := m.Push(map[string]float64{"db.size:app": 1, "disk.use:binlogs": 2}); err != nil {
+	if err := m.Push(map[string]float64{"db.size:app": 1, "disk.use:binlogs": 2, "fpm.active:www": 3}, 45*time.Second); err != nil {
 		t.Error(err)
 	}
 }
@@ -101,7 +101,7 @@ func TestPushOverTheSocket(t *testing.T) {
 	if err != nil || m.held["db.size:app"].value != 7 {
 		t.Errorf("push: %v, held %v", err, m.held)
 	}
-	if err := c.Push(ctx, map[string]float64{"cpu.busy": 1}); err == nil || !strings.Contains(err.Error(), "only db.size") {
+	if err := c.Push(ctx, map[string]float64{"cpu.busy": 1}); err == nil || !strings.Contains(err.Error(), "only db.size:") {
 		t.Errorf("a disallowed name: %v", err)
 	}
 }

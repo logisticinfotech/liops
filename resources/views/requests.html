@@ -1,0 +1,59 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Requests</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+{{if not .Sources}}<div class="note">No access log is read yet. Settings → Monitoring → Web servers shows the change nginx or Caddy needs, and applies it when you approve.</div>{{end}}
+<nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/requests?range={{.}}{{with $.Data.Host}}&amp;host={{.}}{{end}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else if eq . "7d"}}7 days{{else}}90 days{{end}}</a>{{end}}</nav>
+{{if gt (len .Hosts) 1}}<form method="get" action="/monitoring/requests" class="inline-form">
+  <input type="hidden" name="range" value="{{.Range}}">
+  <label>Site <select name="host"><option value="">all {{len .Hosts}}</option>{{range .Hosts}}<option{{if eq .Host $.Data.Host}} selected{{end}}>{{.Host}}</option>{{end}}</select></label>
+  <button class="secondary">Show</button>
+</form>{{end}}
+
+<div class="grid">
+  <div class="stat"><div class="label">Requests</div><div class="value">{{count .Total.Count}}</div><div class="sub">{{printf "%.1f" .Total.PerSecond}} a second</div></div>
+  <div class="stat"><div class="label">Response time</div><div class="value">{{ms .Total.P95}}</div><div class="sub">95% are faster · median {{ms .Total.P50}}</div></div>
+  <div class="stat"><div class="label">Over 1 second</div><div class="value">{{printf "%.1f" .Total.SlowShare}}%</div><div class="sub">{{count (.Total.Slow)}} requests</div></div>
+  <div class="stat"><div class="label">Server errors</div><div class="value">{{count .Total.C5xx}}</div><div class="sub">5xx · {{count .Total.C4xx}} 4xx</div></div>
+</div>
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+
+{{if and (gt (len .Hosts) 1) (not .Host)}}<h2>Sites</h2>
+<div class="table-wrap"><table>
+  <tr><th>Site</th><th class="num">Requests</th><th class="num">Median</th><th class="num">95%</th><th class="num">Total time</th><th class="num">Over 1 s</th><th class="num">5xx</th></tr>
+  {{range .Hosts}}<tr><td><a class="mono" href="/monitoring/requests?range={{$.Data.Range}}&amp;host={{.Host}}">{{.Host}}</a></td><td class="num">{{count .Count}}</td><td class="num">{{ms .P50}}</td><td class="num">{{ms .P95}}</td><td class="num">{{ms .TimeMS}}</td><td class="num">{{printf "%.1f" .SlowShare}}%</td><td class="num">{{count .C5xx}}</td></tr>{{end}}
+</table></div>{{end}}
+
+<h2>Routes by total time</h2>
+{{if .Routes}}<p class="muted">Similar URLs add up: numbers, IDs and tokens become placeholders. Total time is what a route costs the server; a fast route called often can cost more than a slow rare one.</p>
+<div class="table-wrap"><table>
+  <tr><th>Route</th>{{if not .Host}}<th>Site</th>{{end}}<th class="num">Requests</th><th class="num">Median</th><th class="num">95%</th><th class="num">99%</th><th class="num">Total time</th><th class="num">App time</th><th class="num">Errors</th></tr>
+  {{range .Routes}}<tr><td class="mono">{{.Route}}</td>{{if not $.Data.Host}}<td class="mono">{{.Host}}</td>{{end}}<td class="num">{{count .Count}}</td><td class="num">{{ms .P50}}</td><td class="num">{{ms .P95}}</td><td class="num">{{ms .P99}}</td><td class="num">{{ms .TimeMS}}</td>
+    <td class="num">{{if .UpCount}}{{ms .UpAvgMS}}{{else}}—{{end}}</td><td class="num">{{if .C5xx}}<span class="badge failed">{{count .C5xx}} 5xx</span>{{end}}{{if .C4xx}} <span class="muted">{{count .C4xx}} 4xx</span>{{end}}</td></tr>{{end}}
+</table></div>
+<p class="muted">App time is the upstream's (PHP-FPM, the app server) average; the rest of a request's time is the network and the web server.</p>
+{{else}}<p class="muted">No requests recorded in this range yet.</p>{{end}}
+
+<h2>When the slow requests happen</h2>
+<p class="muted">The last 7 days by hour; darker means more requests over 1 second. Device pushes, queue bursts and the nightly backup show up as stripes.</p>
+<div class="table-wrap"><table class="heatmap">
+  <tr><th></th>{{range .Hours}}<th>{{if eq . 0 6 12 18}}{{.}}{{end}}</th>{{end}}</tr>
+  {{range .Heat}}<tr><th class="day">{{.Day}}</th>{{range .Cells}}<td class="heat-{{.Level}}" title="{{.Title}}"></td>{{end}}</tr>{{end}}
+</table></div>
+
+<h2>Slowest requests</h2>
+<div class="table-wrap"><table>
+  <tr><th>When</th><th>Site</th><th>Route</th><th class="num">Status</th><th class="num">Time</th><th class="num">App time</th></tr>
+  {{range .Slowest}}<tr><td>{{datetime .At}}</td><td class="mono">{{.Host}}</td><td class="mono">{{.Route}}</td><td class="num">{{.Status}}</td><td class="num">{{ms .MS}}</td><td class="num">{{if ge .UpstreamMS 0.0}}{{ms .UpstreamMS}}{{else}}—{{end}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">Kept from each finished hour.</td></tr>{{end}}
+</table></div>
+
+<h2>Busiest clients</h2>
+<div class="table-wrap"><table>
+  <tr><th>Address</th><th>Kind</th><th class="num">Requests</th><th class="num">Time</th><th class="num">Over 1 s</th><th class="num">5xx</th></tr>
+  {{range .Clients}}<tr><td class="mono">{{.IP}}</td><td>{{.Class}}</td><td class="num">{{count .Count}}</td><td class="num">{{ms .TimeMS}}</td><td class="num">{{count .Slow}}</td><td class="num">{{count .C5xx}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">Kept from each finished hour.</td></tr>{{end}}
+</table></div>
+<p class="muted">The top 20 addresses of each hour are kept for 7 days, then deleted: addresses are personal data. Read from {{range $i, $s := .Sources}}{{if $i}}, {{end}}{{$s}}{{end}}.</p>
+{{end}}
+{{end}}{{end}}

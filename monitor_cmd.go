@@ -29,6 +29,8 @@ func runMonitor(args []string, out io.Writer) error {
 	data := flags.String("data", d.monitorData, "where the history (metrics.db) is kept")
 	pgDir := flags.String("pg-socket-dir", monitor.DefaultPGSocketDir, "where PostgreSQL's sockets are")
 	mysqlSocket := flags.String("mysql-socket", monitor.DefaultMySQLSocket, "MySQL's socket")
+	nginxLog := flags.String("nginx-log", monitor.NginxLogPath, "the access log liops adds to nginx")
+	caddyfile := flags.String("caddyfile", monitor.DefaultCaddyfile, "Caddy's config, to find its access logs")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -45,6 +47,7 @@ func runMonitor(args []string, out io.Writer) error {
 	defer stop()
 	m := monitor.New(monitor.NewCollector("/"), store, os.Stderr)
 	m.FindDBs = func() []monitor.DBServer { return monitor.FindDBServers(*pgDir, *mysqlSocket) }
+	m.FindLogs = func() []monitor.LogSource { return monitor.FindLogSources(*nginxLog, *caddyfile) }
 	errc := make(chan error, 1)
 	go func() { errc <- monitor.Serve(ctx, *socket, m.Handler()) }()
 	fmt.Fprintf(out, "liops monitor: sampling every %s, answering on %s\n", monitor.Interval, *socket)

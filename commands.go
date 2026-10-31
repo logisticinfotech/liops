@@ -155,6 +155,7 @@ func runServe(args []string, out io.Writer) error {
 		return err
 	}
 	ui.Monitor = monitor.NewClient(p.monitorSocket)
+	ui.WebBackupDir = filepath.Join(filepath.Dir(p.state), "backups")
 	go svc.PushDiskUsage(ui.Monitor.Push)
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {

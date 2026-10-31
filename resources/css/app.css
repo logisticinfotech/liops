@@ -124,6 +124,15 @@
   .inline-form label { @apply m-0 flex items-center gap-2 font-normal; }
   .inline-form select { @apply w-auto; }
   pre.query { @apply mb-3 text-[0.8rem]; }
+  .heatmap { @apply w-auto border-separate border-spacing-0.5; }
+  .heatmap td, .heatmap th { @apply border-0 p-0 text-[0.65rem] font-normal normal-case tracking-normal; }
+  .heatmap th.day { @apply pr-2 text-right whitespace-nowrap text-zinc-500; }
+  .heatmap td { @apply h-4 w-4 rounded-sm bg-zinc-100 dark:bg-zinc-800/60; }
+  .heatmap td.heat-1 { @apply bg-amber-100 dark:bg-amber-950; }
+  .heatmap td.heat-2 { @apply bg-amber-200 dark:bg-amber-900; }
+  .heatmap td.heat-3 { @apply bg-amber-400 dark:bg-amber-700; }
+  .heatmap td.heat-4 { @apply bg-orange-500 dark:bg-orange-600; }
+  .heatmap td.heat-5 { @apply bg-red-600 dark:bg-red-500; }
   .progress-panel { @apply space-y-2; }
   .progress-label { @apply text-sm; }
 

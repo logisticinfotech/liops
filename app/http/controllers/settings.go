@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ type settingsData struct {
 	NeedRootPassword bool   // MySQL's root needs a password to set it up
 	PGRestart        bool   // PostgreSQL waits for a restart to load pg_stat_statements
 	PGRestartCommand string
+	WebLogs          []setup.WebLogPlan // what each web server needs so its requests are read
+	WebLogsError     string
 }
 
 // settingsTab is one tab of the Settings page and the sections (forms) on it.
@@ -78,6 +81,7 @@ func (s *Server) databaseAccess(ctx context.Context, cfg *config.Config, d *sett
 		d.DBError = "The monitoring service isn't answering (it starts when you save with monitoring on): " + err.Error()
 	}
 	d.DBs = dbs
+	d.WebLogs, d.WebLogsError = s.webLogPlans()
 	if runner := s.Svc.Runner(); runner != nil && !cfg.IsMySQL() {
 		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
 		d.PGRestart = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"
@@ -173,4 +177,53 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "settings", "saved "+section, true)
 	s.flash(w, r, "/settings?tab="+tab, "Saved. The new settings are in use.")
+}
+
+// webLogPlans works out the access log changes for the web servers on this machine.
+func (s *Server) webLogPlans() ([]setup.WebLogPlan, string) {
+	var plans []setup.WebLogPlan
+	var problems []string
+	if _, err := os.Stat(s.NginxDir); err == nil {
+		p, err := setup.PlanNginxLogs(s.NginxDir)
+		if err != nil {
+			problems = append(problems, "nginx: "+err.Error())
+		} else {
+			plans = append(plans, p)
+		}
+	}
+	if _, err := os.Stat(s.Caddyfile); err == nil {
+		p, err := setup.PlanCaddyLogs(s.Caddyfile)
+		if err != nil {
+			problems = append(problems, "Caddy: "+err.Error())
+		} else {
+			plans = append(plans, p)
+		}
+	}
+	return plans, strings.Join(problems, "; ")
+}
+
+// monitorWebLogs applies one web server's access log changes (the Apply button): files
+// backed up, the config checked, then a reload; on a failed check everything is put back.
+func (s *Server) monitorWebLogs(w http.ResponseWriter, r *http.Request) {
+	plans, problem := s.webLogPlans()
+	want := r.PostFormValue("server")
+	for _, p := range plans {
+		if p.Server != want {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+		defer cancel()
+		err := setup.ApplyWebLogs(ctx, s.Cmd, p, s.WebBackupDir)
+		s.audit(r, "monitoring", "access log for "+p.Server, err == nil)
+		if err != nil {
+			cfg := s.Svc.Config()
+			d := settingsData{Cfg: cfg, Tabs: settingsTabs, Tab: "monitoring", DBProblem: err.Error()}
+			s.databaseAccess(r.Context(), cfg, &d)
+			s.render(w, r, "settings", page{Title: "Settings", Nav: "settings", Data: d})
+			return
+		}
+		s.flash(w, r, "/settings?tab=monitoring", "Done. "+p.Server+" was reloaded with the new access log; requests show in Monitoring → Requests within a minute.")
+		return
+	}
+	s.fail(w, r, fmt.Errorf("no %s config found to change %s", want, problem))
 }

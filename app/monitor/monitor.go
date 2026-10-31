@@ -53,6 +53,12 @@ type Monitor struct {
 	held      map[string]held // values from the slow checks and from Push
 	dbOnce    sync.Once
 	dbst      *dbState
+	reqOnce   sync.Once
+	reqst     *reqAgg
+	// LogSources are the access logs to read (FindLogSources); FindLogs, when set, finds
+	// them again every few minutes.
+	LogSources []LogSource
+	FindLogs   func() []LogSource
 }
 
 func New(collector *Collector, store *Store, log io.Writer) *Monitor {
@@ -75,6 +81,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	}
 	go m.slowLoop(ctx)
 	go m.dbLoop(ctx)
+	go m.reqLoop(ctx)
 	tick := time.NewTicker(Interval)
 	defer tick.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -135,6 +142,7 @@ type Latest struct {
 // PushRequest is what the root service sends: database sizes and the like.
 type PushRequest struct {
 	Values map[string]float64 `json:"values"`
+	Keep   int                `json:"keep,omitempty"` // seconds the values count; PushKeep when 0
 }
 
 // SeriesResponse is the history of some series over a range.
@@ -178,13 +186,14 @@ func (m *Monitor) Handler() http.Handler {
 		writeJSON(w, Latest{Time: s.Time, Values: s.Values, Processes: procs, Checks: checks})
 	})
 	m.dbHandlers(mux, writeJSON)
+	m.reqHandlers(mux, writeJSON)
 	mux.HandleFunc("POST /v1/push", func(w http.ResponseWriter, r *http.Request) {
 		var req PushRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := m.Push(req.Values); err != nil {
+		if err := m.Push(req.Values, time.Duration(req.Keep)*time.Second); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -307,7 +316,12 @@ func (c *Client) Series(ctx context.Context, rng string, names ...string) (Serie
 
 // Push sends values (database sizes) for the monitor to keep with its samples.
 func (c *Client) Push(ctx context.Context, values map[string]float64) error {
-	data, err := json.Marshal(PushRequest{Values: values})
+	return c.PushFor(ctx, values, 0)
+}
+
+// PushFor sends values that count for keep (rounded to seconds; PushKeep when 0).
+func (c *Client) PushFor(ctx context.Context, values map[string]float64, keep time.Duration) error {
+	data, err := json.Marshal(PushRequest{Values: values, Keep: int(keep / time.Second)})
 	if err != nil {
 		return err
 	}

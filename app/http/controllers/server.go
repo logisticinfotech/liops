@@ -20,6 +20,7 @@ import (
 	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/service"
+	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
 	"github.com/logisticinfotech/liops/app/version"
 	"github.com/logisticinfotech/liops/config"
@@ -35,6 +36,9 @@ type Server struct {
 	Cmd command.Runner
 	// Monitor reads the liops-monitor service over its Unix socket; tests point it elsewhere.
 	Monitor *monitor.Client
+	// Where the web servers' configs are, and where changed ones are backed up; tests
+	// point them elsewhere.
+	NginxDir, Caddyfile, WebBackupDir string
 
 	pages map[string]*template.Template
 	setup *wizard
@@ -48,8 +52,9 @@ func New(svc *service.Service) (*Server, error) {
 		Now:      time.Now,
 		Cmd:      command.Exec{},
 		Monitor:  monitor.NewClient(monitor.DefaultSocket),
-		pages:    map[string]*template.Template{},
-		setup:    newWizard(),
+		NginxDir: setup.NginxDir, Caddyfile: setup.Caddyfile, WebBackupDir: "/var/lib/liops/backups",
+		pages: map[string]*template.Template{},
+		setup: newWizard(),
 	}
 	names, err := fs.Glob(resources.FS, "views/*.html")
 	if err != nil {
@@ -151,9 +156,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /settings/{section}", page(s.saveSettings))
 	mux.Handle("POST /settings/monitor/databases", page(s.monitorDatabases))
 	mux.Handle("POST /settings/monitor/restart", page(s.monitorRestart))
+	mux.Handle("POST /settings/monitor/weblogs", page(s.monitorWebLogs))
 	mux.Handle("GET /audit", page(s.auditPage))
 	mux.Handle("GET /monitoring/resources", page(s.resources))
 	mux.Handle("GET /monitoring/database", page(s.dbMonitor))
+	mux.Handle("GET /monitoring/requests", page(s.requests))
 	mux.Handle("GET /monitoring/database/query", page(s.dbMonitorQuery))
 
 	var h http.Handler = mux

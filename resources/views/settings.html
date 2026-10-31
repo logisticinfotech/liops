@@ -67,6 +67,25 @@
     <p><strong>PostgreSQL needs one restart</strong> to load <code>pg_stat_statements</code>. The apps can't reach the database for a few seconds. Restart now, or run <code>{{.PGRestartCommand}}</code> yourself at a quiet time.</p>
     <div class="actions"><button>Restart PostgreSQL now</button></div>
   </form>{{end}}
+</div>
+<div class="panel" id="weblogs">
+  <h2>Web servers</h2>
+  <p class="muted">Requests are measured from the web server's access log: each request's site, route, status and time. liops never stores full URLs, only routes like <code>/orders/{n}</code>.</p>
+  {{with .WebLogsError}}<div class="error">{{.}}</div>{{end}}
+  {{range .WebLogs}}
+  <h3>{{.Server}}</h3>
+  {{if .Done}}<p><span class="badge ok">ready</span> Its requests are read{{if eq .Server "nginx"}} from <code>/var/log/nginx/liops-access.log</code>{{else}} from each site's log{{end}}.</p>
+  {{else}}
+  <p>To measure its requests, liops would make these changes, keeping copies of the files, check the config ({{if eq .Server "nginx"}}<code>nginx -t</code>{{else}}<code>caddy validate</code>{{end}}) and reload {{.Server}}: no restart, and if the check fails every file is put back.</p>
+  <div class="table-wrap"><table>
+    <tr><th>File</th><th>Sites</th><th>Adds</th></tr>
+    {{range .Files}}<tr><td class="mono">{{.Path}}</td><td class="mono">{{if .Sites}}{{join .Sites ", "}}{{else}}all sites without their own access log{{end}}</td><td><pre>{{lines .Adds}}</pre></td></tr>{{end}}
+  </table></div>
+  <form method="post" action="/settings/monitor/weblogs"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="server" value="{{.Server}}">
+    <div class="actions"><button>Apply the {{.Server}} changes</button></div></form>
+  {{end}}
+  {{range .Skipped}}<p class="muted">Left alone: {{.}}.</p>{{end}}
+  {{else}}{{if not .WebLogsError}}<p class="muted">No nginx or Caddy config found on this server.</p>{{end}}{{end}}
 </div>{{end}}
 {{end}}
 {{end}}{{end}}
