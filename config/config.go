@@ -417,8 +417,9 @@ func (c *Config) IsMySQL() bool { return c.Engine == EngineMySQL }
 var backupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 // identityNameRe is a PostgreSQL cluster name or OS user: interpolated into paths and
-// commands, so it may only be a single path element of letters, digits, '-' or '_'.
-var identityNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+// commands, so it may only be a single path element: letters, digits, '-', '_', '.' and
+// '@' (Homebrew's cluster is postgresql@18), never '/', and never starting with a '.'.
+var identityNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,62}$`)
 
 // Validate reports every problem at once, joined with errors.Join.
 func (c *Config) Validate() error {
@@ -550,7 +551,7 @@ func (c *Config) validatePostgres(add func(string, ...any), errs *[]error) {
 	if c.Postgres.Cluster == "" {
 		add("postgres.cluster: required")
 	} else if !identityNameRe.MatchString(c.Postgres.Cluster) {
-		add("postgres.cluster: %q isn't a valid cluster name: use letters, digits, '-' or '_', starting with a letter or digit", c.Postgres.Cluster)
+		add("postgres.cluster: %q isn't a valid cluster name: use letters, digits, '-', '_', '.' or '@', starting with a letter or digit", c.Postgres.Cluster)
 	}
 	if !filepath.IsAbs(c.Postgres.DataDir) {
 		add("postgres.data_dir: must be an absolute path")
@@ -561,7 +562,7 @@ func (c *Config) validatePostgres(add func(string, ...any), errs *[]error) {
 	if c.Postgres.OSUser == "" {
 		add("postgres.os_user: required")
 	} else if !identityNameRe.MatchString(c.Postgres.OSUser) {
-		add("postgres.os_user: %q isn't a valid user name: use letters, digits, '-' or '_', starting with a letter or digit", c.Postgres.OSUser)
+		add("postgres.os_user: %q isn't a valid user name: use letters, digits, '-', '_', '.' or '@', starting with a letter or digit", c.Postgres.OSUser)
 	}
 	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
 		add("postgres.bin_dir: must be an absolute path (or empty for the layout's default)")

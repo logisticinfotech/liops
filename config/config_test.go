@@ -331,10 +331,19 @@ func TestPostgresIdentityNames(t *testing.T) {
 			t.Errorf("expected error to mention %q, got:\n%v", want, err)
 		}
 	}
-	c = complete()
-	c.Postgres.Cluster, c.Postgres.OSUser = "main", "postgres"
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
+	for _, bad := range []string{"..", ".hidden", "a/b", "main\n"} {
+		c = complete()
+		c.Postgres.Cluster = bad
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "postgres.cluster") {
+			t.Errorf("cluster %q must be refused, got %v", bad, err)
+		}
+	}
+	for _, good := range [][2]string{{"main", "postgres"}, {"postgresql@18", "first.last"}} {
+		c = complete()
+		c.Postgres.Cluster, c.Postgres.OSUser = good[0], good[1]
+		if err := c.Validate(); err != nil {
+			t.Errorf("%q / %q must be accepted: %v", good[0], good[1], err)
+		}
 	}
 }
 
