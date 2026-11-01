@@ -36,11 +36,13 @@
       <a class="nav-link{{if eq .Nav "jobs"}} active{{end}}" href="/jobs">Jobs</a>
       {{if .Monitor}}
       <div class="nav-group">Monitoring</div>
+      <a class="nav-link{{if eq .Nav "overview"}} active{{end}}" href="/monitoring">Overview</a>
       <a class="nav-link{{if eq .Nav "dbmonitor"}} active{{end}}" href="/monitoring/database">Database</a>
       <a class="nav-link{{if eq .Nav "requests"}} active{{end}}" href="/monitoring/requests">Requests</a>
       <a class="nav-link{{if eq .Nav "php"}} active{{end}}" href="/monitoring/php">PHP</a>
       <a class="nav-link{{if eq .Nav "apps"}} active{{end}}" href="/monitoring/apps">Apps</a>
       <a class="nav-link{{if eq .Nav "redis"}} active{{end}}" href="/monitoring/redis">Redis</a>
+      <a class="nav-link{{if eq .Nav "logs"}} active{{end}}" href="/monitoring/logs">Logs</a>
       <a class="nav-link{{if eq .Nav "resources"}} active{{end}}" href="/monitoring/resources">Resources</a>
       {{end}}
       <div class="nav-group">Server</div>

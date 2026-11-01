@@ -59,6 +59,11 @@ type Service struct {
 	healthMu sync.Mutex
 	health   *jobs.Health
 	healthAt time.Time
+
+	logMu       sync.Mutex
+	appLogSizes map[string]int64
+	appLogAt    time.Time
+	appLogRates []LogRate
 }
 
 // New loads the config (a draft is fine) and starts the scheduler if setup is

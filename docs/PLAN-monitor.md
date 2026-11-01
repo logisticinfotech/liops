@@ -501,6 +501,18 @@ Not yet: queue backlog from Redis (needs key names the monitor isn't allowed to 
 per-host split of queries per request (N+1, needs both sides joined), slow-log stack traces
 next to the slow requests, and a `make vm-test-monitor` script that does the above by itself.
 
+**MO3 status (November 2026).** Built: the verdict (`app/verdict`: §5's rules as pure
+functions over the last 24 hours, each finding with the numbers behind it, what to do and
+where to look; Monitoring → Overview), the log viewer (root reads the listed journals and log
+files live, at most their last 2 MB) with log growth (the monitor for `/var/log`, root for the
+apps' `storage/logs`, every 10 minutes), and the immediate alerts (a disk full within 3 days or
+over 95%, OOM kills, a 5xx burst, `pg_wal` tripled and over 1 GB; each kind at most once every
+6 hours, by the existing email). All eleven of §5's scenarios are unit tests; in an Ubuntu
+26.04 VM with nginx, PHP 8.5 and MySQL 8.4, five at once (table scans, N+1, a 2-worker pool
+behind slow requests, a 94% full disk, a log growing 89 MB an hour) were each named, with the
+scans first. The daily email's Server health still lists only the scanning queries; the
+verdict's headline could join it.
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the

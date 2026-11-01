@@ -9,7 +9,7 @@ and manages two backup layers to S3-compatible storage: pgBackRest point-in-time
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
 plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2), with the same installer,
-wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0 machine, MO1 databases and MO2 requests/PHP/apps/Redis are in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0–MO3 are in: machine, databases, requests/PHP/apps/Redis, the verdict, logs and alerts). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -130,6 +130,12 @@ touches the live server.
   Redis are planned in `app/setup` (`weblogs.go`, `phpfpm.go`, `redis.go`), shown in Settings,
   and applied only on a button: back up, check (`nginx -t`, `caddy validate`, `php-fpmX.Y -t`),
   put back on failure, reload (never restart). Deploys go into the audit log as chart markers.
+- **Verdict, logs, alerts** (MO3): `app/verdict` is pure rules over an `Evidence` struct
+  (gathered by `controllers/overview.go` from the monitor, the pools, the apps and the audit
+  log); add a rule with a scenario test in `verdict_test.go`. The log viewer (root) reads only
+  listed sources, live, the last 2 MB. Immediate alerts (`service/alerts.go`: disk filling,
+  OOM kills, a 5xx burst, `pg_wal` piling up) are a pure `judgeAlerts` plus a loop that emails
+  each kind at most once every 6 hours.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`

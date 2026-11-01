@@ -1,0 +1,28 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Logs</h1>
+<form method="get" action="/monitoring/logs" class="inline-form">
+  <label>Log <select name="source">
+    <option value="">choose…</option>
+    {{$group := ""}}{{range .Sources}}{{if ne .Group $group}}{{if $group}}</optgroup>{{end}}<optgroup label="{{.Group}}">{{$group = .Group}}{{end}}<option value="{{.ID}}"{{if eq .ID $.Data.Source}} selected{{end}}>{{.Label}}</option>{{end}}{{if $group}}</optgroup>{{end}}
+  </select></label>
+  <label>Containing <input type="text" name="q" value="{{.Filter}}" placeholder="text"></label>
+  <label class="check"><input type="checkbox" name="errors" value="1"{{if .Errors}} checked{{end}}> errors only</label>
+  <label>Lines <select name="lines"><option{{if eq .Lines 100}} selected{{end}}>100</option><option{{if eq .Lines 200}} selected{{end}}>200</option><option{{if eq .Lines 500}} selected{{end}}>500</option><option{{if eq .Lines 1000}} selected{{end}}>1000</option></select></label>
+  <button>Show</button>
+</form>
+{{with .Problem}}<div class="error">{{.}}</div>{{end}}
+{{if .Source}}{{if not .Problem}}
+<p class="muted">{{len .Output}} lines, newest last, read when this page {{if .Follow}}refreshed (every 5 seconds) · <a href="{{.StopLink}}">stop following</a>{{else}}opened · <a href="{{.FollowLink}}">follow</a>{{end}}. Logs can hold personal data and secrets: liops shows them here and never stores them.</p>
+<pre class="log">{{range .Output}}{{.}}
+{{else}}(nothing matches){{end}}</pre>
+{{end}}{{end}}
+
+<h2>Growing fastest</h2>
+{{if .Growth}}<div class="table-wrap"><table>
+  <tr><th>File</th><th class="num">Size</th><th class="num">An hour</th></tr>
+  {{range .Growth}}<tr><td class="mono">{{.Path}}</td><td class="num">{{if .Size}}{{bytes (int64 .Size)}}{{else}}—{{end}}</td><td class="num">{{bytes (int64 .PerHour)}}</td></tr>{{end}}
+</table></div>
+<p class="muted">Measured every 10 minutes. A log growing by tens of MB an hour is usually a debug level left on, or a line written in a loop.</p>
+{{else}}<p class="muted">Measured every 10 minutes; the first comparison shows here after that.</p>{{end}}
+{{end}}{{end}}

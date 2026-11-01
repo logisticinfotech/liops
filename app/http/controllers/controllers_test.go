@@ -922,3 +922,60 @@ func TestAppsAndRedisPages(t *testing.T) {
 		t.Error("Settings should show Redis as ready")
 	}
 }
+
+func TestOverviewPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	h.ui.PHPEtc = t.TempDir()
+	code, _, body := h.get("/monitoring")
+	if code != 200 {
+		t.Fatalf("GET: %d\n%s", code, body)
+	}
+	// The fake's numbers are extreme (every series climbs to 1e9): plenty to say.
+	for _, want := range []string{`href="/monitoring">Overview`, "Most likely:", "What to do:", "Details →", "Fix the app first"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Overview should contain %q", want)
+		}
+	}
+	h.ui.Monitor = monitor.NewClient("/tmp/liops-no-such.sock")
+	if _, _, body := h.get("/monitoring"); !strings.Contains(body, "isn&#39;t answering") {
+		t.Error("the overview should say when the monitor isn't running")
+	}
+}
+
+func TestLogsPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	app := t.TempDir()
+	os.MkdirAll(filepath.Join(app, "public"), 0o755)
+	os.MkdirAll(filepath.Join(app, "storage", "logs"), 0o755)
+	os.WriteFile(filepath.Join(app, "artisan"), nil, 0o755)
+	logFile := filepath.Join(app, "storage", "logs", "laravel.log")
+	os.WriteFile(logFile, []byte("[2026-11-01 10:00:00] production.INFO: started\n[2026-11-01 10:00:01] production.ERROR: Payment gateway timeout\n[2026-11-01 10:00:02] production.INFO: gateway retry ok\n"), 0o644)
+	nginx := t.TempDir()
+	os.MkdirAll(filepath.Join(nginx, "sites-enabled"), 0o755)
+	os.WriteFile(filepath.Join(nginx, "sites-enabled", "shop"), []byte("server {\n  server_name shop.example.com;\n  root "+app+"/public;\n}\n"), 0o644)
+	h.ui.NginxDir, h.ui.Caddyfile = nginx, filepath.Join(nginx, "none")
+
+	_, _, body := h.get("/monitoring/logs")
+	for _, want := range []string{`href="/monitoring/logs">Logs`, "nginx", "postgresql", logFile} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the source list should offer %q", want)
+		}
+	}
+	_, _, body = h.get("/monitoring/logs?" + url.Values{"source": {"file:" + logFile}, "q": {"gateway"}, "errors": {"1"}}.Encode())
+	if !strings.Contains(body, "Payment gateway timeout") || strings.Contains(body, "retry ok") || strings.Contains(body, "started") {
+		t.Errorf("filtered output:\n%s", body)
+	}
+	if _, _, body := h.get("/monitoring/logs?" + url.Values{"source": {"file:/etc/shadow"}}.Encode()); !strings.Contains(body, "isn&#39;t one liops shows") {
+		t.Error("only listed logs may be read")
+	}
+	_, _, body = h.get("/monitoring/logs?" + url.Values{"source": {"file:" + logFile}, "follow": {"1"}}.Encode())
+	if !strings.Contains(body, `http-equiv="refresh" content="5"`) || !strings.Contains(body, "stop following") {
+		t.Error("follow should refresh the page")
+	}
+}

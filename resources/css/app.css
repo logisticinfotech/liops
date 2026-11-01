@@ -124,6 +124,12 @@
   .inline-form label { @apply m-0 flex items-center gap-2 font-normal; }
   .inline-form select { @apply w-auto; }
   pre.query { @apply mb-3 text-[0.8rem]; }
+  .lead { @apply mb-2 text-base font-medium; }
+  pre.log { @apply max-h-[70vh] overflow-y-auto text-[0.75rem] whitespace-pre-wrap break-all; }
+  .finding { @apply mb-4 rounded-md border bg-white px-4 py-3 dark:bg-zinc-900; }
+  .finding.problem { @apply border-red-200 dark:border-red-900; }
+  .finding.warning { @apply border-amber-200 dark:border-amber-900; }
+  .finding-head { @apply mb-2 flex flex-wrap items-center gap-2; }
   .heatmap { @apply w-auto border-separate border-spacing-0.5; }
   .heatmap td, .heatmap th { @apply border-0 p-0 text-[0.65rem] font-normal normal-case tracking-normal; }
   .heatmap th.day { @apply pr-2 text-right whitespace-nowrap text-zinc-500; }

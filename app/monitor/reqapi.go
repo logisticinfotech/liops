@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -30,6 +31,13 @@ func (m *Monitor) reqHandlers(mux *http.ServeMux, writeJSON func(http.ResponseWr
 		host := r.URL.Query().Get("host")
 		now := m.Now()
 		from := now.Add(-span)
+		// An explicit window (Unix seconds) instead of "the last <range>": the verdict
+		// compares before and after a deploy.
+		if f, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
+			if t, err := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64); err == nil && t > f {
+				from, now, span = time.Unix(f, 0), time.Unix(t, 0), time.Duration(t-f)*time.Second
+			}
+		}
 		var res RequestsResponse
 		var err error
 		if res.Routes, res.Hosts, err = m.Store.RequestTotals(from, now, host); err == nil {
@@ -112,4 +120,12 @@ func (m *Monitor) addCurrentHour(res *RequestsResponse, host string) {
 	if cell.Count > 0 {
 		res.Heatmap = append(res.Heatmap, cell)
 	}
+}
+
+// RequestsBetween returns the requests between from and to (whole minutes, or hours
+// beyond a day), for one host ("" for all).
+func (c *Client) RequestsBetween(ctx context.Context, from, to time.Time, host string) (RequestsResponse, error) {
+	q := url.Values{"range": {"90d"}, "host": {host}, "from": {strconv.FormatInt(from.Unix(), 10)}, "to": {strconv.FormatInt(to.Unix(), 10)}}
+	var out RequestsResponse
+	return out, c.get(ctx, "/v1/requests?"+q.Encode(), &out)
 }

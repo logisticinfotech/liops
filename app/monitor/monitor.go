@@ -62,6 +62,9 @@ type Monitor struct {
 	// Redis is the local Redis, if any (FindRedis).
 	Redis *RedisServer
 	redis *redisState
+
+	logs      *logSizes
+	logGrowth []LogGrowth
 }
 
 func New(collector *Collector, store *Store, log io.Writer) *Monitor {
@@ -86,6 +89,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	go m.dbLoop(ctx)
 	go m.reqLoop(ctx)
 	go m.redisLoop(ctx)
+	go m.logLoop(ctx)
 	tick := time.NewTicker(Interval)
 	defer tick.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -191,6 +195,7 @@ func (m *Monitor) Handler() http.Handler {
 	})
 	m.dbHandlers(mux, writeJSON)
 	m.reqHandlers(mux, writeJSON)
+	m.logHandlers(mux, writeJSON)
 	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
 		var res RedisResponse
 		m.mu.Lock()

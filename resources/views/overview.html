@@ -1,0 +1,16 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Overview</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+<p class="lead">{{.Headline}}</p>
+<p class="muted">The last 24 hours, judged by plain rules: tune it, fix the app, or a bigger VM. Each finding shows the numbers behind it; follow its link for the details.</p>
+{{range .Findings}}
+<div class="finding {{if eq .Level 2}}problem{{else}}warning{{end}}">
+  <div class="finding-head"><span class="badge {{if eq .Level 2}}failed{{else}}waiting{{end}}">{{.Area}}</span> <strong>{{.Says}}</strong></div>
+  <p>{{.Because}}</p>
+  {{with .Do}}<p><strong>What to do:</strong> {{.}}</p>{{end}}
+  {{with .Link}}<p><a href="{{.}}">Details →</a></p>{{end}}
+</div>
+{{else}}<div class="flash">CPU, memory, disk, the databases, PHP and the requests all look fine.</div>{{end}}
+{{end}}
+{{end}}{{end}}
