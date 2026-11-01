@@ -91,8 +91,7 @@ func (s *Server) databaseAccess(ctx context.Context, cfg *config.Config, d *sett
 		d.Redis = res.Status
 	}
 	if runner := s.Svc.Runner(); runner != nil && !cfg.IsMySQL() {
-		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
-		d.PGRestart = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"
+		d.PGRestart = setup.SharedPreloadPendingRestart(ctx, runner.Cluster)
 		d.PGRestartCommand = setup.RestartCommand(cfg)
 	}
 }
@@ -148,8 +147,7 @@ func (s *Server) monitorRestart(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	pending := false
 	if runner := s.Svc.Runner(); runner != nil {
-		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
-		pending = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"
+		pending = setup.SharedPreloadPendingRestart(ctx, runner.Cluster)
 	}
 	if !pending {
 		s.flash(w, r, "/settings?tab=monitoring", "PostgreSQL doesn't need a restart right now.")

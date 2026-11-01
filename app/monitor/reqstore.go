@@ -45,6 +45,10 @@ const (
 // onto otherRoute. A var so tests can lower it.
 var maxRouteIDs = 4096
 
+// maxNewRouteIDsPerHour bounds how many new host+route keys one hour can add, so a
+// crawler burst doesn't fill the cap and leave real routes as {other} for 90 days.
+var maxNewRouteIDsPerHour = 256
+
 var otherRoute = routeKey{"{other}", "{other}"}
 
 // RouteStats are a route's numbers over a period.
@@ -321,9 +325,16 @@ func (s *Store) writeRoutes(bucket []byte, key uint32, rows map[routeKey]*RouteS
 		s.routeIDsLocked(tx)
 		routes := tx.Bucket(bucketRoutes)
 		var rec []byte
+		hour := key
+		if string(bucket) == string(bucketReqMinute) {
+			hour = key / 60
+		}
+		if s.newRouteHour != hour {
+			s.newRouteHour, s.newRouteCount = hour, 0
+		}
 		for k, st := range rows {
 			id, ok := s.routeIDs[k]
-			if !ok && len(s.routeIDs) >= maxRouteIDs {
+			if !ok && (len(s.routeIDs) >= maxRouteIDs || s.newRouteCount >= maxNewRouteIDsPerHour) {
 				k = otherRoute
 				id, ok = s.routeIDs[k]
 			}
@@ -337,6 +348,7 @@ func (s *Store) writeRoutes(bucket []byte, key uint32, rows map[routeKey]*RouteS
 					return err
 				}
 				s.routeIDs[k], s.routeNames[id] = id, k
+				s.newRouteCount++
 			}
 			rec = binary.AppendUvarint(rec, uint64(id))
 			for _, v := range []float64{st.Count, st.C4xx, st.C5xx, st.TimeMS, st.UpMS, st.UpCount, st.KB, st.MaxMS} {

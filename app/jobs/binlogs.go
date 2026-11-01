@@ -18,11 +18,14 @@ import (
 // Binlog shipping runs every few minutes, so its runs aren't kept in the job history;
 // these state meta keys hold what the UI, the report and the next run need.
 const (
-	MetaBinlogShippedAt = "binlog_shipped_at"    // RFC 3339: the last run that worked
-	metaBinlogPosition  = "binlog_position"      // where MySQL was writing after that run
-	metaBinlogFailing   = "binlog_failing_since" // RFC 3339, while runs are failing
-	metaBinlogGaps      = "binlog_gaps_reported" // binlog names already reported as missing
-	metaBinlogCatchUp   = "binlog_catch_up"      // "1" until a catch-up full after a gap succeeds
+	MetaBinlogShippedAt    = "binlog_shipped_at"     // RFC 3339: the last run that worked
+	metaBinlogPosition     = "binlog_position"       // where MySQL was writing after that run
+	metaBinlogFailing      = "binlog_failing_since"  // RFC 3339, while runs are failing
+	metaBinlogGaps         = "binlog_gaps_reported"  // binlog names already reported as missing
+	metaBinlogCatchUp      = "binlog_catch_up"       // RFC 3339 of the gap; empty when none
+	metaBinlogCatchUpTried = "binlog_catch_up_tried" // RFC 3339 of the last catch-up full attempt
+	binlogShipTimeout      = time.Hour
+	catchUpEvery           = time.Hour
 )
 
 // Automatic is the trigger of a job liops starts by itself, e.g. a full backup after a
@@ -44,8 +47,12 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	shipCtx, cancel := context.WithTimeout(ctx, time.Duration(r.Cfg.MySQL.BinlogInterval))
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	shipCtx, cancel := context.WithTimeout(ctx, binlogShipTimeout)
 	res, err := r.shipBinlogs(shipCtx)
 	cancel()
 	if err != nil {
@@ -71,15 +78,59 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 			ToDo:     "check that binlog_expire_logs_seconds is at least 7 days, and look for earlier shipping failures in: sudo liops logs",
 		})
 		r.send(ctx, Binlogs, subject, body)
-		r.setMeta(metaBinlogCatchUp, "1")
+		r.setMeta(metaBinlogCatchUp, r.now().UTC().Format(time.RFC3339))
 	}
-	if r.meta(metaBinlogCatchUp) != "" {
-		if err := r.Run(ctx, Full, Automatic); err != nil {
-			return err
-		}
+	if r.meta(metaBinlogCatchUp) == "" {
+		return nil
+	}
+	if r.skipCatchUp() {
 		r.setMeta(metaBinlogCatchUp, "")
+		r.setMeta(metaBinlogCatchUpTried, "")
+		return nil
 	}
+	if !r.catchUpDue() {
+		return nil
+	}
+	r.setMeta(metaBinlogCatchUpTried, r.now().UTC().Format(time.RFC3339))
+	unlock()
+	unlock = nil
+	if r.skipCatchUp() {
+		r.setMeta(metaBinlogCatchUp, "")
+		r.setMeta(metaBinlogCatchUpTried, "")
+		return nil
+	}
+	if err := r.Run(ctx, Full, Automatic); err != nil {
+		return err
+	}
+	r.setMeta(metaBinlogCatchUp, "")
+	r.setMeta(metaBinlogCatchUpTried, "")
 	return nil
+}
+
+// skipCatchUp reports whether a full backup has already finished since the gap.
+func (r *Runner) skipCatchUp() bool {
+	gapAt, err := time.Parse(time.RFC3339, r.meta(metaBinlogCatchUp))
+	if err != nil {
+		return false // legacy "1" or unparseable: still try (with backoff)
+	}
+	list, err := r.XtraBackup.Backups(context.Background())
+	if err != nil {
+		return false
+	}
+	last := xtrabackup.Last(list, xtrabackup.Full)
+	return last != nil && !last.Stop.Before(gapAt)
+}
+
+func (r *Runner) catchUpDue() bool {
+	v := r.meta(metaBinlogCatchUpTried)
+	if v == "" {
+		return true
+	}
+	tried, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return true
+	}
+	return !r.now().Before(tried.Add(catchUpEvery))
 }
 
 // shipBinlogs does one shipping run.
@@ -105,7 +156,7 @@ func (r *Runner) shipBinlogs(ctx context.Context) (xtrabackup.ShipResult, error)
 			return res, err
 		}
 	}
-	if res, err = r.XtraBackup.ShipBinlogs(ctx, backups[0].BinlogFile); err != nil {
+	if res, err = r.XtraBackup.ShipBinlogs(ctx, backups); err != nil {
 		return res, err
 	}
 	r.setMeta(metaBinlogPosition, status.Position())

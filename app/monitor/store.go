@@ -41,8 +41,10 @@ type Store struct {
 
 	shapeIDs map[string]uint32 // query shape key → id, loaded on first use
 
-	routeIDs   map[routeKey]uint32 // request routes, loaded on first use
-	routeNames map[uint32]routeKey
+	routeIDs      map[routeKey]uint32 // request routes, loaded on first use
+	routeNames    map[uint32]routeKey
+	newRouteHour  uint32 // unix hour of newRouteCount
+	newRouteCount int    // new route IDs assigned in that hour
 }
 
 // rollup gathers the samples of one minute or hour.

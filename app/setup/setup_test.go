@@ -138,6 +138,7 @@ func TestCheckOwner(t *testing.T) {
 		{"another PostgreSQL server's marker", []string{OwnersPrefix + "postgres-7000000000000000001"}, missing, "another PostgreSQL server"},
 		{"a MySQL server's marker", []string{OwnersPrefix + "mysql-3e11fa47-71ca-11e1-9e33-c80aa9429562", "dumps/app/x.sql.gz"}, missing, "another MySQL server"},
 		{"dumps no server has claimed", []string{"dumps/app/2026-10-01T013000Z.dump"}, missing, "no server has claimed"},
+		{"a leftover storage probe", []string{"liops-probe/abc"}, missing, ""},
 	} {
 		store := storage.NewMemory()
 		for _, key := range c.objects {

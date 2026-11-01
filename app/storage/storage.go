@@ -45,7 +45,7 @@ const (
 	PgBackRestPrefix = "pgbackrest/"
 	DumpsPrefix      = "dumps/"
 	GlobalsPrefix    = "globals/"
-	probePrefix      = "liops-probe/"
+	ProbePrefix      = "liops-probe/"
 )
 
 // TotalSize adds up the size of objects.
@@ -114,7 +114,7 @@ func (p Prefixed) Probe(ctx context.Context) error { return ProbeStore(ctx, p) }
 // keep the object inside the server's folder; a leftover from a failed read is still
 // removed.
 func ProbeStore(ctx context.Context, s Store) (err error) {
-	key := probePrefix + strconv.FormatInt(time.Now().UnixNano(), 36)
+	key := ProbePrefix + strconv.FormatInt(time.Now().UnixNano(), 36)
 	want := []byte("liops storage probe\n")
 	if _, err := s.Put(ctx, key, bytes.NewReader(want)); err != nil {
 		return fmt.Errorf("write test object: %w", err)

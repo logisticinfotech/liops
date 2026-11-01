@@ -22,7 +22,7 @@ type RestorePlan struct {
 	Target  time.Time // zero: as late as the binlogs go
 	Full    Manifest
 	Diff    *Manifest
-	Binlogs []string // shipped binlogs, oldest first; the first is where replay starts
+	Binlogs []Binlog // shipped binlogs of this generation, oldest first; the first is where replay starts
 }
 
 // Start is the backup the binlogs are replayed onto: the diff if there is one.
@@ -37,7 +37,7 @@ func (p RestorePlan) Start() Manifest {
 // the newest full backup finished by then, the newest diff of that full finished by
 // then, and every shipped binlog from that backup's binlog on. It refuses a target
 // before the oldest backup, and a gap in the binlogs it needs.
-func PlanRestore(backups []Manifest, binlogs []string, target time.Time) (RestorePlan, error) {
+func PlanRestore(backups []Manifest, binlogs []Binlog, target time.Time) (RestorePlan, error) {
 	plan := RestorePlan{Target: target}
 	before := func(m Manifest) bool { return target.IsZero() || !m.Stop.After(target) }
 
@@ -61,16 +61,19 @@ func PlanRestore(backups []Manifest, binlogs []string, target time.Time) (Restor
 		}
 	}
 
-	start := plan.Start().BinlogFile
+	start := plan.Start()
 	for _, b := range binlogs {
-		if b >= start { // zero-padded numbers compare in order
+		if b.Gen != start.BinlogGen {
+			continue
+		}
+		if !binlogBefore(b.Name, start.BinlogFile) {
 			plan.Binlogs = append(plan.Binlogs, b)
 		}
 	}
 	if len(plan.Binlogs) == 0 {
 		return plan, nil // nothing shipped since the backup: the restore ends at the backup
 	}
-	want, err := binlogRange(start, nextBinlog(plan.Binlogs[len(plan.Binlogs)-1]))
+	want, err := binlogRange(start.BinlogFile, nextBinlog(plan.Binlogs[len(plan.Binlogs)-1].Name))
 	if err != nil {
 		return plan, err
 	}
@@ -78,7 +81,7 @@ func PlanRestore(backups []Manifest, binlogs []string, target time.Time) (Restor
 	for _, name := range want {
 		found := false
 		for _, b := range plan.Binlogs {
-			found = found || b == name
+			found = found || b.Name == name
 		}
 		if !found {
 			missing = append(missing, name)
@@ -170,16 +173,16 @@ func (e *Engine) Fetch(ctx context.Context, plan RestorePlan, dir string, progre
 			return err
 		}
 		for _, b := range plan.Binlogs {
-			if err := e.fetchBinlog(ctx, b, filepath.Join(binlogs, b)); err != nil {
-				return fmt.Errorf("download %s: %w", b, err)
+			if err := e.fetchBinlog(ctx, b, filepath.Join(binlogs, b.Name)); err != nil {
+				return fmt.Errorf("download %s: %w", b.Name, err)
 			}
 		}
 	}
 	return nil
 }
 
-func (e *Engine) fetchBinlog(ctx context.Context, name, path string) error {
-	r, err := e.Store.Read(ctx, BinlogPrefix+name+".gz")
+func (e *Engine) fetchBinlog(ctx context.Context, b Binlog, path string) error {
+	r, err := e.Store.Read(ctx, b.Key())
 	if err != nil {
 		return err
 	}
@@ -224,7 +227,7 @@ func RestoreCommands(plan RestorePlan, dir, dataDir string, loc *time.Location) 
 		}
 		files := make([]string, len(plan.Binlogs))
 		for i, n := range plan.Binlogs {
-			files[i] = shellQuote(filepath.Join(dir, "binlogs", n))
+			files[i] = shellQuote(filepath.Join(dir, "binlogs", n.Name))
 		}
 		w("# 3. Replay the changes made after the backup, up to %s.", until)
 		w("#    To skip one bad statement instead (e.g. a DROP TABLE), add --exclude-gtids='<its GTID>'.")

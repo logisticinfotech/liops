@@ -58,8 +58,12 @@ type Manifest struct {
 	FromLSN uint64 `json:"from_lsn"`
 	ToLSN   uint64 `json:"to_lsn"`
 	// The binlog position the backup is consistent with: a restore replays binlogs from here.
-	BinlogFile    string `json:"binlog_file"`
-	BinlogPos     uint64 `json:"binlog_pos"`
+	BinlogFile string `json:"binlog_file"`
+	BinlogPos  uint64 `json:"binlog_pos"`
+	// BinlogGen is the binlog chain this backup belongs to. RESET BINARY LOGS starts a
+	// new generation; restores never mix files from two generations. Empty is the
+	// legacy flat prefix (xtrabackup/binlog/<file>.gz).
+	BinlogGen     string `json:"binlog_gen,omitempty"`
 	GTIDs         string `json:"gtids,omitempty"`
 	ServerVersion string `json:"server_version"`
 	ToolVersion   string `json:"xtrabackup_version"`
@@ -134,12 +138,12 @@ func Last(list []Manifest, typ string) *Manifest {
 // one (the returned manifest says which).
 func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
 	start := e.Now().UTC()
+	list, err := e.Backups(ctx)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("list the backups: %w", err)
+	}
 	var base *Manifest
 	if typ == Diff {
-		list, err := e.Backups(ctx)
-		if err != nil {
-			return Manifest{}, fmt.Errorf("find the full backup to take the diff against: %w", err)
-		}
 		if base = Last(list, Full); base == nil {
 			typ = Full
 		}
@@ -172,6 +176,7 @@ func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
 		_ = e.Store.Delete(context.WithoutCancel(ctx), m.Key(StreamFile))
 		return m, err
 	}
+	assignBinlogGen(list, &m)
 
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -214,6 +219,24 @@ func readMetadata(dir string, m *Manifest) error {
 	m.BinlogPos, _ = strconv.ParseUint(pos[2], 10, 64)
 	m.GTIDs = strings.Join(strings.Fields(pos[3]), "")
 	return nil
+}
+
+// assignBinlogGen sets m.BinlogGen from the backups already in storage: the same
+// generation as the newest one, or a new one when MySQL's binlog numbers went backwards
+// (RESET BINARY LOGS).
+func assignBinlogGen(list []Manifest, m *Manifest) {
+	last := Last(list, "")
+	if last == nil {
+		m.BinlogGen = m.Start.UTC().Format(labelTime)
+		return
+	}
+	_, newN, _, errNew := splitBinlogName(m.BinlogFile)
+	_, oldN, _, errOld := splitBinlogName(last.BinlogFile)
+	if errNew == nil && errOld == nil && newN < oldN {
+		m.BinlogGen = m.Start.UTC().Format(labelTime)
+		return
+	}
+	m.BinlogGen = last.BinlogGen
 }
 
 // keyValues reads "key = value" lines.

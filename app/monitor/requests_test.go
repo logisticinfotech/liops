@@ -185,6 +185,39 @@ func TestRequestsAPI(t *testing.T) {
 	}
 }
 
+func TestNewRouteIDsAreCappedPerHour(t *testing.T) {
+	old, oldNew := maxRouteIDs, maxNewRouteIDsPerHour
+	maxRouteIDs, maxNewRouteIDsPerHour = 100, 3
+	t.Cleanup(func() { maxRouteIDs, maxNewRouteIDsPerHour = old, oldNew })
+
+	m, clock := newDBMonitor(t, &fakeMySQL{})
+	*clock = time.Date(2026, 11, 2, 10, 0, 10, 0, time.UTC)
+	for i := 0; i < 20; i++ {
+		m.AddRequest(Request{Host: "a.example.com", Method: "GET", Path: fmt.Sprintf("/t/r%d/x", i), Status: 200, MS: 10, UpstreamMS: -1})
+	}
+	*clock = clock.Add(time.Minute)
+	m.flushRequests(*clock)
+	m.Store.mu.Lock()
+	n := len(m.Store.routeIDs)
+	m.Store.mu.Unlock()
+	if n > maxNewRouteIDsPerHour+1 { // the new ones, plus maybe {other}
+		t.Errorf("route ids = %d, want at most %d new this hour", n, maxNewRouteIDsPerHour+1)
+	}
+
+	*clock = clock.Add(time.Hour)
+	for i := 20; i < 23; i++ {
+		m.AddRequest(Request{Host: "a.example.com", Method: "GET", Path: fmt.Sprintf("/t/r%d/x", i), Status: 200, MS: 10, UpstreamMS: -1})
+	}
+	*clock = clock.Add(time.Minute)
+	m.flushRequests(*clock)
+	m.Store.mu.Lock()
+	later := len(m.Store.routeIDs)
+	m.Store.mu.Unlock()
+	if later <= n {
+		t.Errorf("the next hour should assign new route ids, had %d now %d", n, later)
+	}
+}
+
 func TestRouteIDsAreCapped(t *testing.T) {
 	old := maxRouteIDs
 	maxRouteIDs = 8

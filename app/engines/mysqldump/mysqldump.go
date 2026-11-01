@@ -70,13 +70,14 @@ func (e *Engine) Discover(ctx context.Context) ([]string, error) {
 // Labels runs the configured label query and returns database name → label.
 // It returns nil when no label query is configured.
 func (e *Engine) Labels(ctx context.Context) (map[string]string, error) {
-	if e.Cfg.Labels.SQL == "" {
+	if !e.Cfg.Labels.Configured() {
 		return nil, nil
 	}
-	if err := config.CheckLabelSQL(e.Cfg.Labels.SQL); err != nil {
+	sql, err := e.Cfg.Labels.SelectSQL(true)
+	if err != nil {
 		return nil, fmt.Errorf("label query: %w", err)
 	}
-	rows, err := e.Instance.Query(ctx, e.Cfg.Labels.Database, e.Cfg.Labels.SQL)
+	rows, err := e.Instance.Query(ctx, e.Cfg.Labels.Database, sql)
 	if err != nil {
 		return nil, fmt.Errorf("label query: %w", err)
 	}

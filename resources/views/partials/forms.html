@@ -160,11 +160,15 @@
 {{end}}
 
 {{define "fields-labels"}}
-<div class="hint">Optional: a query that maps database names to friendly labels, e.g. tenant subdomains. It must return two columns: database name, label.</div>
+<div class="hint">Optional: map database names to friendly labels, e.g. tenant subdomains. liops runs <span class="mono">SELECT</span> those two columns from the table; it never runs free SQL.</div>
 <label for="labels_database">Run it in database</label>
 <input type="text" id="labels_database" name="labels_database" value="{{.Dumps.Labels.Database}}">
-<label for="labels_sql">Query</label>
-<textarea id="labels_sql" name="labels_sql" placeholder="SELECT db_name, subdomain FROM tenants">{{.Dumps.Labels.SQL}}</textarea>
+<label for="labels_table">Table</label>
+<input type="text" id="labels_table" name="labels_table" value="{{.Dumps.Labels.Table}}" placeholder="tenants">
+<label for="labels_db_column">Database-name column</label>
+<input type="text" id="labels_db_column" name="labels_db_column" value="{{.Dumps.Labels.DBColumn}}" placeholder="db_name">
+<label for="labels_label_column">Label column</label>
+<input type="text" id="labels_label_column" name="labels_label_column" value="{{.Dumps.Labels.LabelColumn}}" placeholder="subdomain">
 {{end}}
 
 {{define "wizard-steps"}}

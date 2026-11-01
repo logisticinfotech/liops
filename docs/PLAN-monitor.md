@@ -279,10 +279,10 @@ journal lines), and whether runs overlapped.
 
 ### 4.7 Redis
 
-From `INFO` and `SLOWLOG`, every 15 s / 5 min: memory against `maxmemory`, **evictions**,
-hit ratio, connected clients, commands per second, slow commands, persistence (last save, AOF).
-The monitor connects with its own Redis ACL user, allowed only `INFO`, `SLOWLOG GET` and
-`CONFIG GET` (set up with approval).
+From `INFO`, every 15 s / 5 min: memory against `maxmemory`, **evictions**,
+hit ratio, connected clients, commands per second, persistence (last save, AOF).
+The monitor connects with its own Redis ACL user, allowed only `INFO`, `PING` and
+queue lengths (set up with approval). No `SLOWLOG` (arguments are real keys and values).
 
 **Sessions in Redis** get their own checks, because a wrong setup silently logs people out:
 
@@ -489,7 +489,7 @@ read live for a page.
   database sessions/cache); sessions in Redis (sharing the cache's database, an evicting
   policy when full, no persistence, Redis reachable from outside); errors grouped from
   `storage/logs` (read live); the scheduler from cron's journal; database queue tables. Redis
-  through the monitor's own ACL user (`INFO`, `SLOWLOG GET`, `PING` only), set up on approval.
+  through the monitor's own ACL user (`INFO`, `PING`, queue lengths only), set up on approval.
   Deploys (a `current` symlink or git commit changing) go into the audit log and onto the
   charts. Monitoring → Apps and → Redis.
 

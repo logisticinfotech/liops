@@ -81,7 +81,7 @@ func runRestoreFiles(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "  diff %s (finished %s)\n", plan.Diff.Label, plan.Diff.Stop.In(loc).Format("2 Jan 15:04"))
 	}
 	if n := len(plan.Binlogs); n > 0 {
-		fmt.Fprintf(out, "  %d binlog(s), %s to %s\n", n, plan.Binlogs[0], plan.Binlogs[n-1])
+		fmt.Fprintf(out, "  %d binlog(s), %s to %s\n", n, plan.Binlogs[0].Name, plan.Binlogs[n-1].Name)
 	} else {
 		fmt.Fprintln(out, "  no binlogs: nothing was shipped after this backup, so the restore ends at the backup")
 	}

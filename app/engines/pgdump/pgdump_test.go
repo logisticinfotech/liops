@@ -95,8 +95,10 @@ func TestFailedUploadIsReported(t *testing.T) {
 
 func TestLabels(t *testing.T) {
 	cfg := config.Default()
-	cfg.Dumps.Labels = config.LabelQuery{Database: "central", SQL: "SELECT db_name, subdomain FROM tenants"}
-	fake := &command.Fake{Handle: func(string, command.Cmd) ([]byte, error) {
+	cfg.Dumps.Labels = config.LabelQuery{Database: "central", Table: "tenants", DBColumn: "db_name", LabelColumn: "subdomain"}
+	var gotSQL string
+	fake := &command.Fake{Handle: func(_ string, c command.Cmd) ([]byte, error) {
+		gotSQL = c.Args[len(c.Args)-1]
 		return []byte("tenant_abc\tabc\ntenant_xyz\txyz\n"), nil
 	}}
 	labels, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background())
@@ -106,13 +108,17 @@ func TestLabels(t *testing.T) {
 	if labels["tenant_abc"] != "abc" || labels["tenant_xyz"] != "xyz" {
 		t.Errorf("labels = %v", labels)
 	}
-
-	cfg.Dumps.Labels.SQL = "COPY tenants TO PROGRAM 'id'"
-	if _, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err == nil || !strings.Contains(err.Error(), "SELECT") {
-		t.Errorf("COPY TO PROGRAM must be refused: %v", err)
+	if gotSQL != `SELECT "db_name", "subdomain" FROM "tenants"` && !strings.Contains(gotSQL, `"db_name"`) {
+		t.Errorf("query = %q", gotSQL)
 	}
-	cfg.Dumps.Labels.SQL = "SELECT 1; SELECT 2"
-	if _, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err == nil || !strings.Contains(err.Error(), "single SELECT") {
-		t.Errorf("a second statement must be refused: %v", err)
+
+	cfg.Dumps.Labels.SQL = "SELECT pg_read_file('/etc/liops/config.yaml')"
+	cfg.Dumps.Labels.Table, cfg.Dumps.Labels.DBColumn, cfg.Dumps.Labels.LabelColumn = "", "", ""
+	if labels, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err != nil || labels != nil {
+		t.Errorf("leftover sql must not run: %v, %v", labels, err)
+	}
+	cfg.Dumps.Labels = config.LabelQuery{Database: "central", Table: "tenants;SELECT pg_read_file('x')", DBColumn: "db_name", LabelColumn: "lo_export"}
+	if _, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err == nil {
+		t.Error("function-like identifiers must be refused")
 	}
 }

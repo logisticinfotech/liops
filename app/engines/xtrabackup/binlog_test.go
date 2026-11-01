@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/storage"
@@ -77,36 +78,45 @@ func gunzip(t *testing.T, data []byte) string {
 	return string(plain)
 }
 
+func shipFrom(file, gen string) []Manifest {
+	return []Manifest{{Type: Full, Label: "full", BinlogFile: file, BinlogGen: gen, Start: now, Stop: now}}
+}
+
 func TestShipBinlogs(t *testing.T) {
 	f := newFakeBinlogs(t, "binlog.000005", "binlog.000006", "binlog.000007", "binlog.000008")
 	e, store := binlogEngine(f)
 	ctx := context.Background()
+	backups := shipFrom("binlog.000006", "gen1")
 
 	// The oldest backup starts in binlog.000006: 000005 is of no use, 000008 is still open.
-	res, err := e.ShipBinlogs(ctx, "binlog.000006")
+	res, err := e.ShipBinlogs(ctx, backups)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(res.Shipped, []string{"binlog.000006", "binlog.000007"}) || len(res.Gaps) != 0 {
 		t.Errorf("result = %+v", res)
 	}
-	data, ok := store.Get(BinlogPrefix + "binlog.000007.gz")
+	data, ok := store.Get(Binlog{Name: "binlog.000007", Gen: "gen1"}.Key())
 	if !ok || gunzip(t, data) != "events of binlog.000007" {
 		t.Errorf("stored binlog.000007 = %q (ok=%v)", data, ok)
 	}
 
 	// Nothing new: nothing shipped. After a rotation, the closed file goes up.
-	if res, _ := e.ShipBinlogs(ctx, "binlog.000006"); len(res.Shipped) != 0 {
+	if res, _ := e.ShipBinlogs(ctx, backups); len(res.Shipped) != 0 {
 		t.Errorf("second run shipped %q again", res.Shipped)
 	}
 	if err := e.Rotate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if res, _ := e.ShipBinlogs(ctx, "binlog.000006"); !slices.Equal(res.Shipped, []string{"binlog.000008"}) {
+	if res, _ := e.ShipBinlogs(ctx, backups); !slices.Equal(res.Shipped, []string{"binlog.000008"}) {
 		t.Errorf("after a rotation, shipped %q", res.Shipped)
 	}
-	if names, _ := e.ShippedBinlogs(ctx); !slices.Equal(names, []string{"binlog.000006", "binlog.000007", "binlog.000008"}) {
-		t.Errorf("ShippedBinlogs = %q", names)
+	if names, _ := e.ShippedBinlogs(ctx); !slices.Equal(names, []Binlog{
+		{Name: "binlog.000006", Gen: "gen1"},
+		{Name: "binlog.000007", Gen: "gen1"},
+		{Name: "binlog.000008", Gen: "gen1"},
+	}) {
+		t.Errorf("ShippedBinlogs = %+v", names)
 	}
 }
 
@@ -114,18 +124,41 @@ func TestShipBinlogsTreatsAResetAsAGap(t *testing.T) {
 	// The oldest backup started in binlog.000050; RESET BINARY LOGS started a new chain.
 	f := newFakeBinlogs(t, "binlog.000001", "binlog.000002")
 	e, store := binlogEngine(f)
-	res, err := e.ShipBinlogs(context.Background(), "binlog.000050")
+	res, err := e.ShipBinlogs(context.Background(), shipFrom("binlog.000050", "gen1"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(res.Gaps, []string{"binlog.000050"}) {
 		t.Errorf("gaps = %q", res.Gaps)
 	}
-	if !slices.Equal(res.Shipped, []string{"binlog.000001"}) {
-		t.Errorf("the new chain's closed file should still ship: %+v", res)
+	if len(res.Shipped) != 0 {
+		t.Errorf("nothing of the new chain ships until a catch-up full: %+v", res)
 	}
-	if _, ok := store.Get(BinlogPrefix + "binlog.000001.gz"); !ok {
-		t.Error("binlog.000001 should be in storage")
+	if objs, _ := store.List(context.Background(), ""); len(objs) != 0 {
+		t.Errorf("stored %v", objs)
+	}
+}
+
+func TestShipBinlogsAfterCatchUpFullUsesANewGeneration(t *testing.T) {
+	f := newFakeBinlogs(t, "binlog.000001", "binlog.000002")
+	e, store := binlogEngine(f)
+	ctx := context.Background()
+	old := Manifest{Type: Full, Label: "old", BinlogFile: "binlog.000050", BinlogGen: "gen1", Start: now.Add(-time.Hour), Stop: now.Add(-time.Hour)}
+	store.Add(Binlog{Name: "binlog.000050", Gen: "gen1"}.Key(), []byte("old"), now)
+	catchUp := Manifest{Type: Full, Label: "new", BinlogFile: "binlog.000001", BinlogGen: "gen2", Start: now, Stop: now}
+
+	res, err := e.ShipBinlogs(ctx, []Manifest{old, catchUp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(res.Shipped, []string{"binlog.000001"}) || len(res.Gaps) != 0 {
+		t.Errorf("after catch-up: %+v", res)
+	}
+	if _, ok := store.Get(Binlog{Name: "binlog.000001", Gen: "gen2"}.Key()); !ok {
+		t.Error("the new chain should be stored under its generation")
+	}
+	if _, ok := store.Get(Binlog{Name: "binlog.000001", Gen: "gen1"}.Key()); ok {
+		t.Error("the new chain must not overwrite the old generation")
 	}
 }
 
@@ -133,7 +166,7 @@ func TestShipBinlogsFindsGaps(t *testing.T) {
 	// binlog.000006 was purged from the server before it was shipped.
 	f := newFakeBinlogs(t, "binlog.000007", "binlog.000008")
 	e, _ := binlogEngine(f)
-	res, err := e.ShipBinlogs(context.Background(), "binlog.000005")
+	res, err := e.ShipBinlogs(context.Background(), shipFrom("binlog.000005", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +178,7 @@ func TestShipBinlogsFindsGaps(t *testing.T) {
 func TestShipBinlogsNeedsABackup(t *testing.T) {
 	f := newFakeBinlogs(t, "binlog.000001", "binlog.000002")
 	e, store := binlogEngine(f)
-	if res, err := e.ShipBinlogs(context.Background(), ""); err != nil || len(res.Shipped) != 0 {
+	if res, err := e.ShipBinlogs(context.Background(), nil); err != nil || len(res.Shipped) != 0 {
 		t.Errorf("with no backup, nothing is shipped: %+v, %v", res, err)
 	}
 	if objs, _ := store.List(context.Background(), ""); len(objs) != 0 {
@@ -157,11 +190,40 @@ func TestShipBinlogsChecksTheSize(t *testing.T) {
 	f := newFakeBinlogs(t, "binlog.000001", "binlog.000002")
 	os.WriteFile(filepath.Join(f.dir, "binlog.000001"), []byte("cut"), 0o600) // shorter than MySQL says
 	e, store := binlogEngine(f)
-	if _, err := e.ShipBinlogs(context.Background(), "binlog.000001"); err == nil || !strings.Contains(err.Error(), "MySQL says") {
+	if _, err := e.ShipBinlogs(context.Background(), shipFrom("binlog.000001", "")); err == nil || !strings.Contains(err.Error(), "MySQL says") {
 		t.Errorf("want a size error, got %v", err)
 	}
 	if objs, _ := store.List(context.Background(), ""); len(objs) != 0 {
 		t.Errorf("a short upload must not be kept: %v", objs)
+	}
+}
+
+func TestAssignBinlogGen(t *testing.T) {
+	start := now
+	m := Manifest{BinlogFile: "binlog.000001", Start: start}
+	assignBinlogGen(nil, &m)
+	if m.BinlogGen != start.UTC().Format(labelTime) {
+		t.Errorf("first backup gen = %q", m.BinlogGen)
+	}
+	prev := Manifest{BinlogFile: "binlog.000050", BinlogGen: "gen1"}
+	m = Manifest{BinlogFile: "binlog.000001", Start: start}
+	assignBinlogGen([]Manifest{prev}, &m)
+	if m.BinlogGen == "gen1" || m.BinlogGen == "" {
+		t.Errorf("a reset should start a new generation, got %q", m.BinlogGen)
+	}
+	m = Manifest{BinlogFile: "binlog.000051", Start: start}
+	assignBinlogGen([]Manifest{prev}, &m)
+	if m.BinlogGen != "gen1" {
+		t.Errorf("the same chain keeps the generation, got %q", m.BinlogGen)
+	}
+}
+
+func TestBinlogBeforeIsNumeric(t *testing.T) {
+	if !binlogBefore("binlog.9", "binlog.10") {
+		t.Error("9 should be before 10 numerically (string compare would put 9 after 10)")
+	}
+	if binlogBefore("binlog.000010", "binlog.000002") {
+		t.Error("10 should not be before 2")
 	}
 }
 

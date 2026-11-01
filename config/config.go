@@ -144,57 +144,50 @@ type Dumps struct {
 }
 
 // LabelQuery optionally maps database names to friendly labels (e.g. tenant subdomains).
-// The query must return two text columns: database name, label. Only a single read-only
-// SELECT (or WITH … SELECT) is allowed: the query runs as the database superuser.
+// liops builds SELECT db_column, label_column FROM table itself: leftover sql in a
+// config from before this is ignored and never run.
 type LabelQuery struct {
-	Database string `yaml:"database"`
-	SQL      string `yaml:"sql"`
+	Database    string `yaml:"database"`
+	Table       string `yaml:"table"`
+	DBColumn    string `yaml:"db_column"`
+	LabelColumn string `yaml:"label_column"`
+	SQL         string `yaml:"sql,omitempty"` // leftover free SQL: never executed
 }
 
-// labelSQLWrite matches statements that change data or write files, so a label query
-// cannot be COPY TO PROGRAM, SELECT INTO, or a second statement in disguise.
-var labelSQLWrite = regexp.MustCompile(`(?i)\b(COPY|INTO|INSERT|UPDATE|DELETE|TRUNCATE|CREATE|DROP|ALTER|GRANT|REVOKE|EXECUTE|PERFORM|CALL|DO|LOAD|LOCK|UNLOCK)\b`)
+// labelIdentRe is a table or column name: quoted into the SELECT liops builds.
+var labelIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// CheckLabelSQL reports whether sql is a single read-only SELECT suitable as a label query.
-func CheckLabelSQL(sql string) error {
-	s := strings.TrimSpace(sql)
-	if s == "" {
-		return nil
+// QuoteIdent quotes a table or column name for PostgreSQL (") or MySQL (backticks).
+func QuoteIdent(name string, mysql bool) (string, error) {
+	if !labelIdentRe.MatchString(name) {
+		return "", fmt.Errorf("%q isn't a table or column name (letters, digits and underscores, starting with a letter or underscore)", name)
 	}
-	s = strings.TrimSpace(strings.TrimSuffix(s, ";"))
-	if strings.Contains(s, ";") {
-		return fmt.Errorf("must be a single SELECT (no extra statements)")
+	if mysql {
+		return "`" + name + "`", nil
 	}
-	lead := s
-	for {
-		t := strings.TrimSpace(lead)
-		switch {
-		case strings.HasPrefix(t, "--"):
-			i := strings.IndexByte(t, '\n')
-			if i < 0 {
-				return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
-			}
-			lead = t[i+1:]
-			continue
-		case strings.HasPrefix(t, "/*"):
-			i := strings.Index(t, "*/")
-			if i < 0 {
-				return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
-			}
-			lead = t[i+2:]
-			continue
-		}
-		lead = t
-		break
+	return `"` + name + `"`, nil
+}
+
+// Configured reports whether the four identifier fields are set, so a query can be built.
+func (q LabelQuery) Configured() bool {
+	return q.Database != "" && q.Table != "" && q.DBColumn != "" && q.LabelColumn != ""
+}
+
+// SelectSQL is the quoted SELECT liops runs. Leftover q.SQL is never used.
+func (q LabelQuery) SelectSQL(mysql bool) (string, error) {
+	table, err := QuoteIdent(q.Table, mysql)
+	if err != nil {
+		return "", err
 	}
-	upper := strings.ToUpper(lead)
-	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
-		return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
+	dbCol, err := QuoteIdent(q.DBColumn, mysql)
+	if err != nil {
+		return "", err
 	}
-	if labelSQLWrite.MatchString(lead) {
-		return fmt.Errorf("must be a read-only SELECT (no COPY, INTO, or changes)")
+	labelCol, err := QuoteIdent(q.LabelColumn, mysql)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	return "SELECT " + dbCol + ", " + labelCol + " FROM " + table, nil
 }
 
 // Storage is where both layers are stored.
@@ -449,11 +442,19 @@ func (c *Config) Validate() error {
 		if c.Dumps.Concurrency < 1 || c.Dumps.Concurrency > 8 {
 			add("dumps.concurrency: %d must be between 1 and 8", c.Dumps.Concurrency)
 		}
-		if (c.Dumps.Labels.Database == "") != (c.Dumps.Labels.SQL == "") {
-			add("dumps.labels: set both database and sql, or neither")
+		q := c.Dumps.Labels
+		partial := q.Table != "" || q.DBColumn != "" || q.LabelColumn != ""
+		if partial && !q.Configured() {
+			add("dumps.labels: set database, table, db_column and label_column, or none of them")
 		}
-		if err := CheckLabelSQL(c.Dumps.Labels.SQL); err != nil {
-			add("dumps.labels.sql: %s", err.Error())
+		if q.Configured() {
+			for _, pair := range []struct{ field, name string }{
+				{"table", q.Table}, {"db_column", q.DBColumn}, {"label_column", q.LabelColumn},
+			} {
+				if _, err := QuoteIdent(pair.name, false); err != nil {
+					add("dumps.labels.%s: %s", pair.field, err.Error())
+				}
+			}
 		}
 	}
 

@@ -184,8 +184,14 @@ func (s *Server) readLog(ctx context.Context, source string, n int, filter strin
 }
 
 // openLogFile opens a regular file and refuses to follow a symlink: Laravel's
-// storage/logs is writable by the app user, and serve runs as root.
+// storage/logs is writable by the app user, and serve runs as root. App logs must
+// also stay under the app folder after resolving the directory (storage/logs as a
+// symlink would otherwise be followed).
 func openLogFile(path string) (*os.File, error) {
+	slash := filepath.ToSlash(path)
+	if i := strings.Index(slash, "/storage/logs/"); i >= 0 {
+		return laravel.OpenUnder(path[:i], path)
+	}
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		if err == syscall.ELOOP {

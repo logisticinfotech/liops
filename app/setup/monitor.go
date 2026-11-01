@@ -88,6 +88,13 @@ FROM pg_settings WHERE name = 'shared_preload_libraries'`)
 	return false, fmt.Errorf("PostgreSQL didn't pick up %s after a reload", monitorConfName)
 }
 
+// SharedPreloadPendingRestart reports whether PostgreSQL needs a restart to apply
+// shared_preload_libraries (pg_stat_statements).
+func SharedPreloadPendingRestart(ctx context.Context, c postgres.Cluster) bool {
+	rows, err := c.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
+	return err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"
+}
+
 // preloadLibraries reads shared_preload_libraries, which is empty by default: a prefix
 // keeps that from being an empty (dropped) line.
 func preloadLibraries(ctx context.Context, c postgres.Cluster) (string, error) {

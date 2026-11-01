@@ -110,7 +110,10 @@ func applyForm(cfg *config.Config, section string, f url.Values) error {
 	case sectionMonitor:
 		cfg.Monitor.Enabled = checked("monitor_enabled")
 	case sectionLabels:
-		cfg.Dumps.Labels.Database, cfg.Dumps.Labels.SQL = text("labels_database"), text("labels_sql")
+		cfg.Dumps.Labels.Database = text("labels_database")
+		cfg.Dumps.Labels.Table = text("labels_table")
+		cfg.Dumps.Labels.DBColumn = text("labels_db_column")
+		cfg.Dumps.Labels.LabelColumn = text("labels_label_column")
 	default:
 		return fmt.Errorf("unknown settings section %q", section)
 	}
@@ -206,7 +209,7 @@ func (s *Server) runTest(ctx context.Context, cfg *config.Config, section string
 		}
 		res.OK, res.Message = true, "Sent a test email to "+strings.Join(cfg.Email.To, ", ")+"."
 	case sectionLabels:
-		if cfg.Dumps.Labels.SQL == "" {
+		if !cfg.Dumps.Labels.Configured() {
 			res.Message = "There's no label query to test."
 			return res
 		}

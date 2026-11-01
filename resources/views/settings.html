@@ -106,8 +106,9 @@
 </div>{{end}}
 {{with .Redis}}<div class="panel" id="redis">
   <h2>Redis</h2>
-  {{if .Error}}
-  <p>The monitor reads Redis's own numbers (memory, evictions, hit ratio, the slow log) as a Redis user of its own, <code>liops-monitor</code>, allowed only <code>INFO</code>, <code>SLOWLOG GET</code> and <code>PING</code>: no keys, no values, no config. Set up Redis access adds that user and saves it (<code>ACL SAVE</code>, or <code>CONFIG REWRITE</code> without an ACL file).</p>
+  {{if or .Error .NeedsSetup}}
+  {{if .NeedsSetup}}<p>The monitor's Redis user can still read the slow log (from an earlier setup). Set up Redis access again to drop that permission: it is allowed only <code>INFO</code>, <code>PING</code>, and queue lengths, never keys, values, config or <code>SLOWLOG</code>.</p>
+  {{else}}<p>The monitor reads Redis's own numbers (memory, evictions, hit ratio) as a Redis user of its own, <code>liops-monitor</code>, allowed only <code>INFO</code>, <code>PING</code>, and queue lengths: no keys, no values, no config, no slow log. Set up Redis access adds that user and saves it (<code>ACL SAVE</code>, or <code>CONFIG REWRITE</code> without an ACL file).</p>{{end}}
   <form method="post" action="/settings/monitor/redis"><input type="hidden" name="csrf" value="{{$.CSRF}}">
     {{if $.Data.NeedRedisPassword}}<label>Redis password (requirepass)<input type="password" name="redis_password" autocomplete="off"></label><p class="hint">Used once, through redis-cli's input (not its command line), and never stored.</p>{{end}}
     <div class="actions"><button>Set up Redis access</button></div></form>

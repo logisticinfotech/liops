@@ -129,7 +129,7 @@ func TestValidateChecksSchedulesAndValues(t *testing.T) {
 	c.Server.Timezone = "Mars/Olympus"
 	c.Storage.S3.Endpoint = "https://example.r2.cloudflarestorage.com"
 	c.Email.To = []string{"not-an-address"}
-	c.Dumps.Labels.Database = "central" // sql missing
+	c.Dumps.Labels.Table = "tenants" // other label fields missing
 	c.Email.TLS = "none"
 	c.PgBackRest.Stanza = "app/prod"
 	c.Postgres.BinDir = "opt/pg/bin"
@@ -269,25 +269,39 @@ func TestIntervalPresetsAreValid(t *testing.T) {
 	}
 }
 
-func TestCheckLabelSQL(t *testing.T) {
-	if err := CheckLabelSQL("SELECT db_name, subdomain FROM tenants"); err != nil {
-		t.Errorf("a two-column SELECT should be allowed: %v", err)
+func TestLabelQueryBuildsQuotedSelect(t *testing.T) {
+	q := LabelQuery{Database: "central", Table: "tenants", DBColumn: "db_name", LabelColumn: "subdomain"}
+	got, err := q.SelectSQL(false)
+	if err != nil || got != `SELECT "db_name", "subdomain" FROM "tenants"` {
+		t.Errorf("postgres: %q, %v", got, err)
 	}
-	if err := CheckLabelSQL("WITH t AS (SELECT db_name, subdomain FROM tenants) SELECT * FROM t"); err != nil {
-		t.Errorf("WITH … SELECT should be allowed: %v", err)
+	got, err = q.SelectSQL(true)
+	if err != nil || got != "SELECT `db_name`, `subdomain` FROM `tenants`" {
+		t.Errorf("mysql: %q, %v", got, err)
 	}
-	for sql, want := range map[string]string{
-		"SELECT 1; SELECT 2":                 "single SELECT",
-		"COPY tenants TO PROGRAM 'id'":       "SELECT",
-		"SELECT db_name INTO outfile FROM t": "read-only",
-		"SELECT 1; COPY t TO PROGRAM 'x'":    "single SELECT",
-		"DELETE FROM tenants":                "SELECT",
-		"DO $$ BEGIN PERFORM 1; END $$":      "SELECT",
-	} {
-		err := CheckLabelSQL(sql)
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: got %v, want it to mention %q", sql, err, want)
+	for _, name := range []string{"pg_read_file", "lo_export", "tenants;DROP", "pg_read_file('x')"} {
+		q := LabelQuery{Database: "central", Table: name, DBColumn: "db_name", LabelColumn: "subdomain"}
+		sql, err := q.SelectSQL(false)
+		if name == "pg_read_file" || name == "lo_export" {
+			if err != nil || !strings.Contains(sql, `"`+name+`"`) || strings.Contains(sql, name+"(") {
+				t.Errorf("%s should be a quoted identifier, not a function call: %q, %v", name, sql, err)
+			}
+			continue
 		}
+		if err == nil {
+			t.Errorf("%q should be refused as an identifier, got %q", name, sql)
+		}
+	}
+}
+
+func TestValidateIgnoresLeftoverLabelSQL(t *testing.T) {
+	c := complete()
+	c.Dumps.Labels = LabelQuery{Database: "central", SQL: "SELECT pg_read_file('/etc/liops/config.yaml')"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("leftover sql must not fail Validate: %v", err)
+	}
+	if c.Dumps.Labels.Configured() {
+		t.Error("sql alone must not count as configured")
 	}
 }
 

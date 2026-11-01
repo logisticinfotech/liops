@@ -200,7 +200,6 @@ type redisData struct {
 	Facts    redisFacts
 	Findings []string
 	Sessions []appSessions
-	Slowlog  []monitor.SlowCommand
 	Keys     map[string]float64
 	Charts   []chartBox
 	Range    string
@@ -213,7 +212,7 @@ type appSessions struct {
 }
 
 // redisPage is the Redis page: memory against maxmemory, evictions, hit ratio,
-// persistence, the slow log, and the session checks of the apps that use it.
+// persistence, and the session checks of the apps that use it.
 func (s *Server) redisPage(w http.ResponseWriter, r *http.Request) {
 	d := redisData{Range: r.URL.Query().Get("range"), Ranges: monitorRanges}
 	span, ok := monitor.Ranges[d.Range]
@@ -243,7 +242,7 @@ func (s *Server) redisPage(w http.ResponseWriter, r *http.Request) {
 		render()
 		return
 	}
-	d.Facts, d.Slowlog = s.redisFacts(ctx), res.Slowlog
+	d.Facts = s.redisFacts(ctx)
 	d.Findings = redisFindings(d.Facts)
 	for _, a := range laravel.FindApps(s.NginxDir, s.Caddyfile) {
 		if f := sessionFindings(laravel.CheckApp(a), d.Facts); len(f) > 0 {

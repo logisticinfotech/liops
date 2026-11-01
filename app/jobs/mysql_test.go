@@ -160,8 +160,10 @@ func TestMySQLBinlogs(t *testing.T) {
 	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
 		t.Fatalf("binlogs: %v\n%s", err, w.log.String())
 	}
-	if got := w.keys(xtrabackup.BinlogPrefix); !slices.Equal(got, []string{"xtrabackup/binlog/binlog.000003.gz"}) {
-		t.Errorf("stored binlogs = %q", got)
+	list, _ := w.runner.XtraBackup.Backups(ctx)
+	want := xtrabackup.Binlog{Name: "binlog.000003", Gen: list[0].BinlogGen}.Key()
+	if got := w.keys(xtrabackup.BinlogPrefix); !slices.Equal(got, []string{want}) {
+		t.Errorf("stored binlogs = %q, want %q", got, want)
 	}
 	if v, _ := w.runner.State.GetMeta(MetaBinlogShippedAt); v == "" {
 		t.Error("a run that worked should be recorded in the state meta")
@@ -252,10 +254,19 @@ func TestMySQLBinlogGapRetriesFailedFull(t *testing.T) {
 	if err := w.runner.Run(ctx, Binlogs, Scheduled); err == nil {
 		t.Fatal("the catch-up full should fail")
 	}
-	if v, _ := w.runner.State.GetMeta(metaBinlogCatchUp); v != "1" {
+	if v, _ := w.runner.State.GetMeta(metaBinlogCatchUp); v == "" {
 		t.Errorf("catch-up should stay needed after a failed full, got %q", v)
 	}
 	w.failBack = false
+	runs, _ := w.runner.State.Runs(Full, 10)
+	before := len(runs)
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("backoff: %v\n%s", err, w.log.String())
+	}
+	if runs, _ = w.runner.State.Runs(Full, 10); len(runs) != before {
+		t.Errorf("a failed catch-up must not retry on the next binlog run: %+v", runs)
+	}
+	w.advance(time.Hour)
 	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
 		t.Fatalf("retry: %v\n%s", err, w.log.String())
 	}
@@ -271,7 +282,7 @@ func TestMySQLBinlogGapRetriesFailedFull(t *testing.T) {
 	if gaps != 1 {
 		t.Errorf("the gap is emailed once: %q", w.subjects())
 	}
-	runs, _ := w.runner.State.Runs(Full, 10)
+	runs, _ = w.runner.State.Runs(Full, 10)
 	var triggers []string
 	for _, r := range runs {
 		triggers = append(triggers, r.Trigger+"/"+r.Status)

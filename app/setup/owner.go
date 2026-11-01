@@ -42,7 +42,7 @@ func claimFolder(ctx context.Context, store storage.Store, name, engine, identit
 		return nil // ours
 	}
 
-	used, err := store.Any(ctx, "")
+	used, err := folderInUse(ctx, store)
 	if err != nil {
 		return fmt.Errorf("couldn't check whether backup name %q is already used in the bucket: %w", name, err)
 	}
@@ -63,6 +63,21 @@ func claimFolder(ctx context.Context, store storage.Store, name, engine, identit
 		return fmt.Errorf("record this server as the owner of backup name %q: %w", name, err)
 	}
 	return nil
+}
+
+// folderInUse reports whether the server's folder already holds objects, ignoring a
+// leftover storage probe (liops-probe/) that would otherwise look like unclaimed backups.
+func folderInUse(ctx context.Context, store storage.Store) (bool, error) {
+	objs, err := store.List(ctx, "")
+	if err != nil {
+		return false, err
+	}
+	for _, o := range objs {
+		if !strings.HasPrefix(o.Key, storage.ProbePrefix) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // describeOwner turns a marker name (mysql-<uuid>) into words for an error message.

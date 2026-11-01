@@ -136,7 +136,7 @@ func runMonitorSetup(args []string, out io.Writer) error {
 		}
 	}
 
-	fmt.Fprintln(out, "Redis (the monitor's ACL user: INFO, SLOWLOG GET, and queue lengths):")
+	fmt.Fprintln(out, "Redis (the monitor's ACL user: INFO, PING, and queue lengths):")
 	if r := monitor.FindRedis(monitor.DefaultRedis); r != nil && reachable(r.Addr) {
 		fmt.Fprintln(out, "  ACL user liops-monitor at "+r.Addr)
 		if *apply {

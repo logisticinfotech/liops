@@ -21,8 +21,43 @@ import (
 // RESET BINARY LOGS (or a renamed log_bin) started a new chain.
 var errBinlogReset = errors.New("binlog numbers went backwards (RESET BINARY LOGS?)")
 
-// BinlogPrefix is where binlogs are stored, gzipped: xtrabackup/binlog/<file>.gz.
+// BinlogPrefix is where binlogs are stored, gzipped. Current chains live under
+// xtrabackup/binlog/<generation>/<file>.gz; a chain from before generations used
+// xtrabackup/binlog/<file>.gz (Binlog.Gen empty).
 const BinlogPrefix = "xtrabackup/binlog/"
+
+// Binlog is one shipped binlog file.
+type Binlog struct {
+	Name string // binlog.000012
+	Gen  string // empty: the legacy flat prefix
+}
+
+// Key is the object key of this binlog in storage.
+func (b Binlog) Key() string {
+	if b.Gen == "" {
+		return BinlogPrefix + b.Name + ".gz"
+	}
+	return BinlogPrefix + b.Gen + "/" + b.Name + ".gz"
+}
+
+// ParseBinlogKey reads a Binlog from an object key under BinlogPrefix.
+func ParseBinlogKey(key string) (Binlog, bool) {
+	rest, ok := strings.CutPrefix(key, BinlogPrefix)
+	if !ok {
+		return Binlog{}, false
+	}
+	rest = strings.TrimSuffix(rest, ".gz")
+	if rest == "" || rest == strings.TrimSuffix(key, ".gz") {
+		return Binlog{}, false
+	}
+	if gen, name, found := strings.Cut(rest, "/"); found {
+		if gen == "" || name == "" || strings.Contains(name, "/") {
+			return Binlog{}, false
+		}
+		return Binlog{Name: name, Gen: gen}, true
+	}
+	return Binlog{Name: rest}, true
+}
 
 // BinlogStatus is the binlog MySQL is writing to now.
 type BinlogStatus struct {
@@ -69,13 +104,14 @@ type ShipResult struct {
 	Gaps []string
 }
 
-// ShipBinlogs uploads every closed binlog from oldestNeeded on (the binlog the oldest
-// kept backup starts in) that isn't in storage yet. Older binlogs can't be replayed
-// onto any backup, so they aren't shipped; with no backup yet (oldestNeeded empty),
-// nothing is.
-func (e *Engine) ShipBinlogs(ctx context.Context, oldestNeeded string) (ShipResult, error) {
+// ShipBinlogs uploads every closed binlog a restore of the current chain can need.
+// A RESET BINARY LOGS (binlog numbers went backwards) is a gap: nothing is shipped
+// until a catch-up full starts a new generation, so the new chain's names never
+// collide with the old one in storage.
+func (e *Engine) ShipBinlogs(ctx context.Context, backups []Manifest) (ShipResult, error) {
 	var res ShipResult
-	if oldestNeeded == "" {
+	latest := Last(backups, "")
+	if latest == nil {
 		return res, nil
 	}
 	rows, err := e.Instance.Query(ctx, "", "SHOW BINARY LOGS")
@@ -98,29 +134,28 @@ func (e *Engine) ShipBinlogs(ctx context.Context, oldestNeeded string) (ShipResu
 	}
 	current := rows[len(rows)-1][0] // still being written: shipped once it is closed
 
+	if binlogBefore(current, latest.BinlogFile) {
+		res.Gaps = append(res.Gaps, latest.BinlogFile)
+		return res, nil
+	}
+
+	oldest := oldestInGen(backups, latest.BinlogGen)
+	names, err := binlogRange(oldest.BinlogFile, current)
+	if err != nil {
+		return res, err
+	}
+
 	stored, err := e.Store.List(ctx, BinlogPrefix)
 	if err != nil {
 		return res, err
 	}
 	shipped := map[string]bool{}
 	for _, o := range stored {
-		shipped[strings.TrimSuffix(strings.TrimPrefix(o.Key, BinlogPrefix), ".gz")] = true
+		if b, ok := ParseBinlogKey(o.Key); ok && b.Gen == latest.BinlogGen {
+			shipped[b.Name] = true
+		}
 	}
 
-	names, err := binlogRange(oldestNeeded, current)
-	if errors.Is(err, errBinlogReset) {
-		// The live chain is a new sequence: don't invent names from the old number up,
-		// ship what is on the server, and report the old starting file as a gap so a
-		// catch-up full can start a restore chain that uses the new binlogs.
-		res.Gaps = append(res.Gaps, oldestNeeded)
-		for _, r := range rows {
-			if r[0] != current {
-				names = append(names, r[0])
-			}
-		}
-	} else if err != nil {
-		return res, err
-	}
 	var dir string
 	for _, name := range names {
 		if shipped[name] {
@@ -136,13 +171,37 @@ func (e *Engine) ShipBinlogs(ctx context.Context, oldestNeeded string) (ShipResu
 				return res, err
 			}
 		}
-		if err := e.shipBinlog(ctx, filepath.Join(dir, name), size); err != nil {
+		b := Binlog{Name: name, Gen: latest.BinlogGen}
+		if err := e.shipBinlog(ctx, filepath.Join(dir, name), size, b); err != nil {
 			return res, fmt.Errorf("ship %s: %w", name, err)
 		}
 		res.Shipped = append(res.Shipped, name)
 		res.Bytes += size
 	}
 	return res, nil
+}
+
+func oldestInGen(backups []Manifest, gen string) Manifest {
+	var oldest Manifest
+	for _, m := range backups {
+		if m.BinlogGen != gen {
+			continue
+		}
+		if oldest.BinlogFile == "" || binlogBefore(m.BinlogFile, oldest.BinlogFile) {
+			oldest = m
+		}
+	}
+	return oldest
+}
+
+// binlogBefore reports whether a is a lower binlog number than b.
+func binlogBefore(a, b string) bool {
+	_, na, _, erra := splitBinlogName(a)
+	_, nb, _, errb := splitBinlogName(b)
+	if erra == nil && errb == nil {
+		return na < nb
+	}
+	return a < b
 }
 
 // binlogDir is the directory MySQL writes its binlogs to.
@@ -155,13 +214,13 @@ func (e *Engine) binlogDir(ctx context.Context) (string, error) {
 }
 
 // shipBinlog uploads one closed binlog, gzipped, and checks that all of it was read.
-func (e *Engine) shipBinlog(ctx context.Context, path string, size int64) error {
+func (e *Engine) shipBinlog(ctx context.Context, path string, size int64, b Binlog) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	key := BinlogPrefix + filepath.Base(path) + ".gz"
+	key := b.Key()
 	_, err = dumps.Upload(ctx, e.Store, key, func(ctx context.Context, w io.Writer) error {
 		zw := gzip.NewWriter(w)
 		n, err := io.Copy(zw, f)
@@ -212,16 +271,25 @@ func splitBinlogName(name string) (base string, n, width int, err error) {
 	return name[:i], n, len(name) - i - 1, nil
 }
 
-// ShippedBinlogs returns the binlogs in storage, oldest first.
-func (e *Engine) ShippedBinlogs(ctx context.Context) ([]string, error) {
+// ShippedBinlogs returns the binlogs in storage, oldest first (by generation, then number).
+func (e *Engine) ShippedBinlogs(ctx context.Context) ([]Binlog, error) {
 	objs, err := e.Store.List(ctx, BinlogPrefix)
 	if err != nil {
 		return nil, err
 	}
-	var names []string
+	var names []Binlog
 	for _, o := range objs {
-		names = append(names, strings.TrimSuffix(strings.TrimPrefix(o.Key, BinlogPrefix), ".gz"))
+		b, ok := ParseBinlogKey(o.Key)
+		if !ok {
+			continue
+		}
+		names = append(names, b)
 	}
-	sort.Strings(names) // zero-padded numbers sort in order
+	sort.Slice(names, func(i, j int) bool {
+		if names[i].Gen != names[j].Gen {
+			return names[i].Gen < names[j].Gen
+		}
+		return binlogBefore(names[i].Name, names[j].Name)
+	})
 	return names, nil
 }

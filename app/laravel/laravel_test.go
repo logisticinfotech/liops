@@ -80,10 +80,26 @@ func TestCheckAppMissingKeysUseLaravelDefaults(t *testing.T) {
 	for _, f := range c.Findings {
 		text += f.Text + "\n"
 	}
-	for _, want := range []string{"LOG_LEVEL is debug", "QUEUE_CONNECTION is sync"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("omitted keys should use Laravel's defaults: missing %q in\n%s", want, text)
-		}
+	if !strings.Contains(text, "LOG_LEVEL is debug") {
+		t.Errorf("omitted LOG_LEVEL should use Laravel's debug default:\n%s", text)
+	}
+	if strings.Contains(text, "QUEUE_CONNECTION is sync") {
+		t.Errorf("omitted QUEUE_CONNECTION should use Laravel 11's database default, not sync:\n%s", text)
+	}
+
+	os.MkdirAll(filepath.Join(a.Dir, "config"), 0o755)
+	os.WriteFile(filepath.Join(a.Dir, "config", "queue.php"), []byte("<?php return ['default' => env('QUEUE_CONNECTION', 'sync')];\n"), 0o644)
+	os.WriteFile(filepath.Join(a.Dir, "config", "logging.php"), []byte("<?php return ['level' => env('LOG_LEVEL', 'error')];\n"), 0o644)
+	c = CheckApp(a)
+	text = ""
+	for _, f := range c.Findings {
+		text += f.Text + "\n"
+	}
+	if !strings.Contains(text, "QUEUE_CONNECTION is sync") {
+		t.Errorf("config/queue.php default sync should be a problem:\n%s", text)
+	}
+	if strings.Contains(text, "LOG_LEVEL is debug") {
+		t.Errorf("config/logging.php default error should not flag debug:\n%s", text)
 	}
 }
 
@@ -118,6 +134,22 @@ func TestErrors(t *testing.T) {
 	}
 	if groups[0].Where != "vendor/laravel/framework/src/Illuminate/Database/Connection.php:829" || groups[1].Where != "Payment gateway timeout for order N" {
 		t.Errorf("where = %q, %q", groups[0].Where, groups[1].Where)
+	}
+}
+
+func TestErrorsRefusesSymlinkedLogsDir(t *testing.T) {
+	a := newApp(t, "")
+	outside := t.TempDir()
+	now := time.Now()
+	ts := now.Format("2006-01-02 15:04:05")
+	os.WriteFile(filepath.Join(outside, "laravel.log"), []byte("["+ts+"] production.ERROR: stolen secret\n"), 0o644)
+	logs := filepath.Join(a.Dir, "storage", "logs")
+	os.RemoveAll(logs)
+	if err := os.Symlink(outside, logs); err != nil {
+		t.Fatal(err)
+	}
+	if groups := Errors(a, now.Add(-time.Hour)); len(groups) != 0 {
+		t.Errorf("must not follow a symlinked storage/logs: %+v", groups)
 	}
 }
 

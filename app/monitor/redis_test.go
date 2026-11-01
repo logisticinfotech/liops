@@ -14,10 +14,11 @@ import (
 
 // fakeRedis answers like Redis to the monitor's user, with INFO counters the test sets.
 type fakeRedis struct {
-	mu      sync.Mutex
-	evicted int
-	noUser  bool
-	cmds    []string
+	mu           sync.Mutex
+	evicted      int
+	noUser       bool
+	allowSlowlog bool
+	cmds         []string
 }
 
 func (f *fakeRedis) serve(t *testing.T) string {
@@ -54,7 +55,7 @@ func (f *fakeRedis) conn(c net.Conn) {
 		}
 		f.mu.Lock()
 		f.cmds = append(f.cmds, strings.Join(words, " "))
-		evicted, noUser := f.evicted, f.noUser
+		evicted, noUser, allowSlowlog := f.evicted, f.noUser, f.allowSlowlog
 		f.mu.Unlock()
 		switch strings.ToUpper(words[0]) {
 		case "AUTH":
@@ -71,7 +72,11 @@ func (f *fakeRedis) conn(c net.Conn) {
 		case "ZCARD":
 			fmt.Fprint(c, ":3\r\n")
 		case "SLOWLOG":
-			fmt.Fprint(c, "*1\r\n*6\r\n:1\r\n:1793400000\r\n:25000\r\n*2\r\n$4\r\nKEYS\r\n$9\r\nsession:*\r\n$15\r\n127.0.0.1:50000\r\n$0\r\n\r\n")
+			if allowSlowlog {
+				fmt.Fprint(c, "*0\r\n")
+			} else {
+				fmt.Fprint(c, "-NOPERM this user has no permissions to run the 'slowlog' command\r\n")
+			}
 		default:
 			fmt.Fprint(c, "-NOPERM this user has no permissions to run this command\r\n")
 		}
@@ -108,13 +113,12 @@ func TestRedis(t *testing.T) {
 	if st := m.redis.status; st.Policy != "allkeys-lru" || !st.LastSave.IsZero() || st.AOF || st.Version != "7.2.4" {
 		t.Errorf("status = %+v (rdb_saves 0 means it never saved)", st)
 	}
-	slow, err := m.RedisSlowlog(ctx)
-	if err != nil || len(slow) != 1 || slow[0].MS != 25 || strings.Join(slow[0].Args, " ") != "KEYS session:*" {
-		t.Errorf("slowlog = %+v, %v", slow, err)
+	if st := m.redis.status; st.NeedsSetup {
+		t.Errorf("restricted ACL should not need setup: %+v", st)
 	}
 	for _, c := range f.cmds {
-		if !strings.HasPrefix(c, "AUTH liops-monitor") && c != "INFO" && c != "SLOWLOG GET 20" && !strings.Contains(c, "queues:") {
-			t.Errorf("the monitor should only send AUTH, INFO and SLOWLOG GET, not %q", c)
+		if !strings.HasPrefix(c, "AUTH liops-monitor") && c != "INFO" && c != "SLOWLOG GET 0" && !strings.Contains(c, "queues:") {
+			t.Errorf("the monitor should only send AUTH, INFO and a SLOWLOG probe, not %q", c)
 		}
 	}
 
@@ -135,6 +139,17 @@ func TestRedis(t *testing.T) {
 	m.readRedis(ctx)
 	if !m.redis.status.Absent {
 		t.Errorf("absent: %+v", m.redis.status)
+	}
+}
+
+func TestRedisNeedsSetupWhenSlowlogStillAllowed(t *testing.T) {
+	f := &fakeRedis{allowSlowlog: true}
+	addr := f.serve(t)
+	m, _ := newDBMonitor(t, &fakeMySQL{})
+	m.Redis = FindRedis(addr)
+	m.readRedis(context.Background())
+	if st := m.redis.status; !st.NeedsSetup || st.Error != "" {
+		t.Errorf("old ACL with SLOWLOG GET should need setup: %+v", st)
 	}
 }
 

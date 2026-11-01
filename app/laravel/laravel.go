@@ -245,7 +245,7 @@ func CheckApp(a App) Check {
 	if production {
 		logLevel := env["LOG_LEVEL"]
 		if logLevel == "" {
-			logLevel = "debug" // Laravel's default when the key is omitted
+			logLevel = phpEnvDefault(filepath.Join(a.Dir, "config", "logging.php"), "LOG_LEVEL", "debug")
 		}
 		if strings.EqualFold(logLevel, "debug") {
 			bad("LOG_LEVEL is debug in production: logs grow fast and every line costs disk writes. Use warning or error.")
@@ -253,7 +253,7 @@ func CheckApp(a App) Check {
 	}
 	queue := strings.ToLower(env["QUEUE_CONNECTION"])
 	if queue == "" {
-		queue = "sync" // Laravel's default when the key is omitted
+		queue = strings.ToLower(phpEnvDefault(filepath.Join(a.Dir, "config", "queue.php"), "QUEUE_CONNECTION", "database"))
 	}
 	switch queue {
 	case "sync":
@@ -309,6 +309,19 @@ func or(v, def string) string {
 	return v
 }
 
+// phpEnvDefault reads env('KEY', 'fallback') from a Laravel config file.
+func phpEnvDefault(path, key, fallback string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fallback
+	}
+	re := regexp.MustCompile(`env\(\s*['"]` + regexp.QuoteMeta(key) + `['"]\s*,\s*['"]([^'"]*)['"]`)
+	if m := re.FindSubmatch(data); len(m) == 2 {
+		return string(m[1])
+	}
+	return fallback
+}
+
 // ErrorGroup is one kind of error in an app's log: its exception class and where it
 // was thrown, or the message's shape.
 type ErrorGroup struct {
@@ -339,7 +352,7 @@ func Errors(a App, since time.Time) []ErrorGroup {
 		if budget <= 0 || modTime(f).Before(since) {
 			break
 		}
-		budget -= scanLog(f, budget, since, groups)
+		budget -= scanLog(a.Dir, f, budget, since, groups)
 	}
 	out := make([]ErrorGroup, 0, len(groups))
 	for _, g := range groups {
@@ -356,8 +369,8 @@ func modTime(path string) time.Time {
 	return time.Time{}
 }
 
-func scanLog(path string, budget int64, since time.Time, groups map[string]*ErrorGroup) int64 {
-	f, err := os.Open(path)
+func scanLog(root, path string, budget int64, since time.Time, groups map[string]*ErrorGroup) int64 {
+	f, err := OpenUnder(root, path)
 	if err != nil {
 		return 0
 	}

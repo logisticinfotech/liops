@@ -27,9 +27,9 @@ func TestPlanRetention(t *testing.T) {
 		full := backup(Full, age, i*10+1, "")
 		backups = append(backups, full, backup(Diff, age-1, i*10+5, full.Label))
 	}
-	var binlogs []string
+	var binlogs []Binlog
 	for n := 1; n <= 60; n++ {
-		binlogs = append(binlogs, fmt.Sprintf("binlog.%06d", n))
+		binlogs = append(binlogs, Binlog{Name: fmt.Sprintf("binlog.%06d", n)})
 	}
 	plan := PlanRetention(backups, nil, binlogs, now, days(30))
 
@@ -50,7 +50,7 @@ func TestPlanRetention(t *testing.T) {
 		t.Errorf("deleted backups %q, want %q", plan.Backups, want)
 	}
 	if want := binlogs[:10]; !slices.Equal(plan.Binlogs, want) {
-		t.Errorf("deleted binlogs %q, want %q", plan.Binlogs, want)
+		t.Errorf("deleted binlogs %+v, want %+v", plan.Binlogs, want)
 	}
 }
 
@@ -59,16 +59,37 @@ func TestPlanRetentionKeepsTheNewestFull(t *testing.T) {
 	old := backup(Full, 90, 1, "")
 	older := backup(Full, 120, 1, "")
 	diff := backup(Diff, 89, 2, old.Label)
-	plan := PlanRetention([]Manifest{older, old, diff}, nil, []string{"binlog.000001"}, now, days(30))
+	plan := PlanRetention([]Manifest{older, old, diff}, nil, []Binlog{{Name: "binlog.000001"}}, now, days(30))
 	if !slices.Equal(plan.Backups, []string{older.Label}) || len(plan.Binlogs) != 0 {
 		t.Errorf("plan = %+v", plan)
+	}
+}
+
+func TestPlanRetentionDropsAnOldGeneration(t *testing.T) {
+	old := backup(Full, 90, 50, "")
+	old.BinlogGen = "gen1"
+	anchor := backup(Full, 40, 1, "")
+	anchor.BinlogGen = "gen2"
+	neu := backup(Full, 1, 2, "")
+	neu.BinlogGen = "gen2"
+	binlogs := []Binlog{
+		{Name: "binlog.000050", Gen: "gen1"},
+		{Name: "binlog.000051", Gen: "gen1"},
+		{Name: "binlog.000001", Gen: "gen2"},
+	}
+	plan := PlanRetention([]Manifest{old, anchor, neu}, nil, binlogs, now, days(30))
+	if !slices.Equal(plan.Backups, []string{old.Label}) {
+		t.Errorf("deleted backups %q, want the expired generation's full", plan.Backups)
+	}
+	if !slices.Equal(plan.Binlogs, []Binlog{{Name: "binlog.000050", Gen: "gen1"}, {Name: "binlog.000051", Gen: "gen1"}}) {
+		t.Errorf("deleted binlogs %+v, want the old generation", plan.Binlogs)
 	}
 }
 
 func TestPlanRetentionCleansUpFailedAttempts(t *testing.T) {
 	recent := now.Add(-time.Hour).Format(labelTime) + "-full" // perhaps still running
 	stale := now.Add(-days(2)).Format(labelTime) + "-diff"
-	plan := PlanRetention(nil, []string{recent, stale}, []string{"binlog.000001"}, now, days(30))
+	plan := PlanRetention(nil, []string{recent, stale}, []Binlog{{Name: "binlog.000001"}}, now, days(30))
 	if !slices.Equal(plan.Incomplete, []string{stale}) {
 		t.Errorf("incomplete to delete = %q, want only the one older than a day", plan.Incomplete)
 	}
@@ -90,7 +111,7 @@ func TestApplyRetention(t *testing.T) {
 	if err != nil || !slices.Equal(incomplete, []string{"2026-10-01T000000Z-full"}) {
 		t.Fatalf("Incomplete = %q, %v", incomplete, err)
 	}
-	if err := e.Apply(ctx, RetentionPlan{Backups: []string{full.Label, diff.Label}, Incomplete: incomplete, Binlogs: []string{"binlog.000001"}}); err != nil {
+	if err := e.Apply(ctx, RetentionPlan{Backups: []string{full.Label, diff.Label}, Incomplete: incomplete, Binlogs: []Binlog{{Name: "binlog.000001"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if objs, _ := store.List(ctx, ""); len(objs) != 0 {

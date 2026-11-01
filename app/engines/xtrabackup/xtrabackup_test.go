@@ -80,7 +80,7 @@ func TestFullThenDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if full.Label != "2026-10-25T013100Z-full" || full.ToLSN != 1000 || full.BinlogFile != "binlog.000008" || full.BinlogPos != 198 {
+	if full.Label != "2026-10-25T013100Z-full" || full.ToLSN != 1000 || full.BinlogFile != "binlog.000008" || full.BinlogPos != 198 || full.BinlogGen == "" {
 		t.Errorf("full = %+v", full)
 	}
 	if full.GTIDs != "a102517a-d2e9-11f1-b24f-525400707196:1-2,b203628b-d2e9-11f1-b24f-525400707196:1-7" || full.ToolVersion != "8.4.0-7" {

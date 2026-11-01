@@ -182,6 +182,8 @@ type RedisStatus struct {
 	AOF      bool      `json:"aof"`
 	// Exposed: it listens on an address other machines can reach.
 	Exposed string `json:"exposed,omitempty"`
+	// NeedsSetup: the ACL user can still run SLOWLOG GET (from before that was dropped).
+	NeedsSetup bool `json:"needs_setup,omitempty"`
 }
 
 // redisState is the monitor's memory of Redis between readings.
@@ -199,6 +201,11 @@ func (m *Monitor) readRedis(ctx context.Context) {
 	now := m.Now()
 	st := RedisStatus{Addr: m.Redis.Addr, Checked: now, Exposed: m.redisExposed()}
 	replies, err := m.Redis.redisCommands(ctx, []string{"INFO"})
+	if err == nil {
+		if _, serr := m.Redis.redisCommands(ctx, []string{"SLOWLOG", "GET", "0"}); serr == nil {
+			st.NeedsSetup = true
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.redis == nil {
@@ -322,48 +329,6 @@ func listeningOn(procNetTCP string, port int) string {
 	return ""
 }
 
-// SlowCommand is one entry of Redis's slow log. Args can hold keys and values: read live
-// for a page, never stored.
-type SlowCommand struct {
-	At   time.Time `json:"at"`
-	MS   float64   `json:"ms"`
-	Args []string  `json:"args"`
-}
-
-// RedisSlowlog reads Redis's slow log, live. The UI does not call this: SLOWLOG
-// arguments are real keys and values, and the monitor user is not allowed to read it.
-func (m *Monitor) RedisSlowlog(ctx context.Context) ([]SlowCommand, error) {
-	if m.Redis == nil {
-		return nil, errors.New("no Redis found")
-	}
-	replies, err := m.Redis.redisCommands(ctx, []string{"SLOWLOG", "GET", "20"})
-	if err != nil {
-		return nil, err
-	}
-	entries, _ := replies[0].([]any)
-	var out []SlowCommand
-	for _, e := range entries {
-		f, ok := e.([]any)
-		if !ok || len(f) < 4 {
-			continue
-		}
-		at, _ := f[1].(int64)
-		us, _ := f[2].(int64)
-		var args []string
-		if a, ok := f[3].([]any); ok {
-			for _, x := range a {
-				s, _ := x.(string)
-				if len(s) > 80 {
-					s = s[:77] + "…"
-				}
-				args = append(args, s)
-			}
-		}
-		out = append(out, SlowCommand{At: time.Unix(at, 0), MS: float64(us) / 1000, Args: args})
-	}
-	return out, nil
-}
-
 // FindRedis returns the Redis to read at addr; until something listens there it's
 // reported as absent, so one installed later is picked up.
 func FindRedis(addr string) *RedisServer {
@@ -394,11 +359,10 @@ func (m *Monitor) redisLoop(ctx context.Context) {
 
 // RedisResponse is the Redis page's data: nil Status when there's no Redis.
 type RedisResponse struct {
-	Status  *RedisStatus  `json:"status"`
-	Slowlog []SlowCommand `json:"slowlog,omitempty"`
+	Status *RedisStatus `json:"status"`
 }
 
-// Redis returns what the monitor knows about Redis, and its slow log read live.
+// Redis returns what the monitor knows about Redis.
 func (c *Client) Redis(ctx context.Context) (RedisResponse, error) {
 	var out RedisResponse
 	return out, c.get(ctx, "/v1/redis", &out)

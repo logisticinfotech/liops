@@ -616,8 +616,7 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 	})
 	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(monitor.RedisResponse{
-			Status:  &monitor.RedisStatus{Addr: "127.0.0.1:6379", Version: "7.2.4", Checked: now, Policy: "allkeys-lru"},
-			Slowlog: []monitor.SlowCommand{{At: now, MS: 25, Args: []string{"KEYS", "session:*"}}},
+			Status: &monitor.RedisStatus{Addr: "127.0.0.1:6379", Version: "7.2.4", Checked: now, Policy: "allkeys-lru"},
 		})
 	})
 	mux.HandleFunc("GET /v1/requests", func(w http.ResponseWriter, r *http.Request) {
@@ -934,7 +933,7 @@ func TestAppsAndRedisPages(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("GET redis: %d\n%s", code, body)
 	}
-	for _, want := range []string{"Redis evicted", "allkeys-lru", "KEYS session:*", "never", "db0", "can evict session keys"} {
+	for _, want := range []string{"Redis evicted", "allkeys-lru", "never", "db0", "can evict session keys"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the Redis page should contain %q", want)
 		}

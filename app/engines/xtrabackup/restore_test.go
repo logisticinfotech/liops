@@ -33,10 +33,10 @@ func restoreBackups() []Manifest {
 	return []Manifest{full1, mk(Diff, 7, 3, full1.Label), mk(Diff, 6, 5, full1.Label), full2}
 }
 
-func binlogNames(from, to int) []string {
-	var names []string
+func binlogNames(from, to int) []Binlog {
+	var names []Binlog
 	for n := from; n <= to; n++ {
-		names = append(names, fmt.Sprintf("binlog.%06d", n))
+		names = append(names, Binlog{Name: fmt.Sprintf("binlog.%06d", n)})
 	}
 	return names
 }
@@ -72,8 +72,43 @@ func TestPlanRestore(t *testing.T) {
 	}
 }
 
+func TestPlanRestoreDoesNotCrossGenerations(t *testing.T) {
+	old := Manifest{Type: Full, Label: "old-full", Start: now.Add(-days(2)), Stop: now.Add(-days(2)),
+		BinlogFile: "binlog.000050", BinlogGen: "gen1"}
+	neu := Manifest{Type: Full, Label: "new-full", Start: now.Add(-time.Hour), Stop: now.Add(-time.Hour),
+		BinlogFile: "binlog.000001", BinlogGen: "gen2"}
+	binlogs := []Binlog{
+		{Name: "binlog.000050", Gen: "gen1"},
+		{Name: "binlog.000051", Gen: "gen1"},
+		{Name: "binlog.000001", Gen: "gen2"},
+		{Name: "binlog.000002", Gen: "gen2"},
+	}
+	plan, err := PlanRestore([]Manifest{old, neu}, binlogs, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Full.Label != neu.Label {
+		t.Errorf("full %s, want the catch-up full", plan.Full.Label)
+	}
+	want := []Binlog{{Name: "binlog.000001", Gen: "gen2"}, {Name: "binlog.000002", Gen: "gen2"}}
+	if !slices.Equal(plan.Binlogs, want) {
+		t.Errorf("binlogs %+v, want the new chain only", plan.Binlogs)
+	}
+
+	plan, err = PlanRestore([]Manifest{old, neu}, binlogs, now.Add(-days(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Full.Label != old.Label {
+		t.Errorf("a restore before the reset should use the old full, got %s", plan.Full.Label)
+	}
+	if !slices.Equal(plan.Binlogs, []Binlog{{Name: "binlog.000050", Gen: "gen1"}, {Name: "binlog.000051", Gen: "gen1"}}) {
+		t.Errorf("old-chain restore binlogs %+v", plan.Binlogs)
+	}
+}
+
 func TestPlanRestoreRefusesABinlogGap(t *testing.T) {
-	binlogs := slices.DeleteFunc(binlogNames(1, 10), func(n string) bool { return n == "binlog.000007" })
+	binlogs := slices.DeleteFunc(binlogNames(1, 10), func(n Binlog) bool { return n.Name == "binlog.000007" })
 	_, err := PlanRestore(restoreBackups(), binlogs, now.Add(-days(6)).Add(12*time.Hour))
 	if err == nil || !strings.Contains(err.Error(), "binlog.000007") {
 		t.Errorf("want a gap error naming binlog.000007, got %v", err)
@@ -110,7 +145,7 @@ func TestFetch(t *testing.T) {
 	cfg := config.Default()
 	e := New(cfg, fake, store, t.TempDir())
 	dir := t.TempDir()
-	plan := RestorePlan{Full: full, Diff: &diff, Binlogs: []string{"binlog.000003", "binlog.000004"}}
+	plan := RestorePlan{Full: full, Diff: &diff, Binlogs: []Binlog{{Name: "binlog.000003"}, {Name: "binlog.000004"}}}
 	if err := e.Fetch(context.Background(), plan, dir, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +179,7 @@ func TestRestoreCommands(t *testing.T) {
 	plan := RestorePlan{
 		Target:  time.Date(2026, 10, 22, 9, 4, 30, 0, time.UTC),
 		Diff:    &diff,
-		Binlogs: []string{"binlog.000003", "binlog.000004"},
+		Binlogs: []Binlog{{Name: "binlog.000003"}, {Name: "binlog.000004"}},
 	}
 	out := RestoreCommands(plan, "/restore/new", "/var/lib/mysql", ist)
 	for _, want := range []string{
