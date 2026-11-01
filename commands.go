@@ -160,8 +160,9 @@ func runServe(args []string, out io.Writer) error {
 	ui.WebBackupDir = filepath.Join(filepath.Dir(p.state), "backups")
 	go svc.PushDiskUsage(ui.Monitor.Push)
 	go svc.CollectPHP(php.DefaultEtc, ui.Monitor.PushFor)
-	go svc.WatchDeploys(func() []laravel.App { return laravel.FindApps(ui.NginxDir, ui.Caddyfile) })
+	go svc.WatchDeploys(func() []laravel.App { return laravel.FindApps(ui.NginxDir, ui.Caddyfile) }, ui.Monitor.SetRedisQueues)
 	go svc.Alerts(ui.Monitor)
+	svc.Verdict = ui.VerdictLines
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {
 		return fmt.Errorf("ui.listen: %w", err)

@@ -797,12 +797,18 @@ func TestRequestsPage(t *testing.T) {
 	cfg.Monitor.Enabled = true
 	h := newHarness(t, cfg, true)
 	h.ui.Monitor = fakeMonitor(t)
+	etc := t.TempDir()
+	h.ui.PHPEtc = etc
+	os.MkdirAll(filepath.Join(etc, "8.3", "fpm", "pool.d"), 0o755)
+	slow := filepath.Join(t.TempDir(), "www.slow.log")
+	os.WriteFile(slow, []byte("\n["+time.Now().Add(-time.Second).Format("02-Jan-2006 15:04:05")+"]  [pool www] pid 4242\nscript_filename = /srv/app/public/index.php\n[0x00007f] curl_exec() /srv/app/app/Gateway.php:88\n"), 0o644)
+	os.WriteFile(filepath.Join(etc, "8.3", "fpm", "pool.d", "www.conf"), []byte("[www]\nlisten = /run/php/php8.3-fpm.sock\nrequest_slowlog_timeout = 1s\nslowlog = "+slow+"\n"), 0o644)
 	code, _, body := h.get("/monitoring/requests?range=24h")
 	if code != 200 {
 		t.Fatalf("GET: %d\n%s", code, body)
 	}
 	for _, want := range []string{`href="/monitoring/requests">Requests`, "Sites", "b.example.com", "GET /dashboard", "GET /api/readings/{n}",
-		"3 5xx", "2.9 s", "203.0.113.50", "script or app", `class="heat-5"`, "liops-access.log", "Routes by total time"} {
+		"3 5xx", "2.9 s", "203.0.113.50", "curl_exec() /srv/app/app/Gateway.php:88", "script or app", `class="heat-5"`, "liops-access.log", "Routes by total time"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the Requests page should contain %q", want)
 		}
@@ -889,10 +895,14 @@ func TestAppsAndRedisPages(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(app, "artisan"), nil, 0o755)
 	os.WriteFile(filepath.Join(app, ".env"), []byte("APP_ENV=production\nAPP_DEBUG=false\nDB_PASSWORD=hunter2-secret\nQUEUE_CONNECTION=sync\nSESSION_DRIVER=redis\nCACHE_STORE=redis\nREDIS_CACHE_DB=0\n"), 0o600)
+	app2 := filepath.Join(t.TempDir(), "jobs")
+	os.MkdirAll(filepath.Join(app2, "public"), 0o755)
+	os.WriteFile(filepath.Join(app2, "artisan"), nil, 0o755)
+	os.WriteFile(filepath.Join(app2, ".env"), []byte("APP_NAME=Jobs\nQUEUE_CONNECTION=redis\n"), 0o600)
 	os.WriteFile(filepath.Join(app, "storage", "logs", "laravel.log"), []byte("["+time.Now().Format("2006-01-02 15:04:05")+"] production.ERROR: Payment gateway timeout for order 12345\n"), 0o644)
 	nginx := t.TempDir()
 	os.MkdirAll(filepath.Join(nginx, "sites-enabled"), 0o755)
-	os.WriteFile(filepath.Join(nginx, "sites-enabled", "shop"), []byte("server {\n  server_name shop.example.com;\n  root "+app+"/public;\n}\n"), 0o644)
+	os.WriteFile(filepath.Join(nginx, "sites-enabled", "shop"), []byte("server {\n  server_name shop.example.com;\n  root "+app+"/public;\n}\nserver {\n  server_name jobs.example.com;\n  root "+app2+"/public;\n}\n"), 0o644)
 	h.ui.NginxDir, h.ui.Caddyfile = nginx, filepath.Join(nginx, "none")
 
 	code, _, body := h.get("/monitoring/apps")
@@ -900,7 +910,7 @@ func TestAppsAndRedisPages(t *testing.T) {
 		t.Fatalf("GET apps: %d\n%s", code, body)
 	}
 	for _, want := range []string{`href="/monitoring/apps">Apps`, "shop.example.com", "QUEUE_CONNECTION is sync", "config isn&#39;t cached",
-		"share Redis database 0", "can evict session keys", "never saves to disk", "Payment gateway timeout for order N", "schedule:run didn&#39;t run"} {
+		"share Redis database 0", "can evict session keys", "never saves to disk", "can evict queued jobs", "jobs_database_queues:default", "Payment gateway timeout for order N", "schedule:run didn&#39;t run"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the Apps page should contain %q", want)
 		}
@@ -939,7 +949,13 @@ func TestOverviewPage(t *testing.T) {
 			t.Errorf("the Overview should contain %q", want)
 		}
 	}
+	if lines := h.ui.VerdictLines(context.Background()); len(lines) < 3 || !strings.HasPrefix(lines[0], "Verdict: most likely,") {
+		t.Errorf("verdict lines = %q", lines)
+	}
 	h.ui.Monitor = monitor.NewClient("/tmp/liops-no-such.sock")
+	if lines := h.ui.VerdictLines(context.Background()); lines != nil {
+		t.Errorf("no monitor, no verdict: %q", lines)
+	}
 	if _, _, body := h.get("/monitoring"); !strings.Contains(body, "isn&#39;t answering") {
 		t.Error("the overview should say when the monitor isn't running")
 	}

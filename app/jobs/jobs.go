@@ -82,7 +82,9 @@ type Runner struct {
 	Dumps      Dumper
 	Cluster    postgres.Cluster
 	// Monitor is the monitoring service, for the daily summary's server health.
-	Monitor  *monitor.Client
+	Monitor *monitor.Client
+	// Verdict, when set, gives the monitoring verdict's lines for the daily summary.
+	Verdict  func(ctx context.Context) []string
 	LockPath string
 	Now      func() time.Time
 

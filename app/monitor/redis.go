@@ -5,17 +5,21 @@ package monitor
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// RedisUser is the monitor's Redis ACL user: allowed only INFO, SLOWLOG GET and PING, so
-// it reads no keys, no values and no config (CONFIG GET would show requirepass).
+// RedisUser is the monitor's Redis ACL user: allowed only INFO, SLOWLOG GET, PING, and
+// LLEN/ZCARD on Laravel's queue keys, so it reads no values and no config (CONFIG GET
+// would show requirepass).
 const RedisUser = "liops-monitor"
 
 // DefaultRedis is where Ubuntu's Redis listens.
@@ -146,6 +150,25 @@ func parseInfo(s string) map[string]string {
 	return out
 }
 
+var queueKeyRE = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,200}$`)
+
+// SetRedisQueues sets the queue keys to count (root works them out from the apps'
+// settings): names only, at most 50.
+func (m *Monitor) SetRedisQueues(keys []string) error {
+	if len(keys) > 50 {
+		return errors.New("at most 50 queues")
+	}
+	for _, k := range keys {
+		if !queueKeyRE.MatchString(k) || !strings.Contains(k, "queues:") {
+			return fmt.Errorf("%q isn't a queue key", k)
+		}
+	}
+	m.mu.Lock()
+	m.redisQueues = append([]string(nil), keys...)
+	m.mu.Unlock()
+	return nil
+}
+
 // RedisStatus is what the monitor knows about Redis.
 type RedisStatus struct {
 	Addr    string    `json:"addr"`
@@ -210,6 +233,27 @@ func (m *Monitor) readRedis(ctx context.Context) {
 		}
 	}
 	values["redis.keys"] = keys
+	// Laravel's queues: waiting (a list), delayed and reserved (sorted sets).
+	if qs := m.redisQueues; len(qs) > 0 {
+		var cmds [][]string
+		for _, k := range qs {
+			cmds = append(cmds, []string{"LLEN", k}, []string{"ZCARD", k + ":delayed"}, []string{"ZCARD", k + ":reserved"})
+		}
+		m.mu.Unlock()
+		replies, err := m.Redis.redisCommands(ctx, cmds...)
+		m.mu.Lock()
+		if err == nil && len(replies) == 3*len(qs) {
+			for i, k := range qs {
+				for j, what := range []string{"redis.queue:", "redis.queue_delayed:", "redis.queue_reserved:"} {
+					if n, ok := replies[3*i+j].(int64); ok {
+						values[what+k] = float64(n)
+					}
+				}
+			}
+		} else if err != nil {
+			rs.status.Error = "reading the queues: " + err.Error()
+		}
+	}
 	counters := map[string]float64{"evicted": num("evicted_keys"), "hits": num("keyspace_hits"), "misses": num("keyspace_misses"), "expired": num("expired_keys")}
 	if rs.prev != nil {
 		d := func(k string) float64 { return max(0, counters[k]-rs.prev[k]) }
@@ -357,4 +401,28 @@ type RedisResponse struct {
 func (c *Client) Redis(ctx context.Context) (RedisResponse, error) {
 	var out RedisResponse
 	return out, c.get(ctx, "/v1/redis", &out)
+}
+
+func (m *Monitor) redisQueueHandler(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/redis/queues", func(w http.ResponseWriter, r *http.Request) {
+		var keys []string
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&keys); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := m.SetRedisQueues(keys); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+// SetRedisQueues tells the monitor which Laravel queue keys to count.
+func (c *Client) SetRedisQueues(ctx context.Context, keys []string) error {
+	data, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, "POST", "/v1/redis/queues", strings.NewReader(string(data)), nil)
 }

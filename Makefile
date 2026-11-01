@@ -4,7 +4,7 @@ BINARY  := liops
 VERSION ?= dev
 LDFLAGS := -s -w -X github.com/logisticinfotech/liops/app/version.Version=$(VERSION)
 
-.PHONY: build build-linux test lint vuln css css-check testenv integration integration-mysql vm-test-mysql testenv-down dev-up dev dev-down
+.PHONY: build build-linux test lint vuln css css-check testenv integration integration-mysql vm-test-mysql vm-test-monitor testenv-down dev-up dev dev-down
 
 # Tailwind CSS's standalone CLI builds the UI's stylesheet: no Node or npm. It's downloaded
 # once into bin/ and checked against the release's sha256sums.txt.
@@ -56,6 +56,9 @@ integration-mysql: ## The same for MySQL 8.4: setup, dumps, users and grants, re
 
 vm-test-mysql:    ## The MySQL integration test in a fresh Ubuntu VM (Multipass), no Docker
 	./scripts/vm-test-mysql.sh
+
+vm-test-monitor:  ## Monitoring end to end in a fresh Ubuntu VM (Multipass): load with known problems, check the verdict
+	./scripts/vm-test-monitor.sh
 
 testenv-down:     ## Stop the test environment and delete its data
 	docker compose -f test/compose.yaml --profile mysql down -v

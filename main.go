@@ -38,6 +38,8 @@ Usage:
                         [--pg-socket-dir DIR] [--mysql-socket PATH]  where the databases' sockets are
                         [--nginx-log PATH] [--caddyfile PATH]       where the access logs are
                         [--redis ADDR]                              Redis (host:port or socket)
+  liops monitor-setup   [--apply]                   list (or make) the changes monitoring needs: database logins, web logs, PHP-FPM, Redis
+  liops verdict                                     print the monitoring verdict (Monitoring → Overview)
   liops install-system                              install the systemd service (install.sh runs this)
   liops uninstall       [--purge] [--yes]           remove liops; backups in storage are kept
 
@@ -92,6 +94,10 @@ func run(args []string, out io.Writer) error {
 		return runDumps(args[1], args[2:], out)
 	case "monitor":
 		return runMonitor(args[1:], out)
+	case "monitor-setup":
+		return runMonitorSetup(args[1:], out)
+	case "verdict":
+		return runVerdict(args[1:], out)
 	case "restore-files":
 		return runRestoreFiles(args[1:], out)
 	case "install-system":

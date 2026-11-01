@@ -29,6 +29,9 @@ func (r *Runner) serverHealth(ctx context.Context) []string {
 		return []string{"The monitoring service isn't answering. Check it with: sudo systemctl status liops-monitor"}
 	}
 	var lines []string
+	if r.Verdict != nil {
+		lines = append(lines, r.Verdict(ctx)...)
+	}
 	for _, d := range dbs {
 		if d.Error != "" {
 			lines = append(lines, d.Title+": the monitor can't log in. Use Set up database access in Settings → Monitoring.")

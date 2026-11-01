@@ -341,6 +341,7 @@ func (s *Server) dbMonitorQuery(w http.ResponseWriter, r *http.Request) {
 		Row         queryRow
 		Charts      []chartBox
 		Touched     []tableIndexes
+		Routes      []monitor.RouteMatch
 		Sample      *monitor.QuerySample
 		SampleFlags []monitor.Flag
 		SampleError string
@@ -419,6 +420,8 @@ func (s *Server) dbMonitorQuery(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	d.Routes, _ = s.Monitor.QueryRoutes(ctx, sv.Label, detail.Shape.DB, detail.Shape.ID)
 
 	// MySQL keeps one real statement per shape. It has real values: shown, never stored.
 	if sv.Engine == monitor.EngineMySQL {

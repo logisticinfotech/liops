@@ -91,3 +91,12 @@ func TestBusyPoolWithBusyCPUIsntMoreWorkers(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueBacklog(t *testing.T) {
+	e := healthy()
+	e.Queues = []Queue{{Key: "shop_database_queues:default", Waiting: 4200}}
+	f := Judge(e)
+	if len(f) != 1 || !strings.Contains(f[0].Says, "4200 jobs are waiting") {
+		t.Errorf("f = %+v", f)
+	}
+}

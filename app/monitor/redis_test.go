@@ -66,6 +66,10 @@ func (f *fakeRedis) conn(c net.Conn) {
 		case "INFO":
 			info := fmt.Sprintf("# Server\r\nredis_version:7.2.4\r\n# Memory\r\nused_memory:1040000000\r\nmaxmemory:1073741824\r\nmaxmemory_policy:allkeys-lru\r\nmem_fragmentation_ratio:1.10\r\n# Persistence\r\nrdb_saves:0\r\nrdb_last_save_time:1793400000\r\naof_enabled:0\r\n# Stats\r\nevicted_keys:%d\r\nkeyspace_hits:%d\r\nkeyspace_misses:100\r\nconnected_clients:7\r\ninstantaneous_ops_per_sec:250\r\n# Keyspace\r\ndb0:keys=1200,expires=1100,avg_ttl=0\r\ndb1:keys=300,expires=0,avg_ttl=0\r\n", evicted, 900+evicted*9)
 			fmt.Fprintf(c, "$%d\r\n%s\r\n", len(info), info)
+		case "LLEN":
+			fmt.Fprint(c, ":1500\r\n")
+		case "ZCARD":
+			fmt.Fprint(c, ":3\r\n")
 		case "SLOWLOG":
 			fmt.Fprint(c, "*1\r\n*6\r\n:1\r\n:1793400000\r\n:25000\r\n*2\r\n$4\r\nKEYS\r\n$9\r\nsession:*\r\n$15\r\n127.0.0.1:50000\r\n$0\r\n\r\n")
 		default:
@@ -109,9 +113,22 @@ func TestRedis(t *testing.T) {
 		t.Errorf("slowlog = %+v, %v", slow, err)
 	}
 	for _, c := range f.cmds {
-		if !strings.HasPrefix(c, "AUTH liops-monitor") && c != "INFO" && c != "SLOWLOG GET 20" {
+		if !strings.HasPrefix(c, "AUTH liops-monitor") && c != "INFO" && c != "SLOWLOG GET 20" && !strings.Contains(c, "queues:") {
 			t.Errorf("the monitor should only send AUTH, INFO and SLOWLOG GET, not %q", c)
 		}
+	}
+
+	if err := m.SetRedisQueues([]string{"shop_database_queues:default"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetRedisQueues([]string{"session:abc"}); err == nil {
+		t.Error("only queue keys may be counted")
+	}
+	*clock = clock.Add(Interval)
+	m.readRedis(ctx)
+	m.collect()
+	if s, _ := m.Store.Latest(); s.Values["redis.queue:shop_database_queues:default"] != 1500 || s.Values["redis.queue_delayed:shop_database_queues:default"] != 3 {
+		t.Errorf("queues = %v", s.Values)
 	}
 
 	m.Redis = FindRedis("127.0.0.1:1") // nothing listens

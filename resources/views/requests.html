@@ -44,7 +44,7 @@
 <h2>Slowest requests</h2>
 <div class="table-wrap"><table>
   <tr><th>When</th><th>Site</th><th>Route</th><th class="num">Status</th><th class="num">Time</th><th class="num">App time</th></tr>
-  {{range .Slowest}}<tr><td>{{datetime .At}}</td><td class="mono">{{.Host}}</td><td class="mono">{{.Route}}</td><td class="num">{{.Status}}</td><td class="num">{{ms .MS}}</td><td class="num">{{if ge .UpstreamMS 0.0}}{{ms .UpstreamMS}}{{else}}—{{end}}</td></tr>
+  {{range .Slowest}}<tr><td>{{datetime .At}}</td><td class="mono">{{.Host}}</td><td class="mono">{{.Route}}{{with .Trace}}<details><summary class="muted">where PHP was (slow log)</summary><pre>{{.}}</pre></details>{{end}}</td><td class="num">{{.Status}}</td><td class="num">{{ms .MS}}</td><td class="num">{{if ge .UpstreamMS 0.0}}{{ms .UpstreamMS}}{{else}}—{{end}}</td></tr>
   {{else}}<tr><td colspan="6" class="muted">Kept from each finished hour.</td></tr>{{end}}
 </table></div>
 

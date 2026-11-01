@@ -22,6 +22,12 @@
 {{end}}
 {{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
 
+{{if .Routes}}<h2>The routes that run it</h2>
+<p class="muted">Their requests rise and fall with this query's calls over the last day.</p>
+<div class="table-wrap"><table><tr><th>Route</th><th class="num">Calls per request</th><th class="num">Match</th></tr>
+  {{range .Routes}}<tr><td class="mono">{{.Host}} {{.Route}}</td><td class="num">{{printf "%.0f" .PerRequest}}{{if ge .PerRequest 20.0}} <span class="badge failed">N+1</span>{{end}}</td><td class="num">{{printf "%.2f" .Correlation}}</td></tr>{{end}}
+</table></div>{{end}}
+
 {{if .Sample}}<h2>A real statement</h2>
 <pre class="query">{{.Sample.Text}}</pre>
 {{range .SampleFlags}}<div class="error"><p><strong>{{.Name}}.</strong> {{.Fix}}</p></div>{{end}}

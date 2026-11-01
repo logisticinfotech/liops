@@ -474,7 +474,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
   services, checks, disk), MO1 (databases: query efficiency, locks, tables, indexes, the
   email headline) MO2 (requests from nginx/Caddy, PHP-FPM and OPcache, Laravel apps,
   Redis and sessions, deploy markers) and MO3 (the verdict, logs, immediate alerts) and MO4 (tuning, applied
-  only on approval, with revert) are built; see its §8. Still to do: a `make vm-test-monitor`
-  that repeats the VM checks unattended, and a week on a real server.
+  only on approval, with revert) are built; see its §8. `make vm-test-monitor` repeats the VM
+  checks unattended; [monitoring.md](monitoring.md) is the operator's guide. Still to do: a
+  week on a real server.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

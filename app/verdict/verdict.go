@@ -31,6 +31,7 @@ type Evidence struct {
 	NPlusOne                             []Query // query shapes called many times per request
 	Logs                                 []Log
 	Apps                                 []App
+	Queues                               []Queue
 	Deploy                               *Deploy
 }
 
@@ -74,6 +75,7 @@ type Query struct {
 	DB, Text   string
 	MS         float64
 	PerRequest float64 // calls per request (N+1)
+	Route      string  // the route that runs it, when its requests move with the calls
 	Read       string  // "1.65M rows per row returned", "25 MB per call"
 }
 
@@ -94,6 +96,12 @@ type Log struct {
 type App struct {
 	Dir      string
 	Problems []string
+}
+
+// Queue is a Redis queue's backlog.
+type Queue struct {
+	Key     string
+	Waiting float64
 }
 
 // Deploy compares the requests before and after the latest deploy.
@@ -197,7 +205,7 @@ func Judge(e Evidence) []Finding {
 	for _, q := range e.NPlusOne {
 		add(Finding{Level: Problem, Area: "Database", weight: 88,
 			Says:    "N+1 queries in the code",
-			Because: fmt.Sprintf("This query ran %.0f times per web request on average, in %s: %s", q.PerRequest, q.DB, short(q.Text, 120)),
+			Because: nPlusOneBecause(q),
 			Do:      "It's run in a loop, once per item: load the relation with the parent query (eager loading, ->with(...)) instead.", Link: "/monitoring/database"})
 	}
 	for _, d := range e.Databases {
@@ -249,6 +257,14 @@ func Judge(e Evidence) []Finding {
 		if len(a.Problems) > 0 {
 			add(Finding{Level: Problem, Area: "App", weight: 75, Says: a.Dir + " has production settings that cost time",
 				Because: strings.Join(a.Problems, " "), Link: "/monitoring/apps"})
+		}
+	}
+
+	for _, q := range e.Queues {
+		if q.Waiting >= 1000 {
+			add(Finding{Level: Warning, Area: "App", weight: 68, Says: fmt.Sprintf("%.0f jobs are waiting in the queue %s", q.Waiting, q.Key),
+				Because: "The queue workers aren't keeping up, or aren't running: mail, exports and notifications go out late.",
+				Do:      "Check the workers (supervisorctl status, or systemctl for a queue:work unit), add workers, or find the slow job in the logs.", Link: "/monitoring/apps"})
 		}
 	}
 
@@ -360,4 +376,11 @@ func bytes(v float64) string {
 		return fmt.Sprintf("%.0f MB", v/(1<<20))
 	}
 	return fmt.Sprintf("%.0f KB", v/(1<<10))
+}
+
+func nPlusOneBecause(q Query) string {
+	if q.Route != "" {
+		return fmt.Sprintf("This query runs about %.0f times per request to %s (its calls rise and fall with that route's requests), in %s: %s", q.PerRequest, q.Route, q.DB, short(q.Text, 120))
+	}
+	return fmt.Sprintf("This query ran %.0f times per web request on average, in %s: %s", q.PerRequest, q.DB, short(q.Text, 120))
 }

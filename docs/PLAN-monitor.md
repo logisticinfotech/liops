@@ -528,6 +528,16 @@ exact old value; `sync_binlog` and the like are refused. Found there: PostgreSQL
 restart-only setting as "could not be applied" (now waiting for a restart, not an error), and
 Redis reads `M` as 10^6 (Redis values use `mb`).
 
+**After MO4 (November 2026).** The gaps listed above are closed: the verdict's headline in
+the daily summary; N+1 joined to the route whose requests move with the query (per request,
+not per average request); Redis queue backlog (the monitor's user may `LLEN`/`ZCARD` queue
+keys only; root works out each app's key from `REDIS_PREFIX`/`APP_NAME`/`REDIS_QUEUE`); PHP's
+slow-log stack traces next to the slowest requests; `liops monitor-setup [--apply]` and
+`liops verdict` for headless servers; and `make vm-test-monitor`
+(`scripts/vm-test-monitor.sh`), which builds a server like the real ones, sets monitoring up,
+loads it with known problems and checks that the verdict names each. Operator's guide:
+[monitoring.md](monitoring.md). Next: a week on a real server.
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the

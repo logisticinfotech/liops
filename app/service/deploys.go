@@ -3,6 +3,8 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,13 +21,26 @@ var deployEvery = time.Minute
 // commit changing. Each one goes into the audit log (action "deploy"), which the charts
 // show as a marker, so "slower since the deploy at 14:02" is visible. It returns when the
 // service stops.
-func (s *Service) WatchDeploys(apps func() []laravel.App) {
+//
+// setQueues, when set, tells the monitor which Redis queue keys the apps use.
+func (s *Service) WatchDeploys(apps func() []laravel.App, setQueues func(ctx context.Context, keys []string) error) {
 	t := time.NewTicker(deployEvery)
 	defer t.Stop()
 	var logsAt time.Time
 	for {
 		if s.Config().Monitor.Enabled {
 			found := apps()
+			if setQueues != nil {
+				var keys []string
+				for _, a := range found {
+					if k := laravel.CheckApp(a).QueueKey; k != "" {
+						keys = append(keys, k)
+					}
+				}
+				ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+				setQueues(ctx, keys)
+				cancel()
+			}
 			if time.Since(logsAt) >= appLogEvery {
 				logsAt = time.Now()
 				s.measureAppLogs(found)
@@ -96,11 +111,32 @@ func (s *Service) measureAppLogs(apps []laravel.App) {
 	}
 	sort.Slice(rates, func(i, j int) bool { return rates[i].PerHour > rates[j].PerHour })
 	s.appLogRates = rates
+	// Kept in the state file too, for liops verdict (another process).
+	if data, err := json.Marshal(savedLogRates{At: now, Rates: rates}); err == nil {
+		s.State.SetMeta(metaAppLogs, string(data))
+	}
+}
+
+const metaAppLogs = "monitor:app-log-growth"
+
+type savedLogRates struct {
+	At    time.Time
+	Rates []LogRate
 }
 
 // AppLogGrowth returns the apps' log files that grew since the last measurement.
 func (s *Service) AppLogGrowth() []LogRate {
 	s.logMu.Lock()
-	defer s.logMu.Unlock()
-	return append([]LogRate(nil), s.appLogRates...)
+	rates := append([]LogRate(nil), s.appLogRates...)
+	measured := s.appLogSizes != nil
+	s.logMu.Unlock()
+	if measured {
+		return rates
+	}
+	// Not measured in this process (liops verdict): serve's last measurement, if recent.
+	var saved savedLogRates
+	if v, err := s.State.GetMeta(metaAppLogs); err == nil && v != "" && json.Unmarshal([]byte(v), &saved) == nil && time.Since(saved.At) < 30*time.Minute {
+		return saved.Rates
+	}
+	return nil
 }

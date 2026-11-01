@@ -47,6 +47,9 @@ type Service struct {
 	// SetMonitor starts (and enables) or stops (and disables) the liops-monitor service;
 	// tests replace it.
 	SetMonitor func(on bool) error
+	// Verdict is the monitoring verdict for the daily summary, in lines (serve sets it from
+	// the UI, which gathers the evidence); nil leaves it out.
+	Verdict func(ctx context.Context) []string
 
 	ctx    context.Context // jobs started by the UI or scheduler run with this
 	mu     sync.Mutex
@@ -168,6 +171,12 @@ func (s *Service) applyLocked(cfg *config.Config) error {
 	r, err := s.NewRunner(cfg)
 	if err != nil {
 		return err
+	}
+	r.Verdict = func(ctx context.Context) []string {
+		if s.Verdict == nil {
+			return nil
+		}
+		return s.Verdict(ctx)
 	}
 	s.runner = r
 	if !s.setupComplete() {

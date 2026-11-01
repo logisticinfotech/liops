@@ -29,6 +29,7 @@ type appRow struct {
 	Check     laravel.Check
 	Sessions  []string // problems with sessions in Redis
 	Jobs      []string // the queue tables' sizes
+	Queue     string   // the Redis queue's jobs
 	Scheduler string   // how often schedule:run ran in the last hour
 	Errors    []laravel.ErrorGroup
 }
@@ -78,12 +79,17 @@ func redisFindings(f redisFacts) []string {
 	return out
 }
 
-// sessionFindings are the ways a Redis setup can silently log people out.
+// sessionFindings are the ways a Redis setup can silently log people out, or lose queued
+// jobs.
 func sessionFindings(c laravel.Check, f redisFacts) []string {
-	if !c.SessionsInRedis {
-		return nil
-	}
 	var out []string
+	if c.QueueKey != "" && f.Status != nil && f.Status.Error == "" && f.Evicted > 0 &&
+		(strings.HasPrefix(f.Status.Policy, "allkeys-") || strings.HasPrefix(f.Status.Policy, "volatile-")) {
+		out = append(out, "Redis can evict queued jobs (maxmemory-policy "+f.Status.Policy+", and it's evicting keys): they're lost without an error. Keep the queue in a Redis with noeviction, or give it more maxmemory.")
+	}
+	if !c.SessionsInRedis {
+		return out
+	}
 	if c.SessionsShareDB {
 		out = append(out, "Sessions and the cache share Redis database "+c.SessionDB+": php artisan cache:clear empties it, which logs everyone out. Give the cache its own database (REDIS_CACHE_DB=1).")
 	}
@@ -129,6 +135,10 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cron := s.cronLines(ctx)
+	var values map[string]float64
+	if latest, err := s.Monitor.Latest(ctx); err == nil {
+		values = latest.Values
+	}
 	for _, a := range apps {
 		row := appRow{App: a, Release: laravel.Release(a), Check: laravel.CheckApp(a)}
 		row.Sessions = sessionFindings(row.Check, facts)
@@ -137,6 +147,13 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 				if ti.DB == row.Check.Database && (ti.Name == "jobs" || ti.Name == "failed_jobs") {
 					row.Jobs = append(row.Jobs, fmt.Sprintf("%s: about %s rows", ti.Name, notify.Count(ti.Rows)))
 				}
+			}
+		}
+		if k := row.Check.QueueKey; k != "" {
+			if n, ok := values["redis.queue:"+k]; ok {
+				row.Queue = fmt.Sprintf("Redis queue %s: %s waiting, %s delayed, %s being worked on.", k, notify.Count(n), notify.Count(values["redis.queue_delayed:"+k]), notify.Count(values["redis.queue_reserved:"+k]))
+			} else {
+				row.Queue = "Redis queue " + k + ": not counted yet (Set up Redis access in Settings → Monitoring lets the monitor count it)."
 			}
 		}
 		runs := 0

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/php"
 )
 
 type requestsData struct {
@@ -21,7 +23,7 @@ type requestsData struct {
 	Hosts   []routeRow
 	Routes  []routeRow
 	Total   routeRow
-	Slowest []monitor.SlowRequest
+	Slowest []slowRow
 	Clients []monitor.ClientStats
 	Sources []monitor.LogSource
 	Charts  []chartBox
@@ -84,7 +86,8 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request) {
 		render()
 		return
 	}
-	d.Sources, d.Slowest, d.Clients = res.Sources, res.Slowest, res.Clients
+	d.Sources, d.Clients = res.Sources, res.Clients
+	d.Slowest = s.withStackTraces(res.Slowest)
 	var total monitor.RouteTotal
 	for _, h := range res.Hosts {
 		d.Hosts = append(d.Hosts, newRouteRow(h, span))
@@ -175,4 +178,52 @@ func (s *Server) heatmap(cells []monitor.HeatCell) ([]heatRow, []int) {
 		hours[i] = i
 	}
 	return rows, hours
+}
+
+// slowRow is a slow request and, when PHP's slow log caught it, its stack trace.
+type slowRow struct {
+	monitor.SlowRequest
+	Trace string
+}
+
+var slowEntryRE = regexp.MustCompile(`^\[(\d\d-\w{3}-\d{4} \d\d:\d\d:\d\d)\]`)
+
+// withStackTraces matches the slow requests with the PHP-FPM slow logs' entries: an entry
+// is written when a request passes request_slowlog_timeout, so it falls between the
+// request's start and its end (when nginx logs it). Read live, never stored.
+func (s *Server) withStackTraces(slow []monitor.SlowRequest) []slowRow {
+	type entry struct {
+		at    time.Time
+		trace string
+		used  bool
+	}
+	var entries []*entry
+	if pools, err := php.FindPools(s.PHPEtc); err == nil {
+		seen := map[string]bool{}
+		for _, p := range pools {
+			if !p.SlowLogOn() || seen[p.SlowLog] {
+				continue
+			}
+			seen[p.SlowLog] = true
+			for _, e := range readSlowLog(p.SlowLog, 200) {
+				if m := slowEntryRE.FindStringSubmatch(e); m != nil {
+					if at, err := time.ParseInLocation("02-Jan-2006 15:04:05", m[1], time.Local); err == nil {
+						entries = append(entries, &entry{at: at, trace: e})
+					}
+				}
+			}
+		}
+	}
+	out := make([]slowRow, len(slow))
+	for i, r := range slow {
+		out[i].SlowRequest = r
+		start := r.At.Add(-time.Duration(r.MS*float64(time.Millisecond)) - time.Second)
+		for _, e := range entries {
+			if !e.used && !e.at.Before(start) && !e.at.After(r.At.Add(time.Second)) {
+				out[i].Trace, e.used = e.trace, true
+				break
+			}
+		}
+	}
+	return out
 }

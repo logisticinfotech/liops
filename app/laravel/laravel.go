@@ -135,6 +135,7 @@ var envKeys = map[string]bool{
 	"APP_ENV": true, "APP_DEBUG": true, "LOG_LEVEL": true, "QUEUE_CONNECTION": true, "SESSION_DRIVER": true,
 	"SESSION_CONNECTION": true, "CACHE_STORE": true, "CACHE_DRIVER": true, "REDIS_DB": true, "REDIS_CACHE_DB": true,
 	"REDIS_CACHE_CONNECTION": true, "TELESCOPE_ENABLED": true, "DEBUGBAR_ENABLED": true, "DB_DATABASE": true,
+	"APP_NAME": true, "REDIS_PREFIX": true, "REDIS_QUEUE": true,
 }
 
 // readEnv reads the named keys of an app's .env.
@@ -184,6 +185,7 @@ type Check struct {
 	SessionDB       string // the Redis database number sessions use
 	Database        string // DB_DATABASE, to find its jobs tables
 	QueueDB         bool   // the database queue driver
+	QueueKey        string // the Redis queue's key, with the redis queue driver
 }
 
 // CheckApp checks one app's production settings.
@@ -216,6 +218,14 @@ func CheckApp(a App) Check {
 		bad("QUEUE_CONNECTION is sync: queued jobs (mail, exports, notifications) run inside the web request, which waits for them. Use redis or database, and run php artisan queue:work.")
 	case "database":
 		c.QueueDB = true
+	case "redis":
+		// config/database.php: prefix REDIS_PREFIX, or APP_NAME's slug + "_database_";
+		// config/queue.php: REDIS_QUEUE, or "default".
+		prefix, ok := env["REDIS_PREFIX"]
+		if !ok {
+			prefix = slug(or(env["APP_NAME"], "laravel")) + "_database_"
+		}
+		c.QueueKey = prefix + "queues:" + or(env["REDIS_QUEUE"], "default")
 	}
 	if production && exists("vendor/laravel/telescope") && !strings.EqualFold(env["TELESCOPE_ENABLED"], "false") {
 		bad("Telescope is installed and on in production: it records every request and query into the database. Set TELESCOPE_ENABLED=false, or install it with --dev.")
@@ -401,3 +411,10 @@ func Release(a App) string {
 }
 
 func short(id string) string { return id[:min(12, len(id))] }
+
+var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
+
+// slug is Laravel's Str::slug($v, '_') for plain names.
+func slug(v string) string {
+	return strings.Trim(slugRE.ReplaceAllString(strings.ToLower(v), "_"), "_")
+}

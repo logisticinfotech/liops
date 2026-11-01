@@ -18,7 +18,8 @@ var ErrRedisPassword = errors.New("Redis needs its password (requirepass) to add
 
 // redisMonitorACL is the monitor's Redis user: no password (it can't read anything
 // secret), allowed only to read Redis's own numbers. No keys, no values, no CONFIG.
-const redisMonitorACL = "ACL SETUSER " + monitor.RedisUser + " reset on nopass -@all +info +slowlog|get +ping"
+// LLEN and ZCARD only on Laravel's queue keys: how many jobs wait, never what they hold.
+const redisMonitorACL = "ACL SETUSER " + monitor.RedisUser + " reset on nopass -@all +info +slowlog|get +ping +llen +zcard ~*queues:*"
 
 // RedisMonitorAccess adds the monitor's Redis user and saves it (ACL SAVE with an ACL
 // file, CONFIG REWRITE without). The password, if Redis has one, goes on redis-cli's

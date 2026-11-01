@@ -203,9 +203,18 @@ func (s *Server) evidence(ctx context.Context) (verdict.Evidence, error) {
 					d.ScanMS += q.TimeMS
 					d.Scans = append(d.Scans, verdict.Query{DB: q.DB, Text: q.Text, MS: q.TimeMS, Read: readText(sv.Engine, eff)})
 				}
-				if e.Requests.Count >= 1000 {
-					if per := q.Calls / e.Requests.Count; per >= 20 {
-						e.NPlusOne = append(e.NPlusOne, verdict.Query{DB: q.DB, Text: q.Text, MS: q.TimeMS, PerRequest: per})
+				if e.Requests.Count >= 1000 && q.Calls >= 1000 {
+					// A query called many times per request: find the route whose requests
+					// move with it, for the real per-request count.
+					per := q.Calls / e.Requests.Count
+					n := verdict.Query{DB: q.DB, Text: q.Text, MS: q.TimeMS, PerRequest: per}
+					if per >= 5 {
+						if routes, err := s.Monitor.QueryRoutes(ctx, sv.Label, q.DB, q.ID); err == nil && len(routes) > 0 && routes[0].PerRequest >= 20 {
+							n.PerRequest, n.Route = routes[0].PerRequest, routes[0].Host+" "+routes[0].Route
+						}
+					}
+					if n.PerRequest >= 20 {
+						e.NPlusOne = append(e.NPlusOne, n)
 					}
 				}
 			}
@@ -238,6 +247,11 @@ func (s *Server) evidence(ctx context.Context) (verdict.Evidence, error) {
 			}
 		}
 		app.Problems = append(app.Problems, sessionFindings(c, facts)...)
+		if c.QueueKey != "" {
+			if n, ok := v["redis.queue:"+c.QueueKey]; ok {
+				e.Queues = append(e.Queues, verdict.Queue{Key: c.QueueKey, Waiting: n})
+			}
+		}
 		e.Apps = append(e.Apps, app)
 	}
 
@@ -326,4 +340,44 @@ func (s *Server) deployEvidence(ctx context.Context) *verdict.Deploy {
 		}
 	}
 	return d
+}
+
+// VerdictLines is the verdict for the daily summary email: the headline and the main
+// findings, in plain text. Nil when monitoring is off or the monitor doesn't answer.
+func (s *Server) VerdictLines(ctx context.Context) []string { return s.verdictLines(ctx, 4) }
+
+// AllVerdictLines is the whole verdict, every finding in full (liops verdict).
+func (s *Server) AllVerdictLines(ctx context.Context) []string { return s.verdictLines(ctx, 0) }
+
+func (s *Server) verdictLines(ctx context.Context, limit int) []string {
+	if !s.Svc.Config().Monitor.Enabled {
+		return nil
+	}
+	e, err := s.evidence(ctx)
+	if err != nil {
+		return nil
+	}
+	findings := verdict.Judge(e)
+	if len(findings) == 0 {
+		return []string{"Verdict: nothing in the last 24 hours points to a problem."}
+	}
+	head := "Verdict: nothing serious; a few things worth a look."
+	if findings[0].Level == verdict.Problem {
+		head = "Verdict: most likely, " + strings.ToLower(findings[0].Says[:1]) + findings[0].Says[1:] + "."
+	}
+	lines := []string{head}
+	if limit > 0 {
+		findings = findings[:min(limit, len(findings))]
+	}
+	for _, f := range findings {
+		because := f.Because
+		if limit > 0 && len(because) > 300 {
+			because = because[:299] + "…"
+		}
+		lines = append(lines, "  - "+f.Area+": "+f.Says+". "+because)
+		if limit == 0 && f.Do != "" {
+			lines = append(lines, "    What to do: "+f.Do)
+		}
+	}
+	return append(lines, "The full verdict, with what to do: Monitoring → Overview in the liops UI.", "")
 }

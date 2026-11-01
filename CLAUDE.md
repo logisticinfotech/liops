@@ -26,6 +26,7 @@ make testenv        # Docker: PostgreSQL 18 + pgBackRest + MinIO + Mailpit (TLS)
 make integration    # Docker end-to-end: setup, backups, dumps, emails, dump + PITR restores
 make integration-mysql  # Docker end-to-end for MySQL 8.4: setup, dumps, users, restores, emails
 make vm-test-mysql  # the same test in a fresh Ubuntu 26.04 Multipass VM, no Docker (Mac)
+make vm-test-monitor  # monitoring end to end in a VM: load with known problems, check `liops verdict`
 make testenv-down   # tear down and delete volumes
 make dev-up         # Mac dev without Docker: MinIO + Mailpit + dev/config.yaml (layout: homebrew)
 make dev            # serve against it (LIOPS_DEV=1); see docs/development.md

@@ -60,8 +60,9 @@ type Monitor struct {
 	LogSources []LogSource
 	FindLogs   func() []LogSource
 	// Redis is the local Redis, if any (FindRedis).
-	Redis *RedisServer
-	redis *redisState
+	Redis       *RedisServer
+	redis       *redisState
+	redisQueues []string
 
 	logs      *logSizes
 	logGrowth []LogGrowth
@@ -196,6 +197,8 @@ func (m *Monitor) Handler() http.Handler {
 	m.dbHandlers(mux, writeJSON)
 	m.reqHandlers(mux, writeJSON)
 	m.logHandlers(mux, writeJSON)
+	m.nplusoneHandler(mux, writeJSON)
+	m.redisQueueHandler(mux)
 	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
 		var res RedisResponse
 		m.mu.Lock()

@@ -52,9 +52,10 @@ func TestServerHealthInTheDailySummary(t *testing.T) {
 		t.Errorf("monitoring off: %q", lines)
 	}
 	cfg.Monitor.Enabled = true
+	r.Verdict = func(context.Context) []string { return []string{"Verdict: most likely, the disk is the bottleneck."} }
 	lines := r.serverHealth(ctx)
 	_, body := notify.DailySummary(notify.Summary{Server: "db-test", Now: time.Now(), Health: lines})
-	for _, want := range []string{"Server health:", "MySQL: 1 query scans whole tables: 41 min of database time", "1.65M rows read per row returned",
+	for _, want := range []string{"Server health:", "Verdict: most likely, the disk", "MySQL: 1 query scans whole tables: 41 min of database time", "1.65M rows read per row returned",
 		"LOWER ( `name` ) LIKE ?", "Monitoring → Database"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("summary should contain %q:\n%s", want, body)

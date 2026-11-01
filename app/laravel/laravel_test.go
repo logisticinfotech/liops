@@ -52,6 +52,9 @@ STRIPE_SECRET=sk_live_example
 			t.Errorf("a secret leaked into the check: %q", secret)
 		}
 	}
+	if c.QueueKey != "" {
+		t.Errorf("sync has no queue key: %q", c.QueueKey)
+	}
 	if !c.SessionsInRedis || !c.SessionsShareDB || c.SessionDB != "0" || c.Database != "shop" {
 		t.Errorf("sessions: %+v", c)
 	}
@@ -113,5 +116,18 @@ func TestRelease(t *testing.T) {
 	os.Symlink(filepath.Join(root, "releases", "20261101-0500"), filepath.Join(root, "current"))
 	if r := Release(App{Dir: filepath.Join(root, "current")}); r != "20261101-0500" {
 		t.Errorf("symlink: %q", r)
+	}
+}
+
+func TestQueueKey(t *testing.T) {
+	for env, want := range map[string]string{
+		"QUEUE_CONNECTION=redis\nAPP_NAME=\"Shop App\"\n":                  "shop_app_database_queues:default",
+		"QUEUE_CONNECTION=redis\nREDIS_PREFIX=shop:\nREDIS_QUEUE=emails\n": "shop:queues:emails",
+		"QUEUE_CONNECTION=redis\nREDIS_PREFIX=\n":                          "queues:default",
+		"QUEUE_CONNECTION=redis\n":                                         "laravel_database_queues:default",
+	} {
+		if got := CheckApp(newApp(t, env)).QueueKey; got != want {
+			t.Errorf("%q: %q, want %q", env, got, want)
+		}
 	}
 }
