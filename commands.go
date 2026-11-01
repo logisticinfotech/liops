@@ -26,6 +26,7 @@ import (
 	"github.com/logisticinfotech/liops/app/jobs"
 	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/php"
 	"github.com/logisticinfotech/liops/app/service"
 	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
@@ -157,6 +158,7 @@ func runServe(args []string, out io.Writer) error {
 	ui.Monitor = monitor.NewClient(p.monitorSocket)
 	ui.WebBackupDir = filepath.Join(filepath.Dir(p.state), "backups")
 	go svc.PushDiskUsage(ui.Monitor.Push)
+	go svc.CollectPHP(php.DefaultEtc, ui.Monitor.PushFor)
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {
 		return fmt.Errorf("ui.listen: %w", err)

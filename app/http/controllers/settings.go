@@ -34,6 +34,8 @@ type settingsData struct {
 	PGRestartCommand string
 	WebLogs          []setup.WebLogPlan // what each web server needs so its requests are read
 	WebLogsError     string
+	PHP              *setup.PHPPlan // what PHP-FPM needs; nil without pools
+	PHPError         string
 }
 
 // settingsTab is one tab of the Settings page and the sections (forms) on it.
@@ -82,6 +84,7 @@ func (s *Server) databaseAccess(ctx context.Context, cfg *config.Config, d *sett
 	}
 	d.DBs = dbs
 	d.WebLogs, d.WebLogsError = s.webLogPlans()
+	d.PHP, d.PHPError = s.phpPlan()
 	if runner := s.Svc.Runner(); runner != nil && !cfg.IsMySQL() {
 		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
 		d.PGRestart = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"

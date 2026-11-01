@@ -1,0 +1,35 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>PHP</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+{{if .NeedSetup}}<div class="note">Some pools have no status page or slow log yet. Settings → Monitoring → PHP-FPM shows the change and applies it when you approve.</div>{{end}}
+<nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/php?range={{.}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else if eq . "7d"}}7 days{{else}}90 days{{end}}</a>{{end}}</nav>
+
+{{range .Pools}}
+<h2>Pool <span class="mono">{{.Label}}</span></h2>
+{{if .Findings}}<div class="error">{{range .Findings}}<p>{{.}}</p>{{end}}</div>{{end}}
+<div class="grid">
+  <div class="stat"><div class="label">Workers busy</div><div class="value">{{if .Measured}}{{printf "%.0f" .Active}}{{else}}—{{end}}</div><div class="sub">{{if .Measured}}{{printf "%.0f" .Idle}} idle · pm.max_children {{.MaxChildren}}{{else}}no status page yet{{end}}</div></div>
+  <div class="stat"><div class="label">All workers busy</div><div class="value">{{if .Measured}}{{printf "%.0f" .SaturatedPct}}%{{else}}—{{end}}</div><div class="sub">of the time{{if .Reached}} · ran out {{count .Reached}} times{{end}}{{if .Queue}} · {{printf "%.0f" .Queue}} waiting now{{end}}</div></div>
+  <div class="stat"><div class="label">Memory per worker</div><div class="value">{{if .WorkerMemory}}{{bytes (int64 .WorkerMemory)}}{{else}}—{{end}}</div><div class="sub">{{if .Affordable}}memory free allows about {{.Affordable}}{{else}}{{.Workers}} running{{end}}</div></div>
+  <div class="stat"><div class="label">Requests</div><div class="value">{{if .Measured}}{{printf "%.1f" .PerSecond}}{{else}}—{{end}}</div><div class="sub">a second · {{.PM}}</div></div>
+</div>
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+{{if .SlowEntries}}<h3>Slow log</h3>
+<p class="muted">The stack trace of each request that took over {{.SlowTimeout}}: the last lines show where it was. Read from <code>{{.SlowLog}}</code> for this page.</p>
+{{range .SlowEntries}}<pre>{{.}}</pre>{{end}}{{end}}
+{{end}}
+
+<h2>OPcache</h2>
+<p class="muted">Each PHP version has its own cache of compiled files, shared by its pools.</p>
+{{range .OPcaches}}
+<h3>PHP {{.Version}}</h3>
+{{if .Findings}}<div class="error">{{range .Findings}}<p>{{.}}</p>{{end}}</div>{{end}}
+{{if .Values}}<div class="table-wrap"><table>
+  <tr><th>Memory used</th><th>Files (of the limit)</th><th>Interned strings</th><th>From the cache</th><th>Restarts</th></tr>
+  <tr><td>{{printf "%.0f" (index .Values "memory_pct")}}% of {{bytes (int64 (index .Values "memory"))}}{{if index .Values "wasted_pct"}} ({{printf "%.0f" (index .Values "wasted_pct")}}% wasted){{end}}</td><td>{{printf "%.0f" (index .Values "scripts")}} ({{printf "%.0f" (index .Values "keys_pct")}}%)</td><td>{{printf "%.0f" (index .Values "strings_pct")}}%</td><td>{{printf "%.1f" (index .Values "hit_rate")}}%</td><td>{{printf "%.0f" (index .Values "restarts")}}</td></tr>
+</table></div>
+{{else}}<p class="muted">Not read yet: it's read every 5 minutes, once the OPcache script is installed (Settings → Monitoring → PHP-FPM).</p>{{end}}
+{{end}}
+{{end}}
+{{end}}{{end}}

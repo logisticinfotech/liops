@@ -22,8 +22,8 @@ const DefaultEtc = "/etc/php"
 const StatusPath = "/liops-fpm-status"
 
 // OPcacheScript is the read-only script liops installs to read OPcache's numbers; it
-// runs in a pool through FastCGI, never through the web server.
-const OPcacheScript = "/usr/local/lib/liops/opcache-status.php"
+// runs in a pool through FastCGI, never through the web server. Tests point it elsewhere.
+var OPcacheScript = "/usr/local/lib/liops/opcache-status.php"
 
 // OPcacheScriptSource prints OPcache's numbers as JSON: sizes and counters, no file
 // names or values.

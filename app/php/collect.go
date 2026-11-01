@@ -67,6 +67,13 @@ func (c *Collector) Collect(ctx context.Context, now time.Time) (fpm, opcache ma
 		fpm["fpm.idle:"+l] = st.Idle
 		fpm["fpm.total:"+l] = st.Total
 		fpm["fpm.queue:"+l] = st.ListenQueue
+		fpm["fpm.max_queue:"+l] = st.MaxListenQueue // the most that ever waited, since the pool started
+		// Every worker busy: the next request waits. PHP-FPM measures its listen queue only
+		// on TCP sockets, so on the usual Unix socket this is the signal that works.
+		fpm["fpm.saturated:"+l] = 0
+		if st.Idle == 0 && p.MaxChildren > 0 && st.Active >= float64(p.MaxChildren) {
+			fpm["fpm.saturated:"+l] = 1
+		}
 		fpm["fpm.max_children:"+l] = float64(p.MaxChildren)
 		if prev, ok := c.prev[l]; ok {
 			// Counters start again when the pool is reloaded (start since goes down).

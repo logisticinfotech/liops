@@ -86,6 +86,23 @@
   {{end}}
   {{range .Skipped}}<p class="muted">Left alone: {{.}}.</p>{{end}}
   {{else}}{{if not .WebLogsError}}<p class="muted">No nginx or Caddy config found on this server.</p>{{end}}{{end}}
-</div>{{end}}
+</div>
+{{if or .PHP .PHPError}}<div class="panel" id="php">
+  <h2>PHP-FPM</h2>
+  {{with .PHPError}}<div class="error">{{.}}</div>{{end}}
+  {{with .PHP}}
+  <p class="muted">liops reads each pool's status page through its socket every 15 seconds (workers, requests waiting for one, "max children reached"), each PHP version's OPcache, and the slow log's stack traces.</p>
+  {{if .Done}}<p><span class="badge ok">ready</span> {{len .Pools}} pool{{if gt (len .Pools) 1}}s{{end}}: {{range $i, $p := .Pools}}{{if $i}}, {{end}}<span class="mono">{{$p.Label}}</span>{{end}}.</p>
+  {{else}}
+  <p>liops would make these changes, keeping copies of the files, check each version's config (<code>php-fpm8.x -t</code>) and reload it: no restart, running requests finish, and if the check fails the files are put back.</p>
+  <div class="table-wrap"><table>
+    <tr><th>File</th><th>Pools</th><th>Adds</th></tr>
+    {{range .Files}}<tr><td class="mono">{{.Path}}</td><td class="mono">{{join .Sites ", "}}</td><td><pre>{{lines .Adds}}</pre></td></tr>{{end}}
+    {{if .Script}}<tr><td class="mono">/usr/local/lib/liops/opcache-status.php</td><td>all</td><td>A read-only script that prints OPcache's numbers (no file names or values). It runs through the pools' sockets, not the web server.</td></tr>{{end}}
+  </table></div>
+  <p class="muted">The status path is only reachable through the pool's socket: nginx passes only <code>.php</code> scripts to PHP-FPM.</p>
+  <form method="post" action="/settings/monitor/php"><input type="hidden" name="csrf" value="{{$.CSRF}}"><div class="actions"><button>Apply the PHP-FPM changes</button></div></form>
+  {{end}}{{end}}
+</div>{{end}}{{end}}
 {{end}}
 {{end}}{{end}}

@@ -553,8 +553,10 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 			"cpus": 4, "cpu.busy": 37, "cpu.user": 30, "load.1": 6.5, "mem.total": 8 << 30, "mem.used": 3 << 30,
 			"disk.pct:/": 41, "disk.pct:/var": 88, "io.read:sda": 1000, "net.rx:eth0": 500,
 			"disk.used:/var": 88e9, "disk.size:/var": 100e9, "db.size:shop": 5 << 30, "disk.use:pg_wal": 1 << 30,
+			"mem.available": 2 << 30, "fpm.total:8.3/www": 5, "fpm.active:8.3/www": 5, "fpm.idle:8.3/www": 0, "fpm.queue:8.3/www": 2,
+			"opcache.enabled:8.3": 1, "opcache.full:8.3": 1, "opcache.memory_pct:8.3": 100, "opcache.memory:8.3": 128 << 20, "opcache.hit_rate:8.3": 91,
 			"svc.mem:nginx.service": 50 << 20, "svc.cpu:nginx.service": 2, "svc.mem:postgresql.service": 900 << 20,
-		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 12, CPU: 80, Memory: 600 << 20}},
+		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 5, CPU: 80, Memory: 5 * 60 << 20}},
 			Checks: monitor.Checks{Time: now, FailedUnits: []string{"queue-worker.service"}, RebootRequired: true, RebootPackages: []string{"libc6"}}})
 	})
 	mux.HandleFunc("GET /v1/db", func(w http.ResponseWriter, r *http.Request) {
@@ -837,5 +839,35 @@ func TestWebServerSettings(t *testing.T) {
 	}
 	if !slices.Contains(ran, "nginx -t") || !slices.Contains(ran, "systemctl reload nginx") {
 		t.Errorf("ran %q", ran)
+	}
+}
+
+func TestPHPPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	etc := t.TempDir()
+	h.ui.PHPEtc = etc
+	os.MkdirAll(filepath.Join(etc, "8.3", "fpm", "pool.d"), 0o755)
+	slow := filepath.Join(t.TempDir(), "www.slow.log")
+	os.WriteFile(slow, []byte("\n[01-Nov-2026 05:00:00]  [pool www] pid 4242\nscript_filename = /srv/app/public/index.php\n[0x00007f] usleep() /srv/app/app/Reports.php:42\n"), 0o644)
+	os.WriteFile(filepath.Join(etc, "8.3", "fpm", "pool.d", "www.conf"), []byte("[www]\nlisten = /run/php/php8.3-fpm.sock\npm = dynamic\npm.max_children = 5\npm.status_path = /liops-fpm-status\nrequest_slowlog_timeout = 3s\nslowlog = "+slow+"\n"), 0o644)
+
+	code, _, body := h.get("/monitoring/php?range=24h")
+	if code != 200 {
+		t.Fatalf("GET: %d\n%s", code, body)
+	}
+	for _, want := range []string{`href="/monitoring/php">PHP`, "Pool <span class=\"mono\">8.3/www</span>", "It ran out of workers", "Raise pm.max_children (now 5); the memory free allows about 31",
+		"2 requests are waiting", "60 MB", "Reports.php:42", "OPcache is full", "Only 91.0%"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the PHP page should contain %q", want)
+		}
+	}
+
+	// Settings: the pool already has both, but the OPcache script isn't installed.
+	_, _, body = h.get("/settings?tab=monitoring")
+	if !strings.Contains(body, "PHP-FPM") || !strings.Contains(body, "opcache-status.php") {
+		t.Errorf("the settings panel should offer the OPcache script")
 	}
 }
