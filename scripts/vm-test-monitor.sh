@@ -172,7 +172,9 @@ vm sudo bash -s <<-'EOF'
 EOF
 sleep 1040
 # The eviction load also evicted the queue (a finding of its own): queue the jobs again.
-vm sudo bash -c 'for i in $(seq 1 1500); do echo "RPUSH shop_database_queues:default job$i"; done | redis-cli >/dev/null'
+vm sudo bash -s <<-'EOF'
+	for i in $(seq 1 1500); do echo "RPUSH shop_database_queues:default job$i"; done | redis-cli >/dev/null
+EOF
 sleep 30
 
 step "Check what the monitor saw"
