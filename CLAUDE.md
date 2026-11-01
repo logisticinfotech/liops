@@ -9,7 +9,7 @@ and manages two backup layers to S3-compatible storage: pgBackRest point-in-time
 (layer 1) and a nightly streamed `pg_dump` per database (layer 2), plus a loopback-only status
 UI and SMTP emails. MySQL 8.4 is supported too (`engine: mysql`, `docs/PLAN-mysql.md`): XtraBackup full/diff
 plus shipped binlogs (layer 1) and nightly `mysqldump` (layer 2), with the same installer,
-wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0 machine resources and MO1 databases are in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
+wizard and UI. Per-server monitoring is being built (`docs/PLAN-monitor.md`; MO0 machine, MO1 databases and MO2 requests/PHP/apps/Redis are in). **`docs/PLAN.md` is the design source of truth.** It covers decisions,
 the planned package layout (§8.2), and build phases (§9). Read the relevant section before
 building a new feature. Phases 0–3 are implemented (engine, UI, installer, wizard); §10
 "Status" in PLAN.md says what is still untested. Keep it current.
@@ -122,6 +122,14 @@ touches the live server.
   hex-encoded in SQL. **Real values** (running statements, MySQL's sample statement) are
   read live for a page and never stored, logged or emailed. Pages: `dbmonitor.go`
   (`/monitoring/database`); the daily summary's Server health comes from `jobs.serverHealth`.
+- **Requests, PHP, apps** (MO2): the monitor tails access logs (`tail.go`, `reqstore.go`:
+  routes, never raw URLs) and reads Redis as its own ACL user (`redis.go`). Root reads what the
+  monitor can't: PHP-FPM status/OPcache over FastCGI (`app/php`, pushed every 15 s with a
+  short lifetime) and Laravel apps (`app/laravel`: named `.env` keys only, findings out, never
+  values; errors grouped live from `storage/logs`). Config changes to nginx, Caddy, PHP-FPM and
+  Redis are planned in `app/setup` (`weblogs.go`, `phpfpm.go`, `redis.go`), shown in Settings,
+  and applied only on a button: back up, check (`nginx -t`, `caddy validate`, `php-fpmX.Y -t`),
+  put back on failure, reload (never restart). Deploys go into the audit log as chart markers.
 - **Layouts** (`postgres.layout`): `debian` (servers, the default) or `homebrew` (Mac
   development). Everything that differs between them (cluster discovery, binary and config
   paths, restart commands) goes through `postgres.Cluster` methods, `pgbackrest.ConfPath`

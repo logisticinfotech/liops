@@ -467,6 +467,40 @@ Not in MO1: queries per request (N+1) needs the request counts from MO2, and MyS
 deadlock report (deadlocks are counted). Real values (running statements, the sample) are only
 read live for a page.
 
+**MO2 status (November 2026).** Built, in three parts:
+
+- **Requests** (monitor): nginx (a JSON `log_format liops` in its own file) and Caddy (its JSON
+  logs, from files or the journal) tailed through rotation; routes, not URLs; per site and
+  route, per minute and hour, counts, 4xx/5xx, total and upstream time and a histogram for
+  p50/p95/p99 (capped at the slowest seen); the slowest requests and top clients per hour
+  (routes only, 7 days); the 7-day heatmap. The log changes are proposed in Settings and
+  applied on approval: files backed up, `nginx -t` / `caddy validate`, put back on failure,
+  reloaded. Monitoring → Requests.
+- **PHP-FPM** (root, pushed to the monitor): each pool's status page over FastCGI every 15 s,
+  each version's OPcache every 5 minutes through a read-only script; "all workers busy" as
+  the starvation signal (FPM counts "max children reached" only for dynamic pools and measures
+  its queue only on TCP sockets), memory per worker and the `pm.max_children` memory allows;
+  the slow log read live. Settings applies `pm.status_path`, the slow log and the script
+  (`php-fpmX.Y -t`, put back on failure, reload). Monitoring → PHP.
+- **Apps, Redis, deploys**: Laravel apps found from the sites' roots; checks from named `.env`
+  keys only (debug, caches, log level, `QUEUE_CONNECTION=sync`, Telescope, Debugbar, file or
+  database sessions/cache); sessions in Redis (sharing the cache's database, an evicting
+  policy when full, no persistence, Redis reachable from outside); errors grouped from
+  `storage/logs` (read live); the scheduler from cron's journal; database queue tables. Redis
+  through the monitor's own ACL user (`INFO`, `SLOWLOG GET`, `PING` only), set up on approval.
+  Deploys (a `current` symlink or git commit changing) go into the audit log and onto the
+  charts. Monitoring → Apps and → Redis.
+
+Checked in an Ubuntu 26.04 VM with nginx, PHP 8.5 and Redis 8.0: a slow tenant's route leads
+the routes with its p95 and app time; a 2-worker pool under slow requests reads "busy in 100%
+of the readings"; a 200-file OPcache with 400 files reads full; `QUEUE_CONNECTION=sync` and an
+evicting, never-saving session Redis sharing the cache's database are each reported; a commit
+change shows as a deploy; and broken configs were refused and put back.
+
+Not yet: queue backlog from Redis (needs key names the monitor isn't allowed to list), the
+per-host split of queries per request (N+1, needs both sides joined), slow-log stack traces
+next to the slow requests, and a `make vm-test-monitor` script that does the above by itself.
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the

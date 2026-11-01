@@ -1,0 +1,27 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Apps</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+<p class="muted">The Laravel apps behind this server's sites. liops reads only the settings these checks need from each <code>.env</code>, and never shows or stores its values.</p>
+{{range .Apps}}
+<h2 class="mono">{{.Dir}}</h2>
+<p class="muted">{{join .Sites ", "}}{{with .Release}} · deployed: <span class="mono">{{.}}</span>{{end}}</p>
+{{$bad := false}}{{range .Check.Findings}}{{if .Bad}}{{$bad = true}}{{end}}{{end}}
+{{if or $bad .Sessions}}<div class="error">{{range .Check.Findings}}{{if .Bad}}<p>{{.Text}}</p>{{end}}{{end}}{{range .Sessions}}<p>{{.}}</p>{{end}}</div>{{end}}
+{{range .Check.Findings}}{{if not .Bad}}<p class="muted">{{.Text}}</p>{{end}}{{end}}
+{{if not (or .Check.Findings .Sessions)}}<p><span class="badge ok">healthy</span> Debug off, config and routes cached, a real queue{{if .Check.SessionsInRedis}}, sessions safe in Redis{{end}}.</p>{{end}}
+{{with .Scheduler}}<p>{{.}}</p>{{end}}
+{{with .Jobs}}<p>Database queue: {{join . "; "}}.</p>{{end}}
+
+<h3>Errors in the last 24 hours</h3>
+{{if .Errors}}<div class="table-wrap"><table>
+  <tr><th>Error</th><th class="num">Times</th><th>First</th><th>Last</th></tr>
+  {{range .Errors}}<tr><td>{{if .Class}}<span class="mono">{{.Class}}</span><div class="muted mono">{{.Where}}</div>{{else}}<span class="mono">{{.Where}}</span>{{end}}
+    <details><summary class="muted">latest message</summary><pre>{{.Message}}</pre></details></td>
+    <td class="num">{{.Count}}</td><td>{{when .First}}</td><td>{{when .Last}}</td></tr>{{end}}
+</table></div>
+<p class="muted">Grouped from <code>storage/logs</code> when this page opened; the messages can hold personal data, so they're shown here and never stored.</p>
+{{else}}<p class="muted">No ERROR or CRITICAL lines in <code>storage/logs</code>.</p>{{end}}
+{{end}}
+{{end}}
+{{end}}{{end}}

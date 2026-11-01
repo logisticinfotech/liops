@@ -205,6 +205,15 @@ func (s *Server) jobMarkers(since time.Time) []chartMarker {
 		}
 		out = append(out, chartMarker{Start: r.Start.Unix(), End: end.Unix(), Label: r.Job})
 	}
+	// Deploys (service.WatchDeploys records them in the audit log): a thin marker each.
+	if entries, err := s.Svc.State.AuditLog(0, 1000); err == nil {
+		for _, e := range entries {
+			if e.Action == "deploy" && e.Time.After(since) {
+				out = append(out, chartMarker{Start: e.Time.Unix(), End: e.Time.Unix(), Label: "deploy"})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
 	return out
 }
 

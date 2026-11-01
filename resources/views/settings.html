@@ -103,6 +103,15 @@
   <p class="muted">The status path is only reachable through the pool's socket: nginx passes only <code>.php</code> scripts to PHP-FPM.</p>
   <form method="post" action="/settings/monitor/php"><input type="hidden" name="csrf" value="{{$.CSRF}}"><div class="actions"><button>Apply the PHP-FPM changes</button></div></form>
   {{end}}{{end}}
+</div>{{end}}
+{{with .Redis}}<div class="panel" id="redis">
+  <h2>Redis</h2>
+  {{if .Error}}
+  <p>The monitor reads Redis's own numbers (memory, evictions, hit ratio, the slow log) as a Redis user of its own, <code>liops-monitor</code>, allowed only <code>INFO</code>, <code>SLOWLOG GET</code> and <code>PING</code>: no keys, no values, no config. Set up Redis access adds that user and saves it (<code>ACL SAVE</code>, or <code>CONFIG REWRITE</code> without an ACL file).</p>
+  <form method="post" action="/settings/monitor/redis"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+    {{if $.Data.NeedRedisPassword}}<label>Redis password (requirepass)<input type="password" name="redis_password" autocomplete="off"></label><p class="hint">Used once, through redis-cli's input (not its command line), and never stored.</p>{{end}}
+    <div class="actions"><button>Set up Redis access</button></div></form>
+  {{else}}<p><span class="badge ok">ready</span> Redis {{.Version}} at <span class="mono">{{.Addr}}</span>.</p>{{end}}
 </div>{{end}}{{end}}
 {{end}}
 {{end}}{{end}}

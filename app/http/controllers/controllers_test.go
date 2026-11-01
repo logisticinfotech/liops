@@ -553,7 +553,7 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 			"cpus": 4, "cpu.busy": 37, "cpu.user": 30, "load.1": 6.5, "mem.total": 8 << 30, "mem.used": 3 << 30,
 			"disk.pct:/": 41, "disk.pct:/var": 88, "io.read:sda": 1000, "net.rx:eth0": 500,
 			"disk.used:/var": 88e9, "disk.size:/var": 100e9, "db.size:shop": 5 << 30, "disk.use:pg_wal": 1 << 30,
-			"mem.available": 2 << 30, "fpm.total:8.3/www": 5, "fpm.active:8.3/www": 5, "fpm.idle:8.3/www": 0, "fpm.queue:8.3/www": 2,
+			"mem.available": 2 << 30, "redis.memory": 1e9, "redis.maxmemory": 1 << 30, "redis.keys:db0": 1200, "fpm.total:8.3/www": 5, "fpm.active:8.3/www": 5, "fpm.idle:8.3/www": 0, "fpm.queue:8.3/www": 2,
 			"opcache.enabled:8.3": 1, "opcache.full:8.3": 1, "opcache.memory_pct:8.3": 100, "opcache.memory:8.3": 128 << 20, "opcache.hit_rate:8.3": 91,
 			"svc.mem:nginx.service": 50 << 20, "svc.cpu:nginx.service": 2, "svc.mem:postgresql.service": 900 << 20,
 		}, Processes: []monitor.Process{{Command: "php-fpm: pool www", Count: 5, CPU: 80, Memory: 5 * 60 << 20}},
@@ -602,6 +602,12 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 				{DB: "tenant_a", Table: "customers", Name: "old_idx", Definition: "(tenant_id)", Unused: true, Duplicate: "tenant_email"}},
 			Memory: map[string]float64{"innodb_buffer_pool_size": 128 << 20},
 			Growth: map[string]float64{"tenant_a/readings": 30e6}})
+	})
+	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.RedisResponse{
+			Status:  &monitor.RedisStatus{Addr: "127.0.0.1:6379", Version: "7.2.4", Checked: now, Policy: "allkeys-lru"},
+			Slowlog: []monitor.SlowCommand{{At: now, MS: 25, Args: []string{"KEYS", "session:*"}}},
+		})
 	})
 	mux.HandleFunc("GET /v1/requests", func(w http.ResponseWriter, r *http.Request) {
 		var slow, fast monitor.RouteStats
@@ -869,5 +875,50 @@ func TestPHPPage(t *testing.T) {
 	_, _, body = h.get("/settings?tab=monitoring")
 	if !strings.Contains(body, "PHP-FPM") || !strings.Contains(body, "opcache-status.php") {
 		t.Errorf("the settings panel should offer the OPcache script")
+	}
+}
+
+func TestAppsAndRedisPages(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	app := t.TempDir()
+	for _, d := range []string{"public", "bootstrap/cache", "storage/logs"} {
+		os.MkdirAll(filepath.Join(app, d), 0o755)
+	}
+	os.WriteFile(filepath.Join(app, "artisan"), nil, 0o755)
+	os.WriteFile(filepath.Join(app, ".env"), []byte("APP_ENV=production\nAPP_DEBUG=false\nDB_PASSWORD=hunter2-secret\nQUEUE_CONNECTION=sync\nSESSION_DRIVER=redis\nCACHE_STORE=redis\nREDIS_CACHE_DB=0\n"), 0o600)
+	os.WriteFile(filepath.Join(app, "storage", "logs", "laravel.log"), []byte("["+time.Now().Format("2006-01-02 15:04:05")+"] production.ERROR: Payment gateway timeout for order 12345\n"), 0o644)
+	nginx := t.TempDir()
+	os.MkdirAll(filepath.Join(nginx, "sites-enabled"), 0o755)
+	os.WriteFile(filepath.Join(nginx, "sites-enabled", "shop"), []byte("server {\n  server_name shop.example.com;\n  root "+app+"/public;\n}\n"), 0o644)
+	h.ui.NginxDir, h.ui.Caddyfile = nginx, filepath.Join(nginx, "none")
+
+	code, _, body := h.get("/monitoring/apps")
+	if code != 200 {
+		t.Fatalf("GET apps: %d\n%s", code, body)
+	}
+	for _, want := range []string{`href="/monitoring/apps">Apps`, "shop.example.com", "QUEUE_CONNECTION is sync", "config isn&#39;t cached",
+		"share Redis database 0", "can evict session keys", "never saves to disk", "Payment gateway timeout for order N", "schedule:run didn&#39;t run"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Apps page should contain %q", want)
+		}
+	}
+	if strings.Contains(body, "hunter2") {
+		t.Error("a .env secret reached the page")
+	}
+
+	code, _, body = h.get("/monitoring/redis?range=24h")
+	if code != 200 {
+		t.Fatalf("GET redis: %d\n%s", code, body)
+	}
+	for _, want := range []string{"Redis evicted", "allkeys-lru", "KEYS session:*", "never", "db0", "can evict session keys"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Redis page should contain %q", want)
+		}
+	}
+	if _, _, body := h.get("/settings?tab=monitoring"); !strings.Contains(body, "Redis 7.2.4") {
+		t.Error("Settings should show Redis as ready")
 	}
 }

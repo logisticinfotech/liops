@@ -24,6 +24,7 @@ import (
 	"github.com/logisticinfotech/liops/app/engines/pgbackrest"
 	"github.com/logisticinfotech/liops/app/http/controllers"
 	"github.com/logisticinfotech/liops/app/jobs"
+	"github.com/logisticinfotech/liops/app/laravel"
 	"github.com/logisticinfotech/liops/app/monitor"
 	"github.com/logisticinfotech/liops/app/notify"
 	"github.com/logisticinfotech/liops/app/php"
@@ -159,6 +160,7 @@ func runServe(args []string, out io.Writer) error {
 	ui.WebBackupDir = filepath.Join(filepath.Dir(p.state), "backups")
 	go svc.PushDiskUsage(ui.Monitor.Push)
 	go svc.CollectPHP(php.DefaultEtc, ui.Monitor.PushFor)
+	go svc.WatchDeploys(func() []laravel.App { return laravel.FindApps(ui.NginxDir, ui.Caddyfile) })
 	listen := svc.Config().UI.Listen
 	if err := config.CheckUIListen(listen); err != nil {
 		return fmt.Errorf("ui.listen: %w", err)

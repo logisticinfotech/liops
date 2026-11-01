@@ -1,0 +1,25 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Redis</h1>
+{{if .Problem}}<div class="note">{{.Problem}}</div>{{else}}
+{{if or .Findings .Sessions}}<div class="error">{{range .Findings}}<p>{{.}}</p>{{end}}{{range .Sessions}}{{$dir := .Dir}}{{range .Findings}}<p><span class="mono">{{$dir}}</span>: {{.}}</p>{{end}}{{end}}</div>{{end}}
+<nav class="tabs" aria-label="Time range">{{range .Ranges}}<a class="tab{{if eq . $.Data.Range}} active{{end}}" href="/monitoring/redis?range={{.}}">{{if eq . "1h"}}Last hour{{else if eq . "24h"}}24 hours{{else if eq . "7d"}}7 days{{else}}90 days{{end}}</a>{{end}}</nav>
+{{with .Facts}}<div class="grid">
+  <div class="stat"><div class="label">Memory</div><div class="value">{{bytes (int64 .Memory)}}</div><div class="sub">{{if .MaxMemory}}of {{bytes (int64 .MaxMemory)}} maxmemory{{else}}no maxmemory: it grows until the server runs out{{end}}</div></div>
+  <div class="stat"><div class="label">Evicted</div><div class="value">{{count .Evicted}}</div><div class="sub">keys in 24 hours · {{.Status.Policy}}</div></div>
+  <div class="stat"><div class="label">Saved to disk</div><div class="value">{{if .Status.AOF}}AOF{{else if .Status.LastSave.IsZero}}never{{else}}{{when .Status.LastSave}}{{end}}</div><div class="sub">{{if .Status.AOF}}every write is logged{{else}}RDB snapshots{{end}}</div></div>
+  <div class="stat"><div class="label">Version</div><div class="value">{{.Status.Version}}</div><div class="sub mono">{{.Status.Addr}}</div></div>
+</div>{{end}}
+{{range .Charts}}<div class="chart" data-chart="{{.Spec}}"><div class="chart-title">{{.Title}}</div></div>{{end}}
+{{if .Keys}}<h2>Keys</h2>
+<div class="table-wrap"><table><tr><th>Database</th><th class="num">Keys</th></tr>
+  {{range $db, $n := .Keys}}<tr><td class="mono">{{$db}}</td><td class="num">{{count $n}}</td></tr>{{end}}
+</table></div>{{end}}
+<h2>Slow commands</h2>
+{{if .Slowlog}}<div class="table-wrap"><table><tr><th>When</th><th class="num">Time</th><th>Command</th></tr>
+  {{range .Slowlog}}<tr><td>{{datetime .At}}</td><td class="num">{{ms .MS}}</td><td class="mono">{{join .Args " "}}</td></tr>{{end}}
+</table></div>
+<p class="muted">Redis's own slow log, read when this page opened. Commands can hold keys and values, so they're never stored. <code>KEYS</code> and big <code>SMEMBERS</code>/<code>HGETALL</code> calls block every other client while they run.</p>
+{{else}}<p class="muted">Nothing in Redis's slow log.</p>{{end}}
+{{end}}
+{{end}}{{end}}

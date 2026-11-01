@@ -159,11 +159,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /settings/monitor/restart", page(s.monitorRestart))
 	mux.Handle("POST /settings/monitor/weblogs", page(s.monitorWebLogs))
 	mux.Handle("POST /settings/monitor/php", page(s.monitorPHP))
+	mux.Handle("POST /settings/monitor/redis", page(s.monitorRedis))
 	mux.Handle("GET /audit", page(s.auditPage))
 	mux.Handle("GET /monitoring/resources", page(s.resources))
 	mux.Handle("GET /monitoring/database", page(s.dbMonitor))
 	mux.Handle("GET /monitoring/requests", page(s.requests))
 	mux.Handle("GET /monitoring/php", page(s.phpPage))
+	mux.Handle("GET /monitoring/apps", page(s.apps))
+	mux.Handle("GET /monitoring/redis", page(s.redisPage))
 	mux.Handle("GET /monitoring/database/query", page(s.dbMonitorQuery))
 
 	var h http.Handler = mux

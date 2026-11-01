@@ -26,16 +26,18 @@ type settingsData struct {
 	Tab    string // the tab shown
 
 	// The Monitoring tab: the databases the monitor found, and what's left to set up.
-	DBs              []monitor.DBStatus
-	DBError          string // the monitor couldn't be asked
-	DBProblem        string // setting up database access failed
-	NeedRootPassword bool   // MySQL's root needs a password to set it up
-	PGRestart        bool   // PostgreSQL waits for a restart to load pg_stat_statements
-	PGRestartCommand string
-	WebLogs          []setup.WebLogPlan // what each web server needs so its requests are read
-	WebLogsError     string
-	PHP              *setup.PHPPlan // what PHP-FPM needs; nil without pools
-	PHPError         string
+	DBs               []monitor.DBStatus
+	DBError           string // the monitor couldn't be asked
+	DBProblem         string // setting up database access failed
+	NeedRootPassword  bool   // MySQL's root needs a password to set it up
+	PGRestart         bool   // PostgreSQL waits for a restart to load pg_stat_statements
+	PGRestartCommand  string
+	WebLogs           []setup.WebLogPlan // what each web server needs so its requests are read
+	WebLogsError      string
+	PHP               *setup.PHPPlan // what PHP-FPM needs; nil without pools
+	PHPError          string
+	Redis             *monitor.RedisStatus // nil without Redis
+	NeedRedisPassword bool
 }
 
 // settingsTab is one tab of the Settings page and the sections (forms) on it.
@@ -85,6 +87,9 @@ func (s *Server) databaseAccess(ctx context.Context, cfg *config.Config, d *sett
 	d.DBs = dbs
 	d.WebLogs, d.WebLogsError = s.webLogPlans()
 	d.PHP, d.PHPError = s.phpPlan()
+	if res, err := s.Monitor.Redis(ctx); err == nil && res.Status != nil && !res.Status.Absent {
+		d.Redis = res.Status
+	}
 	if runner := s.Svc.Runner(); runner != nil && !cfg.IsMySQL() {
 		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
 		d.PGRestart = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"

@@ -471,7 +471,8 @@ Rough estimates for one developer. Each phase ends with a usable result.
 - **Monitoring:** proposed in [PLAN-monitor.md](PLAN-monitor.md) (November 2026): a per-server,
   non-root `liops-monitor` service for slow requests, PHP-FPM, database query load, machine
   resources and logs, with a "tune, fix the app, or a bigger VM" verdict. MO0 (machine,
-  services, checks, disk) and MO1 (databases: query efficiency, locks, tables, indexes, the
-  Database page, the email headline) are built; see its §8.
+  services, checks, disk), MO1 (databases: query efficiency, locks, tables, indexes, the
+  email headline) and MO2 (requests from nginx/Caddy, PHP-FPM and OPcache, Laravel apps,
+  Redis and sessions, deploy markers) are built; see its §8.
 - **Next:** test on a real Ubuntu server: Phase 1's week-long run and Phase 3's fresh-VM
   install.

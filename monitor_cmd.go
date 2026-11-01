@@ -31,6 +31,7 @@ func runMonitor(args []string, out io.Writer) error {
 	mysqlSocket := flags.String("mysql-socket", monitor.DefaultMySQLSocket, "MySQL's socket")
 	nginxLog := flags.String("nginx-log", monitor.NginxLogPath, "the access log liops adds to nginx")
 	caddyfile := flags.String("caddyfile", monitor.DefaultCaddyfile, "Caddy's config, to find its access logs")
+	redis := flags.String("redis", monitor.DefaultRedis, "Redis's address (host:port or a socket path)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -48,6 +49,7 @@ func runMonitor(args []string, out io.Writer) error {
 	m := monitor.New(monitor.NewCollector("/"), store, os.Stderr)
 	m.FindDBs = func() []monitor.DBServer { return monitor.FindDBServers(*pgDir, *mysqlSocket) }
 	m.FindLogs = func() []monitor.LogSource { return monitor.FindLogSources(*nginxLog, *caddyfile) }
+	m.Redis = monitor.FindRedis(*redis)
 	errc := make(chan error, 1)
 	go func() { errc <- monitor.Serve(ctx, *socket, m.Handler()) }()
 	fmt.Fprintf(out, "liops monitor: sampling every %s, answering on %s\n", monitor.Interval, *socket)

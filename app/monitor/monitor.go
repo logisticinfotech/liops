@@ -59,6 +59,9 @@ type Monitor struct {
 	// them again every few minutes.
 	LogSources []LogSource
 	FindLogs   func() []LogSource
+	// Redis is the local Redis, if any (FindRedis).
+	Redis *RedisServer
+	redis *redisState
 }
 
 func New(collector *Collector, store *Store, log io.Writer) *Monitor {
@@ -82,6 +85,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	go m.slowLoop(ctx)
 	go m.dbLoop(ctx)
 	go m.reqLoop(ctx)
+	go m.redisLoop(ctx)
 	tick := time.NewTicker(Interval)
 	defer tick.Stop()
 	prune := time.NewTicker(time.Hour)
@@ -187,6 +191,21 @@ func (m *Monitor) Handler() http.Handler {
 	})
 	m.dbHandlers(mux, writeJSON)
 	m.reqHandlers(mux, writeJSON)
+	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
+		var res RedisResponse
+		m.mu.Lock()
+		if m.redis != nil {
+			st := m.redis.status
+			res.Status = &st
+		}
+		m.mu.Unlock()
+		if res.Status != nil && res.Status.Error == "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			res.Slowlog, _ = m.RedisSlowlog(ctx)
+			cancel()
+		}
+		writeJSON(w, res)
+	})
 	mux.HandleFunc("POST /v1/push", func(w http.ResponseWriter, r *http.Request) {
 		var req PushRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
