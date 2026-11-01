@@ -69,7 +69,8 @@ func runRestoreFiles(args []string, out io.Writer) error {
 		return err
 	}
 
-	loc, _ := cfg.Location()
+	// mysqlbinlog --stop-datetime is the OS timezone of this machine, not server.timezone.
+	loc := time.Local
 	moment := "the newest change shipped"
 	if !target.IsZero() {
 		moment = target.In(loc).Format("2 Jan 2006 15:04:05 MST")
@@ -98,7 +99,7 @@ func runRestoreFiles(args []string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "\nThe files are ready in %s. liops hasn't changed MySQL. To finish the restore, which\n"+
 		"replaces this server's data with it (see docs/restore-mysql.md):\n\n", *dir)
-	fmt.Fprint(out, xtrabackup.RestoreCommands(plan, *dir, cfg.MySQL.DataDir, time.Local))
+	fmt.Fprint(out, xtrabackup.RestoreCommands(plan, *dir, cfg.MySQL.DataDir, loc))
 	return nil
 }
 

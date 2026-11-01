@@ -25,6 +25,8 @@ type Memory struct {
 	// FailList, when set, makes List fail for prefixes starting with it, as an unreachable
 	// S3 server would.
 	FailList string
+	// FailDelete, when set, makes Delete fail for keys with this prefix.
+	FailDelete string
 }
 
 type memObject struct {
@@ -99,6 +101,9 @@ func (m *Memory) Any(ctx context.Context, prefix string) (bool, error) {
 func (m *Memory) Delete(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.FailDelete != "" && strings.HasPrefix(key, m.FailDelete) {
+		return errors.New("delete refused (test)")
+	}
 	delete(m.objects, key)
 	return nil
 }
@@ -107,4 +112,4 @@ func (m *Memory) DownloadURL(ctx context.Context, key string, ttl time.Duration)
 	return "https://storage.example.com/" + key, nil
 }
 
-func (m *Memory) Probe(ctx context.Context) error { return nil }
+func (m *Memory) Probe(ctx context.Context) error { return ProbeStore(ctx, m) }

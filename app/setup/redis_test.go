@@ -36,7 +36,7 @@ func TestRedisMonitorAccess(t *testing.T) {
 	if err := RedisMonitorAccess(context.Background(), fake(true, ""), "127.0.0.1:6379", `p"w`); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(inputs[0], `AUTH "p\"w"`+"\n"+"ACL SETUSER liops-monitor reset on nopass -@all +info +slowlog|get +ping") || !strings.Contains(inputs[1], "CONFIG REWRITE") {
+	if !strings.HasPrefix(inputs[0], `AUTH "p\"w"`+"\n"+"ACL SETUSER liops-monitor reset on nopass -@all +info +ping") || strings.Contains(inputs[0], "slowlog") || !strings.Contains(inputs[1], "CONFIG REWRITE") {
 		t.Errorf("inputs = %q", inputs)
 	}
 	for _, a := range argv {

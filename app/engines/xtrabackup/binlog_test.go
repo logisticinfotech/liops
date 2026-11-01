@@ -110,6 +110,25 @@ func TestShipBinlogs(t *testing.T) {
 	}
 }
 
+func TestShipBinlogsTreatsAResetAsAGap(t *testing.T) {
+	// The oldest backup started in binlog.000050; RESET BINARY LOGS started a new chain.
+	f := newFakeBinlogs(t, "binlog.000001", "binlog.000002")
+	e, store := binlogEngine(f)
+	res, err := e.ShipBinlogs(context.Background(), "binlog.000050")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(res.Gaps, []string{"binlog.000050"}) {
+		t.Errorf("gaps = %q", res.Gaps)
+	}
+	if !slices.Equal(res.Shipped, []string{"binlog.000001"}) {
+		t.Errorf("the new chain's closed file should still ship: %+v", res)
+	}
+	if _, ok := store.Get(BinlogPrefix + "binlog.000001.gz"); !ok {
+		t.Error("binlog.000001 should be in storage")
+	}
+}
+
 func TestShipBinlogsFindsGaps(t *testing.T) {
 	// binlog.000006 was purged from the server before it was shipped.
 	f := newFakeBinlogs(t, "binlog.000007", "binlog.000008")

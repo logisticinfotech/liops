@@ -21,7 +21,7 @@ type Evidence struct {
 	DiskDevice                           string
 	MemTotal                             float64
 	MemAvailMin                          float64 // the least memory available in the window
-	SwapIn                               float64 // pages swapped in a second, on average
+	SwapIn                               float64 // bytes swapped in a second, on average (collector swap.in)
 	OOMKills                             float64
 	Filesystems                          []Filesystem
 	Pools                                []Pool
@@ -153,13 +153,14 @@ func Judge(e Evidence) []Finding {
 			Do:      "A faster disk (NVMe, more IOPS), or more memory for the database's cache so it reads the disk less.", Link: "/monitoring/resources"})
 	}
 	lowMem := e.MemTotal > 0 && e.MemAvailMin < 0.05*e.MemTotal
-	if e.OOMKills > 0 || e.SwapIn >= 10 || lowMem {
+	const swapInBusy = 40 << 10 // 40 KiB/s ≈ 10 pages/s on 4K pages; collector reports bytes/s
+	if e.OOMKills > 0 || e.SwapIn >= swapInBusy || lowMem {
 		var why []string
 		if e.OOMKills > 0 {
 			why = append(why, fmt.Sprintf("the kernel killed %.0f processes for memory", e.OOMKills))
 		}
-		if e.SwapIn >= 10 {
-			why = append(why, fmt.Sprintf("it read %.0f pages a second back from swap", e.SwapIn))
+		if e.SwapIn >= swapInBusy {
+			why = append(why, fmt.Sprintf("it read %.0f KB a second back from swap", e.SwapIn/1024))
 		}
 		if lowMem {
 			why = append(why, fmt.Sprintf("memory available fell to %.0f%%", 100*e.MemAvailMin/e.MemTotal))
@@ -292,7 +293,7 @@ func Judge(e Evidence) []Finding {
 	}
 
 	// What's left when nothing above explains it.
-	if e.CPUHighShare >= 25 && !anyScans && !poolBusy {
+	if e.CPUHighShare >= 25 && !anyScans && !poolBusy && e.Steal < 5 {
 		add(Finding{Level: Problem, Area: "Machine", weight: 78, Says: "The workload has outgrown the VM",
 			Because: fmt.Sprintf("The CPU was over 80%% busy %s of the time, with no single query or setting behind it.", pct(e.CPUHighShare)),
 			Do:      fmt.Sprintf("More CPUs (it has %.0f).", e.CPUs), Link: "/monitoring/resources"})

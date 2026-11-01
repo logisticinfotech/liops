@@ -17,9 +17,9 @@ import (
 	"time"
 )
 
-// RedisUser is the monitor's Redis ACL user: allowed only INFO, SLOWLOG GET, PING, and
-// LLEN/ZCARD on Laravel's queue keys, so it reads no values and no config (CONFIG GET
-// would show requirepass).
+// RedisUser is the monitor's Redis ACL user: allowed only INFO, PING, and LLEN/ZCARD
+// on Laravel's queue keys, so it reads no values, no config (CONFIG GET would show
+// requirepass) and no SLOWLOG (arguments are real keys and values).
 const RedisUser = "liops-monitor"
 
 // DefaultRedis is where Ubuntu's Redis listens.
@@ -330,7 +330,8 @@ type SlowCommand struct {
 	Args []string  `json:"args"`
 }
 
-// RedisSlowlog reads Redis's slow log, live.
+// RedisSlowlog reads Redis's slow log, live. The UI does not call this: SLOWLOG
+// arguments are real keys and values, and the monitor user is not allowed to read it.
 func (m *Monitor) RedisSlowlog(ctx context.Context) ([]SlowCommand, error) {
 	if m.Redis == nil {
 		return nil, errors.New("no Redis found")

@@ -48,8 +48,19 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 		query := c.Args[len(c.Args)-1]
 		switch {
 		case program == "xtrabackup" && slices.Contains(c.Args, "--version"):
-			return []byte("xtrabackup version 8.4.0-7 based on MySQL server 8.4.0 Linux (aarch64)\n"), nil
+			ver := w.xbVersion
+			if ver == "" {
+				ver = "8.4.0-7"
+			}
+			return []byte("xtrabackup version " + ver + " based on MySQL server 8.4.0 Linux (aarch64)\n"), nil
 		case program == "xtrabackup":
+			w.mu.Lock()
+			fail := w.failBack
+			w.mu.Unlock()
+			if fail {
+				out := "xtrabackup: error: failed to connect to MySQL\n"
+				return []byte(out), &command.Error{Cmd: "xtrabackup", ExitCode: 1, Output: out, Err: errors.New("exit status 1")}
+			}
 			return fakeXtraBackup(c)
 		case program == "mysql" && strings.Contains(query, "VERSION()"):
 			return []byte("8.4.11-0ubuntu0.26.04.1\n"), nil
@@ -217,10 +228,80 @@ func TestMySQLBinlogGapTakesAFullBackup(t *testing.T) {
 	if len(runs) != 2 || runs[0].Trigger != Automatic {
 		t.Errorf("a gap should start a full backup: %+v", runs)
 	}
-	// The same gap isn't reported twice.
+	// The same gap isn't reported twice, and a successful catch-up isn't repeated.
 	w.runner.Run(ctx, Binlogs, Scheduled)
 	if len(w.subjects()) != 1 {
 		t.Errorf("emails = %q", w.subjects())
+	}
+	runs, _ = w.runner.State.Runs(Full, 10)
+	if len(runs) != 2 {
+		t.Errorf("a successful catch-up must not take another full: %+v", runs)
+	}
+}
+
+func TestMySQLBinlogGapRetriesFailedFull(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	w.write()
+	w.binlogQuery("FLUSH BINARY LOGS")
+	os.Remove(filepath.Join(w.binlogDir, "binlog.000003"))
+	w.failBack = true
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err == nil {
+		t.Fatal("the catch-up full should fail")
+	}
+	if v, _ := w.runner.State.GetMeta(metaBinlogCatchUp); v != "1" {
+		t.Errorf("catch-up should stay needed after a failed full, got %q", v)
+	}
+	w.failBack = false
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("retry: %v\n%s", err, w.log.String())
+	}
+	if v, _ := w.runner.State.GetMeta(metaBinlogCatchUp); v != "" {
+		t.Errorf("catch-up should clear after a successful full, got %q", v)
+	}
+	var gaps int
+	for _, s := range w.subjects() {
+		if strings.Contains(s, "binlogs missing") {
+			gaps++
+		}
+	}
+	if gaps != 1 {
+		t.Errorf("the gap is emailed once: %q", w.subjects())
+	}
+	runs, _ := w.runner.State.Runs(Full, 10)
+	var triggers []string
+	for _, r := range runs {
+		triggers = append(triggers, r.Trigger+"/"+r.Status)
+	}
+	if len(runs) < 3 || runs[0].Trigger != Automatic || runs[0].Status != state.StatusOK {
+		t.Errorf("failed catch-up then a retry: %q", triggers)
+	}
+}
+
+func TestMySQLBinlogResetTakesAFullBackup(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range w.binlogs {
+		os.Remove(filepath.Join(w.binlogDir, name))
+	}
+	w.binlogs, w.binlogPos = nil, 0
+	w.addBinlog("binlog.000001")
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("binlogs: %v\n%s", err, w.log.String())
+	}
+	if subjects := w.subjects(); len(subjects) != 1 || !strings.Contains(subjects[0], "binlogs missing") {
+		t.Errorf("emails = %q", subjects)
+	}
+	runs, _ := w.runner.State.Runs(Full, 10)
+	if len(runs) != 2 || runs[0].Trigger != Automatic {
+		t.Errorf("a reset should start a full backup: %+v", runs)
 	}
 }
 
@@ -262,6 +343,33 @@ func fakeXtraBackup(c command.Cmd) ([]byte, error) {
 		}
 	}
 	return []byte("XBSTREAM"), nil
+}
+
+func TestMySQLBackupRefusesMismatchedXtraBackup(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	w.xbVersion = "8.0.35-30"
+	err := w.runner.Run(context.Background(), Full, Manual)
+	if err == nil || !strings.Contains(err.Error(), "can't back up MySQL") {
+		t.Fatalf("expected an XtraBackup version error, got %v", err)
+	}
+	if keys := w.keys(xtrabackup.Prefix); len(keys) != 0 {
+		t.Errorf("no backup should have been written: %v", keys)
+	}
+}
+
+func TestBinlogsSkipWhenAlreadyShipping(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	unlock, err := lockFile(context.Background(), filepath.Join(filepath.Dir(w.runner.LockPath), "binlog.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := w.runner.Run(context.Background(), Binlogs, Scheduled); err != nil {
+		t.Fatalf("an overlapping run should be skipped, not fail: %v", err)
+	}
+	if !strings.Contains(w.log.String(), "skipped: a previous shipping run is still going") {
+		t.Errorf("log should say the run was skipped:\n%s", w.log.String())
+	}
 }
 
 func TestMySQLFullThenDiff(t *testing.T) {

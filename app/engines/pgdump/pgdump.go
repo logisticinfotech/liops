@@ -63,6 +63,9 @@ func (e *Engine) Labels(ctx context.Context) (map[string]string, error) {
 	if e.Cfg.Labels.SQL == "" {
 		return nil, nil
 	}
+	if err := config.CheckLabelSQL(e.Cfg.Labels.SQL); err != nil {
+		return nil, fmt.Errorf("label query: %w", err)
+	}
 	rows, err := e.Cluster.Query(ctx, e.Cfg.Labels.Database, e.Cfg.Labels.SQL)
 	if err != nil {
 		return nil, fmt.Errorf("label query: %w", err)

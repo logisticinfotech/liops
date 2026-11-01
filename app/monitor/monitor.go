@@ -208,11 +208,6 @@ func (m *Monitor) Handler() http.Handler {
 			res.Status = &st
 		}
 		m.mu.Unlock()
-		if res.Status != nil && res.Status.Error == "" {
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			res.Slowlog, _ = m.RedisSlowlog(ctx)
-			cancel()
-		}
 		writeJSON(w, res)
 	})
 	mux.HandleFunc("POST /v1/push", func(w http.ResponseWriter, r *http.Request) {

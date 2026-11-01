@@ -39,3 +39,46 @@ func TestPrefixedKeepsToItsFolder(t *testing.T) {
 		t.Error("another server's folder must be untouched")
 	}
 }
+
+func TestPrefixedProbeStaysInFolder(t *testing.T) {
+	ctx := context.Background()
+	mem := NewMemory()
+	mem.Add("other-server/dumps/app/old.dump", []byte("theirs"), time.Now())
+
+	cfg := config.Default()
+	cfg.PgBackRest.Stanza = "app-prod-1"
+	p := Prefixed{Store: mem, Prefix: Folder(cfg)}
+	if err := p.Probe(ctx); err != nil {
+		t.Fatal(err)
+	}
+	objs, err := mem.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objs {
+		if strings.HasPrefix(o.Key, probePrefix) {
+			t.Errorf("probe wrote at the bucket root: %s", o.Key)
+		}
+		if o.Key != "other-server/dumps/app/old.dump" && !strings.HasPrefix(o.Key, "app-prod-1/") {
+			t.Errorf("probe touched another key: %s", o.Key)
+		}
+	}
+	if leftover, _ := p.List(ctx, probePrefix); len(leftover) != 0 {
+		t.Errorf("probe object left behind: %+v", leftover)
+	}
+	if _, ok := mem.Get("other-server/dumps/app/old.dump"); !ok {
+		t.Error("another server's folder must be untouched")
+	}
+}
+
+func TestProbeStoreLeavesNothingWhenWriteFails(t *testing.T) {
+	ctx := context.Background()
+	mem := NewMemory()
+	mem.FailPut = probePrefix
+	if err := mem.Probe(ctx); err == nil {
+		t.Fatal("expected the probe to fail")
+	}
+	if objs, _ := mem.List(ctx, probePrefix); len(objs) != 0 {
+		t.Errorf("failed probe left objects: %+v", objs)
+	}
+}

@@ -269,6 +269,48 @@ func TestIntervalPresetsAreValid(t *testing.T) {
 	}
 }
 
+func TestCheckLabelSQL(t *testing.T) {
+	if err := CheckLabelSQL("SELECT db_name, subdomain FROM tenants"); err != nil {
+		t.Errorf("a two-column SELECT should be allowed: %v", err)
+	}
+	if err := CheckLabelSQL("WITH t AS (SELECT db_name, subdomain FROM tenants) SELECT * FROM t"); err != nil {
+		t.Errorf("WITH … SELECT should be allowed: %v", err)
+	}
+	for sql, want := range map[string]string{
+		"SELECT 1; SELECT 2":                 "single SELECT",
+		"COPY tenants TO PROGRAM 'id'":       "SELECT",
+		"SELECT db_name INTO outfile FROM t": "read-only",
+		"SELECT 1; COPY t TO PROGRAM 'x'":    "single SELECT",
+		"DELETE FROM tenants":                "SELECT",
+		"DO $$ BEGIN PERFORM 1; END $$":      "SELECT",
+	} {
+		err := CheckLabelSQL(sql)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want it to mention %q", sql, err, want)
+		}
+	}
+}
+
+func TestPostgresIdentityNames(t *testing.T) {
+	c := complete()
+	c.Postgres.Cluster = "../etc"
+	c.Postgres.OSUser = "postgres;reboot"
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	for _, want := range []string{"postgres.cluster", "postgres.os_user"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to mention %q, got:\n%v", want, err)
+		}
+	}
+	c = complete()
+	c.Postgres.Cluster, c.Postgres.OSUser = "main", "postgres"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMonitorIsOffByDefault(t *testing.T) {
 	if Default().Monitor.Enabled {
 		t.Error("monitoring must be off until turned on")

@@ -242,10 +242,19 @@ func CheckApp(a App) Check {
 	if !exists("bootstrap/cache/events.php") {
 		note("Events aren't cached: run php artisan event:cache in each deploy.")
 	}
-	if production && strings.EqualFold(env["LOG_LEVEL"], "debug") {
-		bad("LOG_LEVEL is debug in production: logs grow fast and every line costs disk writes. Use warning or error.")
+	if production {
+		logLevel := env["LOG_LEVEL"]
+		if logLevel == "" {
+			logLevel = "debug" // Laravel's default when the key is omitted
+		}
+		if strings.EqualFold(logLevel, "debug") {
+			bad("LOG_LEVEL is debug in production: logs grow fast and every line costs disk writes. Use warning or error.")
+		}
 	}
 	queue := strings.ToLower(env["QUEUE_CONNECTION"])
+	if queue == "" {
+		queue = "sync" // Laravel's default when the key is omitted
+	}
 	switch queue {
 	case "sync":
 		bad("QUEUE_CONNECTION is sync: queued jobs (mail, exports, notifications) run inside the web request, which waits for them. Use redis or database, and run php artisan queue:work.")

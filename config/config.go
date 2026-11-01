@@ -144,10 +144,57 @@ type Dumps struct {
 }
 
 // LabelQuery optionally maps database names to friendly labels (e.g. tenant subdomains).
-// The query must return two text columns: database name, label.
+// The query must return two text columns: database name, label. Only a single read-only
+// SELECT (or WITH … SELECT) is allowed: the query runs as the database superuser.
 type LabelQuery struct {
 	Database string `yaml:"database"`
 	SQL      string `yaml:"sql"`
+}
+
+// labelSQLWrite matches statements that change data or write files, so a label query
+// cannot be COPY TO PROGRAM, SELECT INTO, or a second statement in disguise.
+var labelSQLWrite = regexp.MustCompile(`(?i)\b(COPY|INTO|INSERT|UPDATE|DELETE|TRUNCATE|CREATE|DROP|ALTER|GRANT|REVOKE|EXECUTE|PERFORM|CALL|DO|LOAD|LOCK|UNLOCK)\b`)
+
+// CheckLabelSQL reports whether sql is a single read-only SELECT suitable as a label query.
+func CheckLabelSQL(sql string) error {
+	s := strings.TrimSpace(sql)
+	if s == "" {
+		return nil
+	}
+	s = strings.TrimSpace(strings.TrimSuffix(s, ";"))
+	if strings.Contains(s, ";") {
+		return fmt.Errorf("must be a single SELECT (no extra statements)")
+	}
+	lead := s
+	for {
+		t := strings.TrimSpace(lead)
+		switch {
+		case strings.HasPrefix(t, "--"):
+			i := strings.IndexByte(t, '\n')
+			if i < 0 {
+				return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
+			}
+			lead = t[i+1:]
+			continue
+		case strings.HasPrefix(t, "/*"):
+			i := strings.Index(t, "*/")
+			if i < 0 {
+				return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
+			}
+			lead = t[i+2:]
+			continue
+		}
+		lead = t
+		break
+	}
+	upper := strings.ToUpper(lead)
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
+		return fmt.Errorf("must be a SELECT that returns two columns (database name, label)")
+	}
+	if labelSQLWrite.MatchString(lead) {
+		return fmt.Errorf("must be a read-only SELECT (no COPY, INTO, or changes)")
+	}
+	return nil
 }
 
 // Storage is where both layers are stored.
@@ -366,6 +413,10 @@ func (c *Config) IsMySQL() bool { return c.Engine == EngineMySQL }
 // like. It is the server's folder in the bucket, and for PostgreSQL the pgBackRest stanza.
 var backupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
+// identityNameRe is a PostgreSQL cluster name or OS user: interpolated into paths and
+// commands, so it may only be a single path element of letters, digits, '-' or '_'.
+var identityNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+
 // Validate reports every problem at once, joined with errors.Join.
 func (c *Config) Validate() error {
 	var errs []error
@@ -400,6 +451,9 @@ func (c *Config) Validate() error {
 		}
 		if (c.Dumps.Labels.Database == "") != (c.Dumps.Labels.SQL == "") {
 			add("dumps.labels: set both database and sql, or neither")
+		}
+		if err := CheckLabelSQL(c.Dumps.Labels.SQL); err != nil {
+			add("dumps.labels.sql: %s", err.Error())
 		}
 	}
 
@@ -484,6 +538,8 @@ func (c *Config) validatePostgres(add func(string, ...any), errs *[]error) {
 	}
 	if c.Postgres.Cluster == "" {
 		add("postgres.cluster: required")
+	} else if !identityNameRe.MatchString(c.Postgres.Cluster) {
+		add("postgres.cluster: %q isn't a valid cluster name: use letters, digits, '-' or '_', starting with a letter or digit", c.Postgres.Cluster)
 	}
 	if !filepath.IsAbs(c.Postgres.DataDir) {
 		add("postgres.data_dir: must be an absolute path")
@@ -493,6 +549,8 @@ func (c *Config) validatePostgres(add func(string, ...any), errs *[]error) {
 	}
 	if c.Postgres.OSUser == "" {
 		add("postgres.os_user: required")
+	} else if !identityNameRe.MatchString(c.Postgres.OSUser) {
+		add("postgres.os_user: %q isn't a valid user name: use letters, digits, '-' or '_', starting with a letter or digit", c.Postgres.OSUser)
 	}
 	if c.Postgres.BinDir != "" && !filepath.IsAbs(c.Postgres.BinDir) {
 		add("postgres.bin_dir: must be an absolute path (or empty for the layout's default)")

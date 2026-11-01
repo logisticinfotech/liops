@@ -161,6 +161,9 @@ func (r *Runner) mysqlHealth(ctx context.Context, deep bool, h *Health, problem 
 	if len(list) == 0 {
 		return // nothing is shipped before the first backup
 	}
+	if r.meta(metaBinlogCatchUp) != "" {
+		problem("binlogs went missing; a catch-up full backup is still needed so point-in-time restores cover the new chain")
+	}
 	interval := time.Duration(r.Cfg.MySQL.BinlogInterval)
 	switch failing := r.meta(metaBinlogFailing); {
 	case failing != "":

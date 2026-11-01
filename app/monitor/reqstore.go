@@ -41,6 +41,12 @@ const (
 	keepTop    = 20
 )
 
+// maxRouteIDs is the most distinct host+route keys kept in bbolt. Extra keys collapse
+// onto otherRoute. A var so tests can lower it.
+var maxRouteIDs = 4096
+
+var otherRoute = routeKey{"{other}", "{other}"}
+
 // RouteStats are a route's numbers over a period.
 type RouteStats struct {
 	Count   float64        `json:"count"`
@@ -317,6 +323,10 @@ func (s *Store) writeRoutes(bucket []byte, key uint32, rows map[routeKey]*RouteS
 		var rec []byte
 		for k, st := range rows {
 			id, ok := s.routeIDs[k]
+			if !ok && len(s.routeIDs) >= maxRouteIDs {
+				k = otherRoute
+				id, ok = s.routeIDs[k]
+			}
 			if !ok {
 				next, err := routes.NextSequence()
 				if err != nil {
@@ -524,6 +534,49 @@ func pruneRequests(tx *bolt.Tx, now time.Time) error {
 				return err
 			}
 		}
+	}
+	return pruneUnusedRouteIDs(tx)
+}
+
+func usedRouteIDs(tx *bolt.Tx) map[uint32]bool {
+	used := map[uint32]bool{}
+	for _, name := range [][]byte{bucketReqMinute, bucketReqHour} {
+		c := tx.Bucket(name).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			for len(v) > 0 {
+				id, size := binary.Uvarint(v)
+				if size <= 0 {
+					break
+				}
+				used[uint32(id)] = true
+				v = v[size:]
+				for range 8 + nHist {
+					_, n := binary.Uvarint(v)
+					if n <= 0 {
+						v = nil
+						break
+					}
+					v = v[n:]
+				}
+			}
+		}
+	}
+	return used
+}
+
+func pruneUnusedRouteIDs(tx *bolt.Tx) error {
+	used := usedRouteIDs(tx)
+	routes := tx.Bucket(bucketRoutes)
+	c := routes.Cursor()
+	for k, _ := c.First(); k != nil; {
+		id := binary.BigEndian.Uint32(k)
+		next, _ := c.Next()
+		if !used[id] {
+			if err := routes.Delete(k); err != nil {
+				return err
+			}
+		}
+		k = next
 	}
 	return nil
 }

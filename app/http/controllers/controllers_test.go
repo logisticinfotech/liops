@@ -63,6 +63,9 @@ func validConfig() *config.Config {
 // fakeGTIDMode is the fake MySQL server's gtid_mode: setup's SET GLOBAL steps change it.
 var fakeGTIDMode = "OFF"
 
+// fakePendingRestart is pg_settings.pending_restart for shared_preload_libraries.
+var fakePendingRestart = "t"
+
 // fakeServer answers like a PostgreSQL 18 server with pgBackRest and one database, or
 // like a MySQL 8.4 server with XtraBackup and one database.
 func fakeServer(program string, c command.Cmd) ([]byte, error) {
@@ -118,7 +121,7 @@ func fakeServer(program string, c command.Cmd) ([]byte, error) {
 			return fmt.Appendf(nil, "%d\t0\n", now), nil
 		}
 		if strings.Contains(args, "pending_restart") {
-			return []byte("t\n"), nil
+			return []byte(fakePendingRestart + "\n"), nil
 		}
 		return []byte(hex.EncodeToString([]byte("app")) + "\n"), nil
 	}
@@ -240,6 +243,9 @@ func TestDashboardAndDownload(t *testing.T) {
 	}
 	if code, _, _ := h.post("/databases", "/download", url.Values{"key": {"pgbackrest/archive/x"}}); code != 400 {
 		t.Errorf("only dumps can be downloaded, got %d", code)
+	}
+	if code, _, _ := h.post("/databases", "/download", url.Values{"key": {"dumps/../pgbackrest/x"}}); code != 400 {
+		t.Errorf("a key with .. must be refused, got %d", code)
 	}
 	entries, _ := h.st.AuditLog(0, 20)
 	found := false
@@ -1040,4 +1046,56 @@ func TestTuningPage(t *testing.T) {
 	if len(entries) < 2 || entries[0].Action != "tuning" || !strings.HasPrefix(entries[0].Detail, "revert") {
 		t.Errorf("audit = %+v", entries)
 	}
+}
+
+func TestSetupRestartNeedsPending(t *testing.T) {
+	h := newHarness(t, validConfig(), false)
+	h.ui.setup.mu.Lock()
+	h.ui.setup.task = &applyTask{Running: false}
+	h.ui.setup.mu.Unlock()
+	code, loc, _ := h.post("/setup/apply/progress", "/setup/apply/restart", url.Values{"restart": {"now"}})
+	if code != 303 || loc != "/setup/apply/progress" {
+		t.Fatalf("restart: %d %q", code, loc)
+	}
+	if task := h.ui.setup.snapshot(); task.Running {
+		t.Error("must not restart PostgreSQL when no restart is pending")
+	}
+}
+
+func TestMonitorRestartSkippedWhenNotPending(t *testing.T) {
+	old := fakePendingRestart
+	fakePendingRestart = "f"
+	t.Cleanup(func() { fakePendingRestart = old })
+	h := newHarness(t, validConfig(), true)
+	code, loc, _ := h.post("/settings?tab=monitoring", "/settings/monitor/restart", url.Values{})
+	if code != 303 || !strings.HasPrefix(loc, "/settings") {
+		t.Fatalf("restart: %d %q", code, loc)
+	}
+	_, _, body := h.get("/settings?tab=monitoring")
+	if !strings.Contains(body, "need a restart right now") {
+		t.Errorf("should say no restart was needed:\n%s", body)
+	}
+}
+
+func TestOpenLogFileRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(secret, []byte("storage-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "steal.log")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := openLogFile(link); err == nil {
+		f.Close()
+		t.Fatal("a symlink must not be opened")
+	} else if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("got %v", err)
+	}
+	f, err := openLogFile(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
 }

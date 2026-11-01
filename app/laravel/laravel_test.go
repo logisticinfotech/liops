@@ -60,13 +60,30 @@ STRIPE_SECRET=sk_live_example
 	}
 
 	// Cached, sessions in their own Redis database: nothing bad.
-	b := newApp(t, "APP_ENV=production\nAPP_DEBUG=false\nQUEUE_CONNECTION=redis\nSESSION_DRIVER=redis\nCACHE_STORE=redis\nTELESCOPE_ENABLED=false\n")
+	b := newApp(t, "APP_ENV=production\nAPP_DEBUG=false\nLOG_LEVEL=error\nQUEUE_CONNECTION=redis\nSESSION_DRIVER=redis\nCACHE_STORE=redis\nTELESCOPE_ENABLED=false\n")
 	for _, f := range []string{"config.php", "routes-v7.php", "events.php"} {
 		os.WriteFile(filepath.Join(b.Dir, "bootstrap", "cache", f), nil, 0o644)
 	}
 	c = CheckApp(b)
 	if len(c.Findings) != 0 || c.SessionsShareDB || c.SessionDB != "0" {
 		t.Errorf("a healthy app: %+v", c)
+	}
+}
+
+func TestCheckAppMissingKeysUseLaravelDefaults(t *testing.T) {
+	a := newApp(t, "APP_ENV=production\nAPP_DEBUG=false\n")
+	for _, f := range []string{"config.php", "routes-v7.php", "events.php"} {
+		os.WriteFile(filepath.Join(a.Dir, "bootstrap", "cache", f), nil, 0o644)
+	}
+	c := CheckApp(a)
+	var text string
+	for _, f := range c.Findings {
+		text += f.Text + "\n"
+	}
+	for _, want := range []string{"LOG_LEVEL is debug", "QUEUE_CONNECTION is sync"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("omitted keys should use Laravel's defaults: missing %q in\n%s", want, text)
+		}
 	}
 }
 

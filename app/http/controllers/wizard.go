@@ -339,7 +339,7 @@ func (s *Server) setupApply(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setupRestart(w http.ResponseWriter, r *http.Request) {
 	s.setup.mu.Lock()
 	t := s.setup.task
-	if t == nil || t.Running {
+	if t == nil || t.Running || t.Restart == "" {
 		s.setup.mu.Unlock()
 		http.Redirect(w, r, "/setup/apply/progress", http.StatusSeeOther)
 		return

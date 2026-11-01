@@ -182,7 +182,7 @@ func (s *Server) runTest(ctx context.Context, cfg *config.Config, section string
 			res.Details = strings.Join(errs, "\n")
 			return res
 		}
-		store, err := storage.NewS3(cfg.Storage.S3)
+		store, err := storage.Open(cfg)
 		if err == nil {
 			err = store.Probe(ctx)
 		}

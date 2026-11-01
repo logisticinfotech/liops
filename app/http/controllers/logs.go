@@ -4,6 +4,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/logisticinfotech/liops/app/command"
@@ -154,7 +156,7 @@ func (s *Server) readLog(ctx context.Context, source string, n int, filter strin
 		errorsOnly = false // the journal's priority did it
 	} else {
 		path := strings.TrimPrefix(source, "file:")
-		f, err := os.Open(path)
+		f, err := openLogFile(path)
 		if err != nil {
 			return nil, err
 		}
@@ -179,4 +181,27 @@ func (s *Server) readLog(ctx context.Context, source string, n int, filter strin
 		}
 	}
 	return out[max(0, len(out)-n):], nil
+}
+
+// openLogFile opens a regular file and refuses to follow a symlink: Laravel's
+// storage/logs is writable by the app user, and serve runs as root.
+func openLogFile(path string) (*os.File, error) {
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if err == syscall.ELOOP {
+			return nil, fmt.Errorf("refusing to follow a symlink")
+		}
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("not a regular file")
+	}
+	return f, nil
 }

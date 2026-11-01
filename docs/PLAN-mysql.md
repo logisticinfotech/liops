@@ -1,7 +1,7 @@
 # liops for MySQL: design and build plan
 
-Status: **proposed** (October 2026). Nothing here is built yet. [PLAN.md](PLAN.md) stays the
-source of truth for everything this document doesn't change; read it first.
+Status: **built** (M0–M3, October 2026). [PLAN.md](PLAN.md) stays the
+source of truth for everything this document doesn't change; read it first. §10 says what is tested.
 
 ## 1. Requirement
 

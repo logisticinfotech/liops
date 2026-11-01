@@ -371,7 +371,7 @@ func (s *Server) database(w http.ResponseWriter, r *http.Request) {
 // download sends the browser to a short-lived link for one dump. Every download is audited.
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	key := r.PostFormValue("key")
-	if !strings.HasPrefix(key, storage.DumpsPrefix) && !strings.HasPrefix(key, storage.GlobalsPrefix) {
+	if !dumpKeyOK(key) {
 		http.Error(w, "only database dumps can be downloaded", http.StatusBadRequest)
 		return
 	}
@@ -390,6 +390,15 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "download", key, true)
 	http.Redirect(w, r, url, http.StatusSeeOther)
+}
+
+// dumpKeyOK reports whether key is a dump or globals object this server owns. ".." and
+// backslashes are refused so a crafted form can't walk out of dumps/.
+func dumpKeyOK(key string) bool {
+	if key == "" || strings.Contains(key, "..") || strings.ContainsAny(key, "\\\x00") {
+		return false
+	}
+	return strings.HasPrefix(key, storage.DumpsPrefix) || strings.HasPrefix(key, storage.GlobalsPrefix)
 }
 
 type jobsData struct {

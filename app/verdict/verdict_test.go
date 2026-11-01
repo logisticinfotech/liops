@@ -42,7 +42,7 @@ func TestScenarios(t *testing.T) {
 		area string
 	}{
 		{"CPU hog", func(e *Evidence) { e.CPUBusy, e.CPUHighShare = 85, 60 }, "outgrown the VM", "Machine"},
-		{"memory pressure", func(e *Evidence) { e.OOMKills, e.SwapIn, e.MemAvailMin = 2, 40, 100<<20 }, "short of memory", "Machine"},
+		{"memory pressure", func(e *Evidence) { e.OOMKills, e.SwapIn, e.MemAvailMin = 2, 80*1024, 100<<20 }, "short of memory", "Machine"},
 		{"bad query", func(e *Evidence) {
 			e.CPUBusy, e.CPUHighShare = 75, 40 // the scans make the CPU busy: not "outgrown"
 			e.Databases[0].ScanMS, e.Databases[0].SlowMax = 500e3, 4
@@ -79,6 +79,27 @@ func TestScenarios(t *testing.T) {
 				t.Errorf("a finding needs the numbers behind it and where to look: %+v", f)
 			}
 		})
+	}
+}
+
+func TestSwapInIsBytesPerSecond(t *testing.T) {
+	e := healthy()
+	e.SwapIn = 4096 // one 4K page a second: not a memory crisis
+	if f := Judge(e); len(f) != 0 {
+		t.Errorf("one page/s must not be short of memory: %+v", f)
+	}
+	e.SwapIn = 50 * 1024
+	if !strings.Contains(first(t, e).Says, "short of memory") {
+		t.Errorf("50 KB/s of swap-in should be short of memory: %+v", Judge(e))
+	}
+}
+
+func TestModerateStealIsntMoreCPUs(t *testing.T) {
+	e := healthy()
+	e.Steal, e.CPUBusy, e.CPUHighShare = 7, 90, 60
+	f := first(t, e)
+	if !strings.Contains(f.Says, "overcommitted") {
+		t.Errorf("steal should outrank add CPUs: %+v", f)
 	}
 }
 

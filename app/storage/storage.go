@@ -6,8 +6,11 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,4 +108,33 @@ func (p Prefixed) DownloadURL(ctx context.Context, key string, ttl time.Duration
 	return p.Store.DownloadURL(ctx, p.Prefix+key, ttl)
 }
 
-func (p Prefixed) Probe(ctx context.Context) error { return p.Store.Probe(ctx) }
+func (p Prefixed) Probe(ctx context.Context) error { return ProbeStore(ctx, p) }
+
+// ProbeStore writes, reads back and deletes a small test object on s. Prefixed stores
+// keep the object inside the server's folder; a leftover from a failed read is still
+// removed.
+func ProbeStore(ctx context.Context, s Store) (err error) {
+	key := probePrefix + strconv.FormatInt(time.Now().UnixNano(), 36)
+	want := []byte("liops storage probe\n")
+	if _, err := s.Put(ctx, key, bytes.NewReader(want)); err != nil {
+		return fmt.Errorf("write test object: %w", err)
+	}
+	defer func() {
+		if derr := s.Delete(ctx, key); derr != nil && err == nil {
+			err = fmt.Errorf("delete test object: %w", derr)
+		}
+	}()
+	r, err := s.Read(ctx, key)
+	if err != nil {
+		return fmt.Errorf("read test object: %w", err)
+	}
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		return fmt.Errorf("read test object: %w", err)
+	}
+	if !bytes.Equal(got, want) {
+		return fmt.Errorf("read test object: content doesn't match what was written")
+	}
+	return nil
+}

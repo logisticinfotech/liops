@@ -106,4 +106,13 @@ func TestLabels(t *testing.T) {
 	if labels["tenant_abc"] != "abc" || labels["tenant_xyz"] != "xyz" {
 		t.Errorf("labels = %v", labels)
 	}
+
+	cfg.Dumps.Labels.SQL = "COPY tenants TO PROGRAM 'id'"
+	if _, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err == nil || !strings.Contains(err.Error(), "SELECT") {
+		t.Errorf("COPY TO PROGRAM must be refused: %v", err)
+	}
+	cfg.Dumps.Labels.SQL = "SELECT 1; SELECT 2"
+	if _, err := New(cfg, fake, storage.NewMemory()).Labels(context.Background()); err == nil || !strings.Contains(err.Error(), "single SELECT") {
+		t.Errorf("a second statement must be refused: %v", err)
+	}
 }

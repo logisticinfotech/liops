@@ -184,3 +184,37 @@ func TestRequestsAPI(t *testing.T) {
 		t.Errorf("current hour: slowest %+v clients %+v heat %+v", res.Slowest, res.Clients, res.Heatmap)
 	}
 }
+
+func TestRouteIDsAreCapped(t *testing.T) {
+	old := maxRouteIDs
+	maxRouteIDs = 8
+	t.Cleanup(func() { maxRouteIDs = old })
+
+	m, clock := newDBMonitor(t, &fakeMySQL{})
+	*clock = time.Date(2026, 11, 2, 10, 0, 10, 0, time.UTC)
+	m.AddRequest(Request{})
+	for i := 0; i < 20; i++ {
+		m.AddRequest(Request{Host: "a.example.com", Method: "GET", Path: fmt.Sprintf("/t/r%d/x", i), Status: 200, MS: 10, UpstreamMS: -1})
+	}
+	*clock = clock.Add(time.Minute)
+	m.flushRequests(*clock)
+
+	m.Store.mu.Lock()
+	n := len(m.Store.routeIDs)
+	m.Store.mu.Unlock()
+	if n > maxRouteIDs+1 {
+		t.Errorf("route ids = %d, want at most %d", n, maxRouteIDs+1)
+	}
+	if n < 2 {
+		t.Errorf("expected some route ids, got %d", n)
+	}
+
+	if err := m.Store.Prune(clock.Add(91 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	m.Store.mu.Lock()
+	defer m.Store.mu.Unlock()
+	if m.Store.routeIDs != nil {
+		t.Errorf("unused route ids should be dropped on prune, maps = %d", len(m.Store.routeIDs))
+	}
+}

@@ -22,6 +22,7 @@ const (
 	metaBinlogPosition  = "binlog_position"      // where MySQL was writing after that run
 	metaBinlogFailing   = "binlog_failing_since" // RFC 3339, while runs are failing
 	metaBinlogGaps      = "binlog_gaps_reported" // binlog names already reported as missing
+	metaBinlogCatchUp   = "binlog_catch_up"      // "1" until a catch-up full after a gap succeeds
 )
 
 // Automatic is the trigger of a job liops starts by itself, e.g. a full backup after a
@@ -35,12 +36,18 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 	if r.XtraBackup == nil {
 		return errors.New("binlogs are only shipped for MySQL (engine: mysql); PostgreSQL archives WAL through pgBackRest")
 	}
-	unlock, err := lockFile(ctx, filepath.Join(filepath.Dir(r.LockPath), "binlog.lock"))
+	unlock, err := tryLockFile(filepath.Join(filepath.Dir(r.LockPath), "binlog.lock"))
+	if errors.Is(err, errLocked) {
+		r.logf(Binlogs, "skipped: a previous shipping run is still going")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	res, err := r.shipBinlogs(ctx)
-	unlock()
+	defer unlock()
+	shipCtx, cancel := context.WithTimeout(ctx, time.Duration(r.Cfg.MySQL.BinlogInterval))
+	res, err := r.shipBinlogs(shipCtx)
+	cancel()
 	if err != nil {
 		r.binlogsFailed(ctx, err)
 		return err
@@ -52,18 +59,25 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 	}
 	r.setMeta(MetaBinlogShippedAt, r.now().UTC().Format(time.RFC3339))
 
-	if gaps := r.newGaps(res.Gaps); len(gaps) > 0 {
-		r.logf(Binlogs, "binlogs missing before they were shipped: %s; taking a new full backup", strings.Join(gaps, ", "))
+	fresh := r.newGaps(res.Gaps)
+	if len(fresh) > 0 {
+		r.logf(Binlogs, "binlogs missing before they were shipped: %s; taking a new full backup", strings.Join(fresh, ", "))
 		subject, body := notify.FailureEmail(notify.Failure{
 			Server:   r.Server,
 			Headline: "binlogs missing: a gap in point-in-time restores",
-			What:     "binlogs " + strings.Join(gaps, ", ") + " were removed from the MySQL server before liops shipped them",
+			What:     "binlogs " + strings.Join(fresh, ", ") + " were removed from the MySQL server before liops shipped them",
 			Reason:   "MySQL deletes binlogs after binlog_expire_logs_seconds, or someone purged or reset them, while shipping wasn't working",
 			Safe:     "restores to moments before the gap still work, and so will restores after the new full backup liops is taking now",
 			ToDo:     "check that binlog_expire_logs_seconds is at least 7 days, and look for earlier shipping failures in: sudo liops logs",
 		})
 		r.send(ctx, Binlogs, subject, body)
-		return r.Run(ctx, Full, Automatic)
+		r.setMeta(metaBinlogCatchUp, "1")
+	}
+	if r.meta(metaBinlogCatchUp) != "" {
+		if err := r.Run(ctx, Full, Automatic); err != nil {
+			return err
+		}
+		r.setMeta(metaBinlogCatchUp, "")
 	}
 	return nil
 }

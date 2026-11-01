@@ -146,6 +146,15 @@ func (s *Server) monitorRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
+	pending := false
+	if runner := s.Svc.Runner(); runner != nil {
+		rows, err := runner.Cluster.Query(ctx, "postgres", "SELECT pending_restart FROM pg_settings WHERE name = 'shared_preload_libraries'")
+		pending = err == nil && len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] == "t"
+	}
+	if !pending {
+		s.flash(w, r, "/settings?tab=monitoring", "PostgreSQL doesn't need a restart right now.")
+		return
+	}
 	err := setup.RestartPostgres(ctx, pgbackrest.New(cfg, s.Cmd))
 	s.audit(r, "monitoring", "restart PostgreSQL for pg_stat_statements", err == nil)
 	if err != nil {
@@ -163,24 +172,28 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	section := r.PathValue("section")
 	tab := tabOf(section)
-	cfg := s.Svc.Config()
-	if err := applyForm(cfg, section, r.PostForm); err != nil {
-		s.settingsPage(w, r, tab, cfg, nil, map[string][]string{section: strings.Split(err.Error(), "\n")})
-		return
-	}
 	if r.PostFormValue("action") == "test" {
+		cfg := s.Svc.Config()
+		if err := applyForm(cfg, section, r.PostForm); err != nil {
+			s.settingsPage(w, r, tab, cfg, nil, map[string][]string{section: strings.Split(err.Error(), "\n")})
+			return
+		}
 		res := s.runTest(r.Context(), cfg, section)
 		s.audit(r, "test", section, res.OK)
 		s.settingsPage(w, r, tab, cfg, &res, nil)
 		return
 	}
-	if err := cfg.Validate(); err != nil {
-		s.settingsPage(w, r, tab, cfg, nil, map[string][]string{section: strings.Split(err.Error(), "\n")})
-		return
-	}
-	if err := s.Svc.SaveSettings(r.Context(), cfg); err != nil {
+	var cfg *config.Config
+	err := s.Svc.UpdateSettings(r.Context(), func(c *config.Config) error {
+		cfg = c
+		return applyForm(c, section, r.PostForm)
+	})
+	if err != nil {
+		if cfg == nil {
+			cfg = s.Svc.Config()
+		}
 		s.audit(r, "settings", section, false)
-		s.settingsPage(w, r, tab, cfg, nil, map[string][]string{section: {err.Error()}})
+		s.settingsPage(w, r, tab, cfg, nil, map[string][]string{section: strings.Split(err.Error(), "\n")})
 		return
 	}
 	s.audit(r, "settings", "saved "+section, true)

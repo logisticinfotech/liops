@@ -10,6 +10,7 @@ import (
 	"github.com/logisticinfotech/liops/app/command"
 	"github.com/logisticinfotech/liops/app/engines/xtrabackup"
 	"github.com/logisticinfotech/liops/app/notify"
+	"github.com/logisticinfotech/liops/app/setup"
 	"github.com/logisticinfotech/liops/app/state"
 )
 
@@ -92,8 +93,7 @@ func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *stat
 	r.setProgress(Progress{Kind: typ, Label: backupName(typ), Detail: "Running XtraBackup…"})
 	defer r.clearProgress()
 
-	m, err := r.XtraBackup.Backup(ctx, typ)
-	if err != nil {
+	fail := func(err error) error {
 		out := errOutput(err)
 		r.logOutput(typ, []byte(out))
 		run.Output = command.LastLines(out, outputLines)
@@ -114,6 +114,20 @@ func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *stat
 		})
 		r.send(ctx, typ, subject, body)
 		return err
+	}
+
+	inst := r.XtraBackup.Instance
+	version, err := inst.Version(ctx)
+	if err != nil {
+		return fail(fmt.Errorf("couldn't connect to MySQL: %w", err))
+	}
+	if _, _, err := setup.CheckPointInTime(ctx, inst, version); err != nil {
+		return fail(err)
+	}
+
+	m, err := r.XtraBackup.Backup(ctx, typ)
+	if err != nil {
+		return fail(err)
 	}
 
 	run.Size = m.Size

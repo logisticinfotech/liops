@@ -5,6 +5,7 @@ package xtrabackup
 import (
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,10 @@ import (
 
 	"github.com/logisticinfotech/liops/app/engines/dumps"
 )
+
+// errBinlogReset is when the current binlog's number is lower than the oldest backup's:
+// RESET BINARY LOGS (or a renamed log_bin) started a new chain.
+var errBinlogReset = errors.New("binlog numbers went backwards (RESET BINARY LOGS?)")
 
 // BinlogPrefix is where binlogs are stored, gzipped: xtrabackup/binlog/<file>.gz.
 const BinlogPrefix = "xtrabackup/binlog/"
@@ -103,7 +108,17 @@ func (e *Engine) ShipBinlogs(ctx context.Context, oldestNeeded string) (ShipResu
 	}
 
 	names, err := binlogRange(oldestNeeded, current)
-	if err != nil {
+	if errors.Is(err, errBinlogReset) {
+		// The live chain is a new sequence: don't invent names from the old number up,
+		// ship what is on the server, and report the old starting file as a gap so a
+		// catch-up full can start a restore chain that uses the new binlogs.
+		res.Gaps = append(res.Gaps, oldestNeeded)
+		for _, r := range rows {
+			if r[0] != current {
+				names = append(names, r[0])
+			}
+		}
+	} else if err != nil {
 		return res, err
 	}
 	var dir string
@@ -174,6 +189,9 @@ func binlogRange(first, current string) ([]string, error) {
 	}
 	if base != base2 {
 		return nil, fmt.Errorf("binlog names changed from %s to %s (log_bin was renamed?)", first, current)
+	}
+	if to < from {
+		return nil, errBinlogReset
 	}
 	var names []string
 	for n := from; n < to; n++ {

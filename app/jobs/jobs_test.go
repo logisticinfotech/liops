@@ -40,6 +40,8 @@ type world struct {
 	failBinlogs bool
 	// mysqlSettings answers SELECT @@log_bin, @@binlog_format, @@gtid_mode, ...
 	mysqlSettings string
+	// xbVersion is the string xtrabackup --version prints; empty uses 8.4.0-7.
+	xbVersion string
 
 	runner *Runner
 	store  *storage.Memory
@@ -241,6 +243,35 @@ func TestNewAndDeletedDatabases(t *testing.T) {
 	// Live databases keep the newest dump plus the ones within 7 days.
 	if keys := w.keys("dumps/app/"); len(keys) != 1 {
 		t.Errorf("app should have only its newest dump left: %v", keys)
+	}
+}
+
+func TestForgottenDumpStaysTrackedIfDeleteFails(t *testing.T) {
+	w := newWorld(t, "app", "old_tenant")
+	if err := w.runner.Run(context.Background(), Dumps, Manual); err != nil {
+		t.Fatal(err)
+	}
+	w.advance(24 * time.Hour)
+	w.databases = []string{"app"}
+	if err := w.runner.Run(context.Background(), Dumps, Scheduled); err != nil {
+		t.Fatal(err)
+	}
+	deleted, _ := w.runner.State.Deleted()
+	if _, ok := deleted["old_tenant"]; !ok {
+		t.Fatal("old_tenant should be tracked as deleted")
+	}
+
+	w.advance(15 * 24 * time.Hour)
+	w.store.FailDelete = "dumps/old_tenant/"
+	if err := w.runner.Run(context.Background(), Dumps, Scheduled); err == nil {
+		t.Fatal("expected the dump delete to fail")
+	}
+	if keys := w.keys("dumps/old_tenant/"); len(keys) == 0 {
+		t.Error("old_tenant's dump should still be in storage")
+	}
+	deleted, _ = w.runner.State.Deleted()
+	if _, ok := deleted["old_tenant"]; !ok {
+		t.Error("old_tenant should stay tracked until its dump is actually gone")
 	}
 }
 

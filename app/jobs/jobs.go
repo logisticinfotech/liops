@@ -213,8 +213,20 @@ func (r *Runner) lock(ctx context.Context) (unlock func(), err error) {
 	return lockFile(ctx, r.LockPath)
 }
 
+// errLocked is returned by tryLockFile when another process already holds the lock.
+var errLocked = errors.New("another process holds the lock")
+
 // lockFile takes an exclusive lock on path, waiting while another process holds it.
 func lockFile(ctx context.Context, path string) (unlock func(), err error) {
+	return flock(ctx, path, true)
+}
+
+// tryLockFile takes an exclusive lock on path, or returns errLocked without waiting.
+func tryLockFile(path string) (unlock func(), err error) {
+	return flock(context.Background(), path, false)
+}
+
+func flock(ctx context.Context, path string, wait bool) (unlock func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -230,6 +242,10 @@ func lockFile(ctx context.Context, path string) (unlock func(), err error) {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			f.Close()
 			return nil, fmt.Errorf("job lock %s: %w", path, err)
+		}
+		if !wait {
+			f.Close()
+			return nil, errLocked
 		}
 		select {
 		case <-ctx.Done():

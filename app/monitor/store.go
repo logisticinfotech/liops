@@ -167,6 +167,8 @@ func (s *Store) writeLocked(bucket []byte, key uint32, r rollup) error {
 
 // Prune deletes 1-minute records older than MinuteKeep and hourly ones older than HourKeep.
 func (s *Store) Prune(now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		for _, p := range []struct {
 			bucket []byte
@@ -185,7 +187,11 @@ func (s *Store) Prune(now time.Time) error {
 		if err := pruneQueries(tx, now); err != nil {
 			return err
 		}
-		return pruneRequests(tx, now)
+		if err := pruneRequests(tx, now); err != nil {
+			return err
+		}
+		s.routeIDs, s.routeNames = nil, nil // reload after unused ids were dropped
+		return nil
 	})
 }
 

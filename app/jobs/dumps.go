@@ -172,13 +172,26 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 		errs = append(errs, err)
 	}
 	toDelete := append(plan.Delete, dumps.PlanGlobalsRetention(globals, now, days(r.Cfg.Dumps.RetentionDays))...)
+	wantGone := map[string]int{}
+	for _, key := range plan.Delete {
+		if db, _, ok := dumps.ParseKey(key); ok {
+			wantGone[db]++
+		}
+	}
+	gotGone := map[string]int{}
+	var deletedN int
 	for _, key := range toDelete {
 		if err := r.Store.Delete(ctx, key); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		deletedN++
+		if db, _, ok := dumps.ParseKey(key); ok {
+			gotGone[db]++
 		}
 	}
-	if len(toDelete) > 0 {
-		note("retention: deleted %d old dump(s)", len(toDelete))
+	if deletedN > 0 {
+		note("retention: deleted %d old dump(s)", deletedN)
 	}
 
 	for _, db := range plan.NewlyDeleted {
@@ -198,6 +211,9 @@ func (r *Runner) retention(ctx context.Context, live []string, labels map[string
 		}
 	}
 	for _, db := range plan.Forgotten {
+		if gotGone[db] < wantGone[db] {
+			continue // its dump is still in storage; try again next night
+		}
 		note("%s: its last dump was deleted after the deleted-database retention", db)
 		if err := r.State.ClearDeleted(db); err != nil {
 			errs = append(errs, fmt.Errorf("state: %w", err))

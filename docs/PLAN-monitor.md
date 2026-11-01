@@ -1,8 +1,7 @@
 # liops monitoring: design and build plan
 
-Status: **agreed** (November 2026), revised after a real investigation (§1.1); not started.
-[PLAN.md](PLAN.md) stays the source of truth for everything this document doesn't change; read
-it first.
+Status: **built** (MO0–MO4, November 2026). [PLAN.md](PLAN.md) stays the source of truth for
+everything this document doesn't change; read it first. §8 says what is tested.
 
 ## 1. Requirement
 

@@ -59,9 +59,10 @@ type Service struct {
 	closed bool
 	active map[string]string // job → "queued" or "running", for jobs started from the UI
 
-	healthMu sync.Mutex
-	health   *jobs.Health
-	healthAt time.Time
+	healthMu   sync.Mutex
+	health     *jobs.Health
+	healthAt   time.Time
+	healthWait chan struct{} // closed when an in-flight Health check finishes; nil when idle
 
 	logMu       sync.Mutex
 	appLogSizes map[string]int64
@@ -239,6 +240,28 @@ func (s *Service) SaveSettings(ctx context.Context, cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commitSettingsLocked(ctx, cfg)
+}
+
+// UpdateSettings applies a change to a clone of the live config under the service lock,
+// so two Settings saves can't overwrite each other, then validates and saves.
+func (s *Service) UpdateSettings(ctx context.Context, apply func(*config.Config) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := s.cfg.Clone()
+	if err := apply(cfg); err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return s.commitSettingsLocked(ctx, cfg)
+}
+
+// commitSettingsLocked writes cfg and makes it live. The caller holds s.mu.
+func (s *Service) commitSettingsLocked(ctx context.Context, cfg *config.Config) error {
 	if s.setupComplete() && !cfg.IsMySQL() {
 		archiving, err := s.WriteSettings(ctx, cfg)
 		if err != nil {
@@ -250,12 +273,15 @@ func (s *Service) SaveSettings(ctx context.Context, cfg *config.Config) error {
 			defer s.logf("warning: archive_mode is off; WAL archiving needs: %s", setup.RestartCommand(cfg))
 		}
 	}
-	if on := cfg.Monitor.Enabled; on != s.Config().Monitor.Enabled {
+	if on := cfg.Monitor.Enabled; on != s.cfg.Monitor.Enabled {
 		if err := s.SetMonitor(on); err != nil {
 			return fmt.Errorf("couldn't %s the monitoring service: %w", map[bool]string{true: "start", false: "stop"}[on], err)
 		}
 	}
-	return s.SaveDraft(cfg)
+	if err := cfg.Save(s.ConfigPath); err != nil {
+		return err
+	}
+	return s.applyLocked(cfg)
 }
 
 // MarkSetupComplete records that setup has finished and starts the scheduler.
@@ -314,17 +340,34 @@ func (s *Service) Health(ctx context.Context) *jobs.Health {
 	if r == nil {
 		return nil
 	}
-	s.healthMu.Lock()
-	defer s.healthMu.Unlock()
-	if s.health != nil && time.Since(s.healthAt) < healthTTL {
-		return s.health
+	for {
+		s.healthMu.Lock()
+		if s.health != nil && time.Since(s.healthAt) < healthTTL {
+			h := s.health
+			s.healthMu.Unlock()
+			return h
+		}
+		if wait := s.healthWait; wait != nil {
+			s.healthMu.Unlock()
+			<-wait
+			continue
+		}
+		wait := make(chan struct{})
+		s.healthWait = wait
+		s.healthMu.Unlock()
+
+		// Not tied to the request: a closed browser tab mustn't cache errors for everyone.
+		checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		h := r.Health(checkCtx, false)
+		cancel()
+
+		s.healthMu.Lock()
+		s.health, s.healthAt = &h, time.Now()
+		s.healthWait = nil
+		s.healthMu.Unlock()
+		close(wait)
+		return &h
 	}
-	// Not tied to the request: a closed browser tab mustn't cache errors for everyone.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	h := r.Health(ctx, false)
-	s.health, s.healthAt = &h, time.Now()
-	return s.health
 }
 
 func (s *Service) invalidateHealth() {

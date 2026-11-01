@@ -3,7 +3,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -140,26 +139,4 @@ func (s *S3) DownloadURL(ctx context.Context, key string, ttl time.Duration) (st
 	return u.String(), nil
 }
 
-func (s *S3) Probe(ctx context.Context) error {
-	key := probePrefix + strconv.FormatInt(time.Now().UnixNano(), 36)
-	want := []byte("liops storage probe\n")
-	if _, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(want), int64(len(want)), minio.PutObjectOptions{}); err != nil {
-		return fmt.Errorf("write test object: %w", err)
-	}
-	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
-	if err != nil {
-		return fmt.Errorf("read test object: %w", err)
-	}
-	got, err := io.ReadAll(obj)
-	obj.Close()
-	if err != nil {
-		return fmt.Errorf("read test object: %w", err)
-	}
-	if !bytes.Equal(got, want) {
-		return fmt.Errorf("read test object: content doesn't match what was written")
-	}
-	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
-		return fmt.Errorf("delete test object: %w", err)
-	}
-	return nil
-}
+func (s *S3) Probe(ctx context.Context) error { return ProbeStore(ctx, s) }
