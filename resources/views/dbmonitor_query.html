@@ -36,6 +36,12 @@
   {{range .Indexes}}<tr><td class="mono">{{.Name}}</td><td class="mono">{{.Definition}}</td><td>{{if .Primary}}<span class="badge ok">primary key</span>{{else if .Unique}}<span class="badge pending">unique</span>{{end}}{{if .Unused}} <span class="badge waiting">unused</span>{{end}}</td></tr>
   {{else}}<tr><td colspan="3"><span class="badge failed">no indexes</span></td></tr>{{end}}
 </table></div>
+{{with .Suggest}}<div class="note">
+  {{with .Note}}<p>{{.}}</p>{{end}}
+  {{if .SQL}}<p><strong>Suggested index</strong> (liops never creates it: add it in a migration and deploy):</p>
+  <pre>{{.SQL}}</pre><pre>{{.Migration}}</pre>
+  <p class="muted">Check it on a copy first: building an index locks writes to a big table on older MySQL versions; PostgreSQL can build it with CREATE INDEX CONCURRENTLY.</p>{{end}}
+</div>{{end}}
 {{else}}<p class="muted">The tables it names weren't in the last table pass (it runs hourly), or the query names none.</p>{{end}}
 <p class="muted">An index helps when its first columns are the ones the query filters on with = (then a range or a sort). An index can't be used for a column inside a function, or a LIKE starting with %. Add indexes in the app's migrations, not by hand.</p>
 {{end}}

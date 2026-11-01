@@ -208,8 +208,8 @@ func (s *Server) jobMarkers(since time.Time) []chartMarker {
 	// Deploys (service.WatchDeploys records them in the audit log): a thin marker each.
 	if entries, err := s.Svc.State.AuditLog(0, 1000); err == nil {
 		for _, e := range entries {
-			if e.Action == "deploy" && e.Time.After(since) {
-				out = append(out, chartMarker{Start: e.Time.Unix(), End: e.Time.Unix(), Label: "deploy"})
+			if (e.Action == "deploy" || e.Action == "tuning" && e.OK) && e.Time.After(since) {
+				out = append(out, chartMarker{Start: e.Time.Unix(), End: e.Time.Unix(), Label: e.Action})
 			}
 		}
 	}

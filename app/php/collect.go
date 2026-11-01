@@ -137,6 +137,12 @@ func opcacheSeries(o OPcache) map[string]float64 {
 		v["opcache.wasted_pct"] = 100 * m.Wasted / total
 		v["opcache.memory"] = total
 	}
+	if o.MemoryMB > 0 {
+		v["opcache.memory_mb"] = o.MemoryMB
+	}
+	if o.StringsMB > 0 {
+		v["opcache.strings_mb"] = o.StringsMB
+	}
 	if s := o.Strings; s != nil && s.Size > 0 {
 		v["opcache.strings_pct"] = 100 * s.Used / s.Size
 	}
@@ -148,6 +154,7 @@ func opcacheSeries(o OPcache) map[string]float64 {
 			v["opcache.keys_pct"] = 100 * s.Keys / s.MaxKeys
 		}
 		v["opcache.scripts"] = s.Scripts
+		v["opcache.max_files"] = o.MaxFiles
 		v["opcache.restarts"] = s.OOMRestarts + s.HashRestarts
 	}
 	return v

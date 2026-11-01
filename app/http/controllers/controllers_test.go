@@ -979,3 +979,44 @@ func TestLogsPage(t *testing.T) {
 		t.Error("follow should refresh the page")
 	}
 }
+
+func TestTuningPage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Monitor.Enabled = true
+	h := newHarness(t, cfg, true)
+	h.ui.Monitor = fakeMonitor(t)
+	etc := t.TempDir()
+	h.ui.PHPEtc, h.ui.WebBackupDir = etc, t.TempDir()
+	os.MkdirAll(filepath.Join(etc, "8.3", "fpm", "pool.d"), 0o755)
+	poolFile := filepath.Join(etc, "8.3", "fpm", "pool.d", "www.conf")
+	os.WriteFile(poolFile, []byte("[www]\nlisten = /run/php/php8.3-fpm.sock\npm = static\npm.max_children = 5\npm.max_requests = 500\npm.status_path = /liops-fpm-status\n"), 0o644)
+
+	_, _, body := h.get("/monitoring/tuning")
+	for _, want := range []string{`href="/monitoring/tuning">Tuning`, "pm.max_children", "5 → ", "Apply", "never touched"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Tuning page should contain %q", want)
+		}
+	}
+	code, loc, body := h.post("/monitoring/tuning", "/monitoring/tuning/apply", url.Values{"id": {"pool/8.3/www/pm.max_children"}})
+	if code != 303 || loc != "/monitoring/tuning" {
+		t.Fatalf("apply: %d %q\n%s", code, loc, body)
+	}
+	data, _ := os.ReadFile(poolFile)
+	if strings.Contains(string(data), "pm.max_children = 5\n") || !strings.Contains(string(data), "; liops tuning") {
+		t.Errorf("pool after apply:\n%s", data)
+	}
+	_, _, body = h.get("/monitoring/tuning")
+	if !strings.Contains(body, "Applied:") || !strings.Contains(body, "Revert") || !strings.Contains(body, "was: pm.max_children 5") {
+		t.Errorf("after apply:\n%s", body)
+	}
+	if code, _, _ := h.post("/monitoring/tuning", "/monitoring/tuning/revert", url.Values{"index": {"0"}}); code != 303 {
+		t.Fatalf("revert: %d", code)
+	}
+	if data, _ := os.ReadFile(poolFile); !strings.Contains(string(data), "pm.max_children = 5 ; liops tuning") {
+		t.Errorf("pool after revert:\n%s", data)
+	}
+	entries, _ := h.st.AuditLog(0, 10)
+	if len(entries) < 2 || entries[0].Action != "tuning" || !strings.HasPrefix(entries[0].Detail, "revert") {
+		t.Errorf("audit = %+v", entries)
+	}
+}

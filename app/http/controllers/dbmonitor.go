@@ -334,6 +334,7 @@ func (s *Server) dbMonitorQuery(w http.ResponseWriter, r *http.Request) {
 	type tableIndexes struct {
 		Table   monitor.TableInfo
 		Indexes []monitor.IndexInfo
+		Suggest *monitor.IndexSuggestion
 	}
 	var d struct {
 		dbMonData
@@ -410,6 +411,9 @@ func (s *Server) dbMonitorQuery(w http.ResponseWriter, r *http.Request) {
 					if ix.TableKey() == ti.Key() {
 						ti2.Indexes = append(ti2.Indexes, ix)
 					}
+				}
+				if len(monitor.TablesIn(detail.Shape.Text)) == 1 {
+					ti2.Suggest = monitor.SuggestIndex(detail.Shape.Text, ti.Name, ti2.Indexes)
 				}
 				d.Touched = append(d.Touched, ti2)
 			}

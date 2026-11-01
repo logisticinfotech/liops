@@ -40,6 +40,8 @@ echo json_encode([
     'stats' => $s['opcache_statistics'] ?? null,
     'full' => (bool) ($s['cache_full'] ?? false),
     'max_files' => $c['directives']['opcache.max_accelerated_files'] ?? null,
+    'memory_mb' => isset($c['directives']['opcache.memory_consumption']) ? $c['directives']['opcache.memory_consumption'] / 1048576 : null,
+    'strings_mb' => $c['directives']['opcache.interned_strings_buffer'] ?? null,
     'validate_timestamps' => $c['directives']['opcache.validate_timestamps'] ?? null,
 ]);
 `
@@ -53,6 +55,7 @@ type Pool struct {
 	User        string
 	PM          string // dynamic, static, ondemand
 	MaxChildren int
+	MaxRequests int    // pm.max_requests: 0 means workers are never recycled
 	StatusPath  string // pm.status_path; empty when it's off
 	SlowTimeout string // request_slowlog_timeout; empty or "0" when off
 	SlowLog     string
@@ -119,6 +122,8 @@ func parsePoolFile(path, version string) ([]Pool, error) {
 			cur.PM = v
 		case "pm.max_children":
 			cur.MaxChildren, _ = strconv.Atoi(v)
+		case "pm.max_requests":
+			cur.MaxRequests, _ = strconv.Atoi(v)
 		case "pm.status_path":
 			cur.StatusPath = v
 		case "request_slowlog_timeout":
@@ -187,8 +192,10 @@ type OPcache struct {
 		HashRestarts   float64 `json:"hash_restarts"`
 		ManualRestarts float64 `json:"manual_restarts"`
 	} `json:"stats"`
-	Full     bool    `json:"full"`
-	MaxFiles float64 `json:"max_files"`
+	Full      bool    `json:"full"`
+	MaxFiles  float64 `json:"max_files"`
+	MemoryMB  float64 `json:"memory_mb"`
+	StringsMB float64 `json:"strings_mb"`
 }
 
 // ReadOPcache runs OPcacheScript in a pool.

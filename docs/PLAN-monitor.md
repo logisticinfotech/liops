@@ -513,6 +513,21 @@ behind slow requests, a 94% full disk, a log growing 89 MB an hour) were each na
 scans first. The daily email's Server health still lists only the scanning queries; the
 verdict's headline could join it.
 
+**MO4 status (November 2026).** Built: recommendations (`app/tuning`, pure rules with one
+memory budget for the buffer pool or `shared_buffers`, PHP workers, OPcache and Redis, the OS
+keeping 15%), applied only on a button in Monitoring → Tuning (`setup.ApplyTuning`, whitelisted
+settings only): MySQL in `zz-liops-tuning.cnf`, checked with `mysqld --validate-config`, set
+online; PostgreSQL in `conf.d/30-liops-tuning.conf`, reloaded, with `shared_buffers` waiting for
+a restart a person starts; PHP in `fpm/conf.d/zz-liops-tuning.ini` and pools in their file
+(a copy kept), checked with `php-fpmX.Y -t`, reloaded; Redis with `CONFIG SET` and
+`CONFIG REWRITE`. Each change records what it replaced for a one-click revert, is a chart
+marker, and shows the day before against the time since. Indexes are suggested on a query's
+page as SQL and a Laravel migration, never created. Checked on a fresh Ubuntu 26.04 VM against
+MySQL 8.4, PostgreSQL 18, PHP 8.5 and Redis 8: each kind applied live and reverted to its
+exact old value; `sync_binlog` and the like are refused. Found there: PostgreSQL reports a
+restart-only setting as "could not be applied" (now waiting for a restart, not an error), and
+Redis reads `M` as 10^6 (Redis values use `mb`).
+
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
 Redis, MySQL and PostgreSQL, a small Laravel app), drives load at it, and checks what the

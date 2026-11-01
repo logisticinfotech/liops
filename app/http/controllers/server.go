@@ -40,6 +40,7 @@ type Server struct {
 	// Where the web servers' configs are, and where changed ones are backed up; tests
 	// point them elsewhere.
 	NginxDir, Caddyfile, WebBackupDir, PHPEtc string
+	MySQLTuningConf                           string // setup.MySQLTuningConf; tests point it elsewhere
 
 	pages map[string]*template.Template
 	setup *wizard
@@ -168,6 +169,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /monitoring/php", page(s.phpPage))
 	mux.Handle("GET /monitoring/apps", page(s.apps))
 	mux.Handle("GET /monitoring/logs", page(s.logs))
+	mux.Handle("GET /monitoring/tuning", page(s.tuningPage))
+	mux.Handle("POST /monitoring/tuning/apply", page(s.tuningApply))
+	mux.Handle("POST /monitoring/tuning/revert", page(s.tuningRevert))
 	mux.Handle("GET /monitoring/redis", page(s.redisPage))
 	mux.Handle("GET /monitoring/database/query", page(s.dbMonitorQuery))
 

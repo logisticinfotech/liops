@@ -1,0 +1,42 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Tuning</h1>
+{{with .Problem}}<div class="error">{{.}}</div>{{end}}
+<p class="muted">liops recommends; nothing changes until you press Apply. Each change goes into a file liops manages (or, for a PHP-FPM pool, the pool's file, with a copy kept), is checked before it's applied, is applied without a restart where possible, and can be reverted here. Durability, replication, authentication and network settings are never touched. Memory is planned together{{if .MemTotal}}, against the server's {{bytes (int64 .MemTotal)}}{{end}}: liops won't recommend more than there is.</p>
+
+{{if .PGRestart}}<form method="post" action="/settings/monitor/restart" class="note">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <p><strong>PostgreSQL waits for a restart</strong> to use a changed setting. The apps can't reach the database for a few seconds. Restart now, or run <code>{{.PGRestartCommand}}</code> yourself at a quiet time.</p>
+  <div class="actions"><button>Restart PostgreSQL now</button></div>
+</form>{{end}}
+
+<h2>Recommended</h2>
+{{range .Recs}}
+<div class="finding warning">
+  <div class="finding-head"><span class="badge waiting">{{.Component}}</span> <strong class="mono">{{.Setting}}</strong> <span class="mono">{{.Current}} → {{.Proposed}}</span>{{range $k, $v := .Extra}} <span class="muted mono">· {{$k}} {{$v}}</span>{{end}}</div>
+  <p>{{.Why}}</p>
+  <p><strong>Effect:</strong> {{.Effect}}</p>
+  <p class="muted">{{.How}}{{if .Restart}} <strong>Needs a PostgreSQL restart</strong>, which you start.{{end}}</p>
+  <form method="post" action="/monitoring/tuning/apply"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+    {{if and $.Data.NeedMySQLPass (eq .Kind "mysql")}}<label>MySQL root password<input type="password" name="mysql_root_password" autocomplete="off"></label>{{end}}
+    {{if and $.Data.NeedRedisPass (eq .Kind "redis")}}<label>Redis password<input type="password" name="redis_password" autocomplete="off"></label>{{end}}
+    <div class="actions"><button>Apply</button></div></form>
+</div>
+{{else}}{{if not .Problem}}<div class="flash">Nothing to change: the settings fit what this server does.</div>{{end}}{{end}}
+
+{{if .Applied}}<h2>Applied</h2>
+<div class="table-wrap"><table>
+  <tr><th>When</th><th>Change</th><th>The day before</th><th>Since</th><th></th></tr>
+  {{range .Applied}}<tr>
+    <td>{{datetime .At}}</td>
+    <td><span class="mono">{{.Component}} · {{.Setting}}</span><div class="muted mono">{{range $k, $v := .New}}{{$k}} = {{$v}} {{end}}(was: {{range $k, $v := .Old}}{{$k}} {{if $v}}{{$v}}{{else}}unset{{end}} {{end}})</div>{{if .Restart}}<span class="badge waiting">waits for a restart</span>{{end}}</td>
+    <td>{{if .Reverted.IsZero}}{{if .Waiting}}<span class="muted">after an hour</span>{{else}}{{.Before}}{{end}}{{else}}<span class="muted">reverted {{when .Reverted}}</span>{{end}}</td>
+    <td>{{if .Reverted.IsZero}}{{if not .Waiting}}{{.After}}{{end}}{{end}}</td>
+    <td>{{if .Reverted.IsZero}}<form method="post" action="/monitoring/tuning/revert"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="index" value="{{.Index}}"><button class="secondary">Revert</button></form>{{end}}</td>
+  </tr>{{end}}
+</table></div>
+<p class="muted">Each change is a marker on the charts. The comparison is the day before against the time since (up to a day): the requests, and the number the change was meant to move.</p>{{end}}
+
+<h2>Indexes</h2>
+<p class="muted">liops suggests indexes on each query's page (Monitoring → Database → a query), as SQL and a Laravel migration. It never creates one: schema belongs in the app's migrations.</p>
+{{end}}{{end}}
