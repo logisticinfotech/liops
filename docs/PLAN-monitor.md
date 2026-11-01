@@ -70,7 +70,7 @@ Not in scope (decided October 2026):
 | History | Raw samples (every 15 s) in memory for the last hour; **1-minute rollups for 7 days** and **hourly rollups for 90 days** on disk. 7 days to diagnose, 90 days for trends ("disk full in 40 days", "memory has grown 30% since August"). |
 | Storage | bbolt, as for the backup state, in its own file (`/var/lib/liops-monitor/metrics.db`): one record per minute (or hour) holding every series, compactly encoded. No time-series database to install. |
 | Charts | **Drawn on the server as SVG**: no JavaScript chart library, and nothing the strict CSP has to allow. |
-| Footprint | Budget: **under 50 MB of memory and 1% of a CPU** on a busy server. Logs are read incrementally (offsets, rotation by inode), never re-read. |
+| Footprint | Budget: **under 100 MB of memory and 10% of a CPU** on a busy server (`MemoryMax=100M`, `CPUQuota=10%`). Logs are read incrementally (offsets, rotation by inode), never re-read. |
 | Tuning | **Always advise; apply only on approval; never on its own.** Approved changes go into files liops manages, are checked before they're applied, applied the least disruptive way (online, then reload; a restart only when asked), can be reverted in one click, and are measured before and after (§5.1). Durability and security settings are never touched. Indexes are suggested (SQL and a Laravel migration), never created: schema belongs in the app's migrations. |
 | App checks | The few Laravel settings that matter (§4.6) are read **by the root service, once a day**, from the app's `.env` and `bootstrap/cache`. Only true/false findings are kept; **no `.env` value is ever stored, shown or sent**. |
 | Alerts | Few, and through the existing email: a "server health" section in the daily summary, plus immediate emails for disk filling soon, memory exhaustion (OOM kills), and a sustained burst of 5xx errors. No pager-style alerting. |
@@ -310,7 +310,7 @@ numbers and the charts behind it; liops never claims more than the data shows:
 | Evidence | Says |
 |---|---|
 | High **steal** | The host is overcommitted: move the VM, or a different plan; tuning won't help |
-| High **iowait**, disk utilisation near 100% | Disk-bound: faster disk, or more memory for the database's cache |
+| High **iowait** (≥ 15%) or the busiest disk ≥ 60% utilised | Disk-bound: faster disk, or more memory for the database's cache |
 | **Swap** in use, OOM kills, little memory available | Memory-bound: more RAM, or fewer PHP workers / smaller DB buffers |
 | PHP **max children reached** / listen queue > 0 while CPU has room | Raise `pm.max_children` (with the memory per worker it would cost) |
 | A few query shapes take most of the database's time; rows examined ≫ rows sent, or no index used | **Fix the app first**: those queries need indexes or rewriting (listed, with the tables' indexes and pattern flags) |

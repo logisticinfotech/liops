@@ -138,8 +138,9 @@ so it feels familiar to developers coming from those frameworks.
   `deleted since <date>`, sends an email, keeps its **newest** dump for N days (default 14),
   then deletes it. Note: layer 1 still contains the deleted database until its backups
   expire. Operators should reflect that in their privacy policy.
-- **Labels (optional)**: a configurable SQL query against one database that returns
-  `(database name, label)`, e.g. `SELECT db_name, subdomain FROM tenants`. The UI and emails
+- **Labels (optional)**: in one database, a table (`schema.table` allowed) plus the
+  database-name column and the label column. liops builds `SELECT` those two columns
+  itself. An old `labels.sql` in the config is ignored and never run. The UI and emails
   then show `abc` instead of `tenant_abc`.
 
 > Dumps of different databases are taken at different moments. They're for single-database
@@ -204,7 +205,7 @@ Server-rendered pages (`html/template` + `embed`) with a little vanilla JS. Six 
 | **Point-in-time backups** | Table from `pgbackrest info --output=json`: type, start/end, duration, size |
 | **Databases** | One row per database: label, last dump time and size, history, **Download** button. Deleted databases show "deleted since … (dump kept until …)". |
 | **Jobs** | History of all runs, filterable, with each job's output. A **Run now** button for `diff`, `dumps` and `report`. |
-| **Settings** | Storage, email, schedules, retention, exclusions, label query. Each section has a **Test** button. |
+| **Settings** | Storage, email, schedules, retention, exclusions, dump labels (table and columns). Each section has a **Test** button. |
 | **Audit log** | Which dump was downloaded, which settings changed, which jobs were started, and when |
 
 ### 5.1 Downloads
@@ -330,7 +331,7 @@ liops, but leaves the backups in storage untouched.
    object.
 3. **Email:** SMTP account, recipients. **Test** sends an email.
 4. **Schedules and retention:** defaults from §4.4 and §2, editable.
-5. **Labels (optional):** label database and query. **Test** shows the mapping.
+5. **Labels (optional):** database, table (`schema.table` allowed), and the two columns. An old `labels.sql` is ignored. **Test** shows the mapping.
 6. **Review and apply:**
    - writes `pgbackrest.conf` and `conf.d/10-pgbackrest.conf`;
    - **asks before** restarting PostgreSQL (seconds of downtime, needed for `archive_mode`),

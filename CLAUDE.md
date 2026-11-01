@@ -68,7 +68,9 @@ commit are injected via `-ldflags -X .../app/version.Version/Commit`.
   process at a time and both the service and the CLI use it.
 - **Bucket layout**: everything a server stores is under its backup name
   (`cfg.BackupName()` + "/", `storage.Folder`; for PostgreSQL that is `pgbackrest.stanza`). Get a store with `storage.Open(cfg)`, which
-  adds the folder, so keys in code stay relative (`dumps/<db>/…`). pgBackRest's
+  adds the folder, so keys in code stay relative (`dumps/<db>/…`). MySQL binlogs live under
+  `xtrabackup/binlog/<generation>/` (a RESET starts a new folder; older backups keep the
+  flat `xtrabackup/binlog/<file>.gz`). pgBackRest's
   `repo1-path` is `/<name>/pgbackrest`. Setup claims the folder (`setup.claimFolder`, used
   by `CheckOwner` and `CheckMySQLOwner`): it writes `owners/<engine>-<identity>` and only
   uses a folder that is empty or holds its own marker; anything else is refused before

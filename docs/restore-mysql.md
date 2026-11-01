@@ -60,8 +60,11 @@ accounts are left as they are.
 ## 2. Restore the whole server to a point in time
 
 This replaces **all** of the server's databases with how they were at one moment, from a
-base backup (full, plus a diff) and the binlogs shipped after it. The current data is moved
-aside, not deleted. Your app should be stopped while you do this.
+base backup (full, plus a diff) and the binlogs shipped after it. Only binlogs from that
+backup's own generation are replayed, so a restore cannot cross a `RESET BINARY LOGS` (or
+`RESET BINARY LOGS AND GTIDS`): the chain after the reset is a new generation, started by
+the catch-up full. The current data is moved aside, not deleted. Your app should be stopped
+while you do this.
 
 **Pick the moment**, in `server.timezone`, just before the damage. The backups page in the UI
 shows how far back you can go ("can restore back to") and when binlogs were last shipped:

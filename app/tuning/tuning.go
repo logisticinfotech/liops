@@ -183,7 +183,9 @@ func Recommend(f Facts) []Recommendation {
 				Effect: "PostgreSQL uses indexes where they help, instead of reading whole tables.",
 				How:    "Written to conf.d/30-liops-tuning.conf and reloaded."})
 		}
-		if p.TempBytesPerHour >= 100<<20 && p.WorkMem < 32<<20 && f.MemTotal >= 4<<30 {
+		const workMemWant = 32 << 20
+		if p.TempBytesPerHour >= 100<<20 && p.WorkMem < workMemWant && f.MemTotal >= 4<<30 &&
+			b.take(workMemWant-p.WorkMem) {
 			out = append(out, Recommendation{ID: "postgres/work_mem", Kind: KindPostgres, Component: "PostgreSQL", Setting: "work_mem",
 				Current: mb(p.WorkMem), Proposed: "32MB",
 				Why:    fmt.Sprintf("Sorts and hashes spilled %s an hour to temporary files.", gb(p.TempBytesPerHour)),

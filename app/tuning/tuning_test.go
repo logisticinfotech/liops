@@ -66,9 +66,11 @@ func TestRecommend(t *testing.T) {
 func TestMemoryIsNeverOverpromised(t *testing.T) {
 	f := defaults()
 	f.MemAvailable = 1 << 30 // little left: 1 GB, less the 1.2 GB margin
+	f.Postgres = &Postgres{SharedBuffers: 128 << 20, EffectiveCache: 4 << 30, WorkMem: 4 << 20,
+		DataBytes: 20 << 30, TempBytesPerHour: 2 << 30, CacheHit: 90}
 	rs := Recommend(f)
 	for _, r := range rs {
-		if r.Setting == "innodb_buffer_pool_size" || r.Setting == "pm.max_children" || r.Setting == "opcache.memory_consumption" || r.Setting == "maxmemory" {
+		if r.Setting == "innodb_buffer_pool_size" || r.Setting == "pm.max_children" || r.Setting == "opcache.memory_consumption" || r.Setting == "maxmemory" || r.Setting == "work_mem" || r.Setting == "shared_buffers" {
 			t.Errorf("no memory to hand out, yet: %+v", r)
 		}
 	}

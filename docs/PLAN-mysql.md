@@ -50,7 +50,8 @@ restoring from the UI (same rule as PLAN.md §2).
          backup.xbstream                         ← xtrabackup --stream, zstd-compressed
          backup.json                             ← manifest, written LAST (no manifest = incomplete)
        xtrabackup/base/<UTC time>-diff/…         ← incremental from that week's full
-       xtrabackup/binlog/binlog.000123.gz        ← every closed binlog file
+       xtrabackup/binlog/<generation>/binlog.000123.gz  ← one chain; RESET starts a new folder
+         (older backups: xtrabackup/binlog/binlog.000123.gz)
        dumps/<database>/<UTC time>.sql.gz        ← layer 2
        globals/<UTC time>.sql                    ← users and grants
 ```
@@ -67,8 +68,10 @@ xtrabackup --defaults-extra-file=/etc/liops/mysql.cnf --backup \
 - stdout goes through `io.Pipe` into a multipart upload, as dumps do today. Only the small
   `xtrabackup_checkpoints` / `xtrabackup_info` files touch the disk (`--extra-lsndir`).
 - When the upload succeeds, liops writes `backup.json`: type, start and stop time, LSNs,
-  binlog file and position, GTID set, the full it is based on, XtraBackup and MySQL versions,
-  and size. Everything that reads backups only trusts folders that have a manifest. Folders
+  binlog file and position, GTID set, `binlog_gen` (the chain this backup belongs to), the
+  full it is based on, XtraBackup and MySQL versions, and size. Restores never mix binlogs
+  from two generations. Everything that reads backups only trusts folders that have a
+  manifest. Folders
   without one are failed attempts, and retention deletes them.
 - A diff whose full is missing or has no manifest is refused, and the job falls back to a full.
 - Before each backup: check that the installed XtraBackup supports the running MySQL
@@ -81,16 +84,20 @@ xtrabackup --defaults-extra-file=/etc/liops/mysql.cnf --backup \
   1. `SHOW BINARY LOG STATUS` (the 8.4 name; `SHOW MASTER STATUS` is gone). If the position
      moved since the last run, `FLUSH BINARY LOGS` closes the current file.
   2. `SHOW BINARY LOGS` lists the files. Every **closed** file not yet in storage is gzipped and
-     uploaded. Its name, size and GTID range go into the state file.
+     uploaded under `xtrabackup/binlog/<generation>/<file>.gz` (the backup's `binlog_gen`;
+     older backups keep the flat `xtrabackup/binlog/<file>.gz`). The last shipped position
+     is kept in the state file (`binlog_position`); there is no per-file GTID range. A reset
+     is caught by file numbers going backwards and by `GTID_SUBSET` of the backup's set.
 - It uses its **own lock** (`binlog.lock`), so a long full backup doesn't hold up shipping.
   Binlog files only grow and are never rewritten, so shipping and backups don't conflict.
 - Successful runs are **not** recorded as job runs (288 a day would bury the history). Only
   the last success and any failures are. A failure emails straight away, like other jobs.
 - **Gap detection:** file numbers and GTID sets must follow on from each other, starting at
-  the binlog position recorded in the oldest kept base backup. A gap means a file was purged
-  before it was shipped, or someone ran `RESET BINARY LOGS AND GTIDS`. liops emails, says
-  which window can't be restored, and takes a new full backup straight away so the chain starts
-  again.
+  the binlog position recorded in the oldest kept base backup of the current generation. A
+  gap means a file was purged before it was shipped, or someone ran `RESET BINARY LOGS AND
+  GTIDS`. A reset is sticky (`binlog_new_gen` in the state file) until a full starts a new
+  generation: nothing ships in between, and a requested diff becomes that full. liops emails,
+  says which window can't be restored, and takes a new full backup so the chain starts again.
 - Setup checks that `binlog_expire_logs_seconds` is at least 7 days, so MySQL keeps local
   binlogs long enough to survive a storage outage of a few days.
 
@@ -300,13 +307,16 @@ with XtraBackup reading liops's login from the defaults file's `[client]` group.
 **M2 step 3, binlog shipping (October 2026):** the `binlogs` job (`liops run binlogs`, and
 every `mysql.binlog_interval` from the scheduler) runs under its own `binlog.lock`. If MySQL
 wrote anything since the last run it does `FLUSH BINARY LOGS`, then uploads, gzipped, every
-closed binlog from the oldest backup's binlog file on that isn't in storage yet
-(`xtrabackup/binlog/<file>.gz`), reading it from the binlog directory and checking its size
-against `SHOW BINARY LOGS`. Nothing is shipped before the first backup. A needed binlog
-that is neither stored nor on the server is a gap: one email per gap, then a full backup
-(trigger `automatic`). Failures email once until a run works again. Runs aren't kept in the
-job history; the last good run is state meta `binlog_shipped_at`. In the VM test, a row
-written after the diff was found, with `mysqlbinlog`, in the shipped binlogs.
+closed binlog from the oldest backup of the current generation that isn't in storage yet
+(`xtrabackup/binlog/<generation>/<file>.gz`; older backups keep the flat
+`xtrabackup/binlog/<file>.gz`), reading it from the binlog directory and checking its size
+against `SHOW BINARY LOGS`. `backup.json` records `binlog_gen`; restores never cross a
+generation. A `RESET BINARY LOGS` (or lost GTIDs) is sticky until a full starts a new
+generation: nothing ships in between. Nothing is shipped before the first backup. A needed
+binlog that is neither stored nor on the server is a gap: one email per gap, then a full
+backup (trigger `automatic`). Failures email once until a run works again. Runs aren't kept
+in the job history; the last good run is state meta `binlog_shipped_at`. In the VM test, a
+row written after the diff was found, with `mysqlbinlog`, in the shipped binlogs.
 
 **M2 step 4, retention and health (October 2026):** after each successful MySQL backup,
 `xtrabackup.PlanRetention` (pure) and `Apply` delete fulls older than `mysql.retention_days`
@@ -332,7 +342,10 @@ drops the table, ships binlogs, runs `restore-files` and then the printed comman
 printed: the table comes back with the same checksum as at the moment. **It passed.**
 A `RESET BINARY LOGS AND GTIDS` in the middle (Docker and VM) takes a catch-up full, starts
 a new binlog generation, and ships the row written after the reset; the VM restore that
-follows is then from that new generation.
+follows is then from that new generation. **It passed** in an Ubuntu 26.04 VM against
+MySQL 8.4: the gap was at `binlog.000008`, the catch-up full started `binlog.000003`, two
+generation folders were stored, and the point-in-time restore replayed only the new
+generation's files.
 Found along the way: a restored server gets a new `server_uuid` (the backup has no
 `auto.cnf`), and XtraBackup copies the open binlog, so the restored server's binlog numbers
 carry on from the backup's: it must use a new backup name, and setup refuses the old one.
