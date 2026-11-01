@@ -293,6 +293,9 @@ func TestBackupFailureEmail(t *testing.T) {
 }
 
 func TestReport(t *testing.T) {
+	old := diskUsedPctFn
+	diskUsedPctFn = func(string) (int, error) { return 10, nil }
+	t.Cleanup(func() { diskUsedPctFn = old })
 	w := newWorld(t, "app")
 	if err := w.runner.Run(context.Background(), Dumps, Manual); err != nil {
 		t.Fatal(err)

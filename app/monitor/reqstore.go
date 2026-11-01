@@ -49,6 +49,11 @@ var maxRouteIDs = 4096
 // crawler burst doesn't fill the cap and leave real routes as {other} for 90 days.
 var maxNewRouteIDsPerHour = 256
 
+// staleRouteHours is how long a route id must go unseen in hourly records before
+// it can be evicted when the 4096 cap is full, so a burst crawler doesn't leave
+// real routes as {other} until the 90-day hours expire.
+const staleRouteHours = 7 * 24
+
 var otherRoute = routeKey{"{other}", "{other}"}
 
 // RouteStats are a route's numbers over a period.
@@ -334,6 +339,10 @@ func (s *Store) writeRoutes(bucket []byte, key uint32, rows map[routeKey]*RouteS
 		}
 		for k, st := range rows {
 			id, ok := s.routeIDs[k]
+			if !ok && len(s.routeIDs) >= maxRouteIDs {
+				s.evictStaleRouteIDs(tx, hour, rows)
+				id, ok = s.routeIDs[k]
+			}
 			if !ok && (len(s.routeIDs) >= maxRouteIDs || s.newRouteCount >= maxNewRouteIDsPerHour) {
 				k = otherRoute
 				id, ok = s.routeIDs[k]
@@ -550,30 +559,81 @@ func pruneRequests(tx *bolt.Tx, now time.Time) error {
 	return pruneUnusedRouteIDs(tx)
 }
 
+func collectRouteIDs(v []byte, used map[uint32]bool) {
+	for len(v) > 0 {
+		id, size := binary.Uvarint(v)
+		if size <= 0 {
+			return
+		}
+		used[uint32(id)] = true
+		v = v[size:]
+		for range 8 + nHist {
+			_, n := binary.Uvarint(v)
+			if n <= 0 {
+				return
+			}
+			v = v[n:]
+		}
+	}
+}
+
 func usedRouteIDs(tx *bolt.Tx) map[uint32]bool {
 	used := map[uint32]bool{}
 	for _, name := range [][]byte{bucketReqMinute, bucketReqHour} {
 		c := tx.Bucket(name).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			for len(v) > 0 {
-				id, size := binary.Uvarint(v)
-				if size <= 0 {
-					break
-				}
-				used[uint32(id)] = true
-				v = v[size:]
-				for range 8 + nHist {
-					_, n := binary.Uvarint(v)
-					if n <= 0 {
-						v = nil
-						break
-					}
-					v = v[n:]
-				}
-			}
+			collectRouteIDs(v, used)
 		}
 	}
 	return used
+}
+
+// usedRouteIDsSince is the route ids seen in hourly (and minute) records at or after cutHour.
+func usedRouteIDsSince(tx *bolt.Tx, cutHour uint32) map[uint32]bool {
+	used := map[uint32]bool{}
+	scan := func(bucket []byte, cut uint32) {
+		c := tx.Bucket(bucket).Cursor()
+		start := binary.BigEndian.AppendUint32(nil, cut)
+		for k, v := c.Seek(start); k != nil; k, v = c.Next() {
+			collectRouteIDs(v, used)
+		}
+	}
+	scan(bucketReqHour, cutHour)
+	scan(bucketReqMinute, cutHour*60)
+	return used
+}
+
+// evictStaleRouteIDs drops ids that haven't appeared in the last staleRouteHours of
+// records, so a crawler burst can give those slots back. keep's keys (this write)
+// are not dropped. The caller holds s.mu and is inside an Update.
+func (s *Store) evictStaleRouteIDs(tx *bolt.Tx, hour uint32, keep map[routeKey]*RouteStats) {
+	cut := uint32(0)
+	if hour > staleRouteHours {
+		cut = hour - staleRouteHours
+	}
+	used := usedRouteIDsSince(tx, cut)
+	if id, ok := s.routeIDs[otherRoute]; ok {
+		used[id] = true
+	}
+	for k := range keep {
+		if id, ok := s.routeIDs[k]; ok {
+			used[id] = true
+		}
+	}
+	routes := tx.Bucket(bucketRoutes)
+	c := routes.Cursor()
+	for k, _ := c.First(); k != nil; {
+		id := binary.BigEndian.Uint32(k)
+		next, _ := c.Next()
+		if !used[id] {
+			if rk, ok := s.routeNames[id]; ok {
+				delete(s.routeIDs, rk)
+				delete(s.routeNames, id)
+			}
+			_ = routes.Delete(k)
+		}
+		k = next
+	}
 }
 
 func pruneUnusedRouteIDs(tx *bolt.Tx) error {

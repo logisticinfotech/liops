@@ -163,6 +163,33 @@ func TestCheckOwner(t *testing.T) {
 	}
 }
 
+type countList struct {
+	storage.Store
+	lists int
+}
+
+func (c *countList) List(ctx context.Context, prefix string) ([]storage.Object, error) {
+	if prefix == "" {
+		c.lists++
+	}
+	return c.Store.List(ctx, prefix)
+}
+
+func TestFolderInUseStopsBeforeListingWAL(t *testing.T) {
+	mem := storage.NewMemory()
+	for i := 0; i < 100; i++ {
+		mem.Add(fmt.Sprintf("pgbackrest/archive/18-1/%d", i), []byte("wal"), time.Now())
+	}
+	c := &countList{Store: mem}
+	used, err := folderInUse(context.Background(), c)
+	if err != nil || !used {
+		t.Fatalf("used=%v err=%v", used, err)
+	}
+	if c.lists != 0 {
+		t.Errorf("a pgBackRest repo must be seen with Any, not a full List; lists=%d", c.lists)
+	}
+}
+
 func TestWriteSettingsStopsBeforeArchivingWhenNameIsTaken(t *testing.T) {
 	old := postgres.HomebrewPrefix
 	postgres.HomebrewPrefix = t.TempDir()

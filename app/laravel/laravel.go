@@ -352,7 +352,7 @@ func Errors(a App, since time.Time) []ErrorGroup {
 		if budget <= 0 || modTime(f).Before(since) {
 			break
 		}
-		budget -= scanLog(a.Dir, f, budget, since, groups)
+		budget -= scanLog(AppRoot(a.Dir), f, budget, since, groups)
 	}
 	out := make([]ErrorGroup, 0, len(groups))
 	for _, g := range groups {

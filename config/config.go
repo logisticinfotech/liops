@@ -154,18 +154,28 @@ type LabelQuery struct {
 	SQL         string `yaml:"sql,omitempty"` // leftover free SQL: never executed
 }
 
-// labelIdentRe is a table or column name: quoted into the SELECT liops builds.
+// labelIdentRe is one identifier: a schema, table or column name.
 var labelIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // QuoteIdent quotes a table or column name for PostgreSQL (") or MySQL (backticks).
+// Table may be schema.table (one optional dot); each part is quoted separately.
 func QuoteIdent(name string, mysql bool) (string, error) {
-	if !labelIdentRe.MatchString(name) {
-		return "", fmt.Errorf("%q isn't a table or column name (letters, digits and underscores, starting with a letter or underscore)", name)
+	parts := strings.Split(name, ".")
+	if len(parts) == 0 || len(parts) > 2 {
+		return "", fmt.Errorf("%q isn't a table or column name (letters, digits and underscores, starting with a letter or underscore; one optional schema.)", name)
 	}
-	if mysql {
-		return "`" + name + "`", nil
+	quoted := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if !labelIdentRe.MatchString(p) {
+			return "", fmt.Errorf("%q isn't a table or column name (letters, digits and underscores, starting with a letter or underscore; one optional schema.)", name)
+		}
+		if mysql {
+			quoted = append(quoted, "`"+p+"`")
+		} else {
+			quoted = append(quoted, `"`+p+`"`)
+		}
 	}
-	return `"` + name + `"`, nil
+	return strings.Join(quoted, "."), nil
 }
 
 // Configured reports whether the four identifier fields are set, so a query can be built.

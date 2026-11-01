@@ -107,7 +107,7 @@ func (r *Runner) Health(ctx context.Context, deep bool) Health {
 	if r.Cfg.IsMySQL() {
 		dataDir, fullSchedule = r.Cfg.MySQL.DataDir, r.Cfg.MySQL.FullSchedule
 	}
-	if pct, err := diskUsedPct(dataDir); err == nil {
+	if pct, err := diskUsedPctFn(dataDir); err == nil {
 		s.DiskUsedPct = pct
 		if pct >= 90 {
 			problem("the server disk is %d%% full", pct)
@@ -265,6 +265,10 @@ func (r *Runner) archiver(ctx context.Context) (archived, failed time.Time, err 
 	}
 	return unix(rows[0][0]), unix(rows[0][1]), nil
 }
+
+// diskUsedPctFn reads how full the filesystem is. Tests replace it so a nearly
+// full developer disk doesn't fail the daily-summary checks.
+var diskUsedPctFn = diskUsedPct
 
 func diskUsedPct(path string) (int, error) {
 	var st syscall.Statfs_t

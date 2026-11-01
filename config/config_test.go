@@ -279,6 +279,19 @@ func TestLabelQueryBuildsQuotedSelect(t *testing.T) {
 	if err != nil || got != "SELECT `db_name`, `subdomain` FROM `tenants`" {
 		t.Errorf("mysql: %q, %v", got, err)
 	}
+	q.Table = "public.tenants"
+	got, err = q.SelectSQL(false)
+	if err != nil || got != `SELECT "db_name", "subdomain" FROM "public"."tenants"` {
+		t.Errorf("schema.table postgres: %q, %v", got, err)
+	}
+	got, err = q.SelectSQL(true)
+	if err != nil || got != "SELECT `db_name`, `subdomain` FROM `public`.`tenants`" {
+		t.Errorf("schema.table mysql: %q, %v", got, err)
+	}
+	q.Table = "a.b.c"
+	if sql, err := q.SelectSQL(false); err == nil {
+		t.Errorf("two dots should be refused, got %q", sql)
+	}
 	for _, name := range []string{"pg_read_file", "lo_export", "tenants;DROP", "pg_read_file('x')"} {
 		q := LabelQuery{Database: "central", Table: name, DBColumn: "db_name", LabelColumn: "subdomain"}
 		sql, err := q.SelectSQL(false)

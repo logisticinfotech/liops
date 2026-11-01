@@ -24,6 +24,7 @@ const (
 	metaBinlogGaps         = "binlog_gaps_reported"  // binlog names already reported as missing
 	metaBinlogCatchUp      = "binlog_catch_up"       // RFC 3339 of the gap; empty when none
 	metaBinlogCatchUpTried = "binlog_catch_up_tried" // RFC 3339 of the last catch-up full attempt
+	metaBinlogNewGen       = "binlog_new_gen"        // "1" until a full starts a new generation after a reset
 	binlogShipTimeout      = time.Hour
 	catchUpEvery           = time.Hour
 )
@@ -84,8 +85,7 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 		return nil
 	}
 	if r.skipCatchUp() {
-		r.setMeta(metaBinlogCatchUp, "")
-		r.setMeta(metaBinlogCatchUpTried, "")
+		r.clearCatchUp()
 		return nil
 	}
 	if !r.catchUpDue() {
@@ -95,20 +95,30 @@ func (r *Runner) binlogs(ctx context.Context, trigger string) error {
 	unlock()
 	unlock = nil
 	if r.skipCatchUp() {
-		r.setMeta(metaBinlogCatchUp, "")
-		r.setMeta(metaBinlogCatchUpTried, "")
+		r.clearCatchUp()
 		return nil
 	}
 	if err := r.Run(ctx, Full, Automatic); err != nil {
 		return err
 	}
+	r.clearCatchUp()
+	return nil
+}
+
+func (r *Runner) clearCatchUp() {
 	r.setMeta(metaBinlogCatchUp, "")
 	r.setMeta(metaBinlogCatchUpTried, "")
-	return nil
+	r.setMeta(metaBinlogNewGen, "")
+	if r.XtraBackup != nil {
+		r.XtraBackup.NewGen = false
+	}
 }
 
 // skipCatchUp reports whether a full backup has already finished since the gap.
 func (r *Runner) skipCatchUp() bool {
+	if r.meta(metaBinlogNewGen) != "" {
+		return false // a reset still needs a full that starts a new generation
+	}
 	gapAt, err := time.Parse(time.RFC3339, r.meta(metaBinlogCatchUp))
 	if err != nil {
 		return false // legacy "1" or unparseable: still try (with backoff)
@@ -156,10 +166,16 @@ func (r *Runner) shipBinlogs(ctx context.Context) (xtrabackup.ShipResult, error)
 			return res, err
 		}
 	}
-	if res, err = r.XtraBackup.ShipBinlogs(ctx, backups); err != nil {
+	lastSeen, _, _ := strings.Cut(r.meta(metaBinlogPosition), ":")
+	if res, err = r.XtraBackup.ShipBinlogs(ctx, backups, lastSeen, r.meta(metaBinlogNewGen) != ""); err != nil {
 		return res, err
 	}
-	r.setMeta(metaBinlogPosition, status.Position())
+	if res.NewGen {
+		r.setMeta(metaBinlogNewGen, "1")
+		r.XtraBackup.NewGen = true
+	} else {
+		r.setMeta(metaBinlogPosition, status.Position())
+	}
 	if len(res.Shipped) > 0 {
 		names := res.Shipped[0]
 		if len(res.Shipped) > 1 {

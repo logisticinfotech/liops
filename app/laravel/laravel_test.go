@@ -137,6 +137,34 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+func TestErrorsFollowsDeployerSharedStorage(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "releases", "20261101-0500")
+	sharedLogs := filepath.Join(root, "shared", "storage", "logs")
+	if err := os.MkdirAll(release, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sharedLogs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "shared", "storage"), filepath.Join(release, "storage")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "20261101-0500"), filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	ts := now.Format("2006-01-02 15:04:05")
+	if err := os.WriteFile(filepath.Join(sharedLogs, "laravel.log"), []byte("["+ts+"] production.ERROR: Payment gateway timeout for order 12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := App{Dir: filepath.Join(root, "current")}
+	groups := Errors(a, now.Add(-time.Hour))
+	if len(groups) != 1 || groups[0].Where != "Payment gateway timeout for order N" {
+		t.Errorf("shared storage logs should be read: %+v", groups)
+	}
+}
+
 func TestErrorsRefusesSymlinkedLogsDir(t *testing.T) {
 	a := newApp(t, "")
 	outside := t.TempDir()

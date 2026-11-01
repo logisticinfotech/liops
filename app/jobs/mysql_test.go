@@ -78,6 +78,8 @@ func newMySQLWorld(t *testing.T, dbs ...string) *world {
 			return []byte(out.String()), nil
 		case program == "mysql" && strings.Contains(query, "FROM mysql.user"):
 			return []byte(hex.EncodeToString([]byte("app")) + "\t" + hex.EncodeToString([]byte("%")) + "\n"), nil
+		case program == "mysql" && strings.Contains(query, "GTID_SUBSET"):
+			return []byte("1\n"), nil
 		case program == "mysql" && strings.Contains(query, "BINARY LOG"), program == "mysql" && strings.Contains(query, "log_bin_basename"):
 			return w.binlogQuery(strings.TrimPrefix(query, "--execute="))
 		case program == "mysql" && strings.Contains(query, "SHOW CREATE USER"):
@@ -292,6 +294,70 @@ func TestMySQLBinlogGapRetriesFailedFull(t *testing.T) {
 	}
 }
 
+func TestMySQLBinlogResetStaysWhileCatchUpIsDelayed(t *testing.T) {
+	w := newMySQLWorld(t, "app")
+	ctx := context.Background()
+	if err := w.runner.Run(ctx, Full, Manual); err != nil {
+		t.Fatal(err)
+	}
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatal(err)
+	}
+	backs, err := w.runner.XtraBackup.Backups(ctx)
+	if err != nil || len(backs) != 1 {
+		t.Fatalf("backups: %v %+v", err, backs)
+	}
+	oldGen := backs[0].BinlogGen
+	shippedBefore := w.keys(xtrabackup.BinlogPrefix + oldGen + "/")
+
+	for _, name := range w.binlogs {
+		os.Remove(filepath.Join(w.binlogDir, name))
+	}
+	w.binlogs, w.binlogPos = nil, 0
+	w.addBinlog("binlog.000001")
+	w.write()
+	w.failBack = true
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err == nil {
+		t.Fatal("the catch-up full should fail")
+	}
+	if v, _ := w.runner.State.GetMeta(metaBinlogNewGen); v == "" {
+		t.Fatal("a reset should stay pending")
+	}
+
+	// The new chain rotates past the backup's binlog.000003. Without a sticky
+	// flag, shipping would resume into the old generation.
+	w.addBinlog("binlog.000003")
+	w.addBinlog("binlog.000004")
+	w.write()
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("pending reset must not fail shipping: %v\n%s", err, w.log.String())
+	}
+	if v, _ := w.runner.State.GetMeta(metaBinlogNewGen); v == "" {
+		t.Error("the reset must stay pending after numbers catch up")
+	}
+	if after := w.keys(xtrabackup.BinlogPrefix + oldGen + "/"); len(after) != len(shippedBefore) {
+		t.Errorf("must not ship the new chain into the old generation: before %q after %q", shippedBefore, after)
+	}
+
+	w.failBack = false
+	w.advance(time.Hour)
+	if err := w.runner.Run(ctx, Binlogs, Scheduled); err != nil {
+		t.Fatalf("catch-up: %v\n%s", err, w.log.String())
+	}
+	if v, _ := w.runner.State.GetMeta(metaBinlogNewGen); v != "" {
+		t.Errorf("the flag should clear after the catch-up full, got %q", v)
+	}
+	backs, err = w.runner.XtraBackup.Backups(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := xtrabackup.Last(backs, xtrabackup.Full)
+	if last == nil || last.BinlogGen == "" || last.BinlogGen == oldGen {
+		t.Errorf("catch-up should start a new generation, old %q backups %+v", oldGen, backs)
+	}
+}
+
 func TestMySQLBinlogResetTakesAFullBackup(t *testing.T) {
 	w := newMySQLWorld(t, "app")
 	ctx := context.Background()
@@ -411,6 +477,9 @@ func TestMySQLFullThenDiff(t *testing.T) {
 }
 
 func TestMySQLReport(t *testing.T) {
+	old := diskUsedPctFn
+	diskUsedPctFn = func(string) (int, error) { return 10, nil }
+	t.Cleanup(func() { diskUsedPctFn = old })
 	w := newMySQLWorld(t, "app")
 	ctx := context.Background()
 	if err := w.runner.Run(ctx, Full, Manual); err != nil {

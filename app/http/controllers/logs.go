@@ -190,7 +190,7 @@ func (s *Server) readLog(ctx context.Context, source string, n int, filter strin
 func openLogFile(path string) (*os.File, error) {
 	slash := filepath.ToSlash(path)
 	if i := strings.Index(slash, "/storage/logs/"); i >= 0 {
-		return laravel.OpenUnder(path[:i], path)
+		return laravel.OpenUnder(laravel.AppRoot(path[:i]), path)
 	}
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if err != nil {

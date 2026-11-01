@@ -536,6 +536,16 @@ func TestSettingsTabs(t *testing.T) {
 	}
 }
 
+func TestSettingsLeftoverLabelSQL(t *testing.T) {
+	cfg := validConfig()
+	cfg.Dumps.Labels = config.LabelQuery{Database: "central", SQL: "SELECT db_name, subdomain FROM tenants"}
+	h := newHarness(t, cfg, true)
+	_, _, body := h.get("/settings?tab=dumps")
+	if !strings.Contains(body, "old label query is in the config and is ignored") {
+		t.Errorf("leftover sql should be mentioned:\n%s", body)
+	}
+}
+
 func TestErrorPageLeadsWithTheReason(t *testing.T) {
 	h := newHarness(t, validConfig(), true)
 	h.store.FailList = "dumps/"
@@ -1074,6 +1084,33 @@ func TestMonitorRestartSkippedWhenNotPending(t *testing.T) {
 	if !strings.Contains(body, "need a restart right now") {
 		t.Errorf("should say no restart was needed:\n%s", body)
 	}
+}
+
+func TestOpenLogFileFollowsDeployerSharedStorage(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "releases", "20261101-0500")
+	sharedLogs := filepath.Join(root, "shared", "storage", "logs")
+	if err := os.MkdirAll(release, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sharedLogs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "shared", "storage"), filepath.Join(release, "storage")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "20261101-0500"), filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "current", "storage", "logs", "laravel.log")
+	if err := os.WriteFile(filepath.Join(sharedLogs, "laravel.log"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openLogFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
 }
 
 func TestOpenLogFileRefusesSymlink(t *testing.T) {

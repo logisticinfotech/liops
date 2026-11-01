@@ -7,46 +7,49 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
-// OpenUnder opens path as a regular file, without following a symlink, and only if
-// the resolved directory stays under root. Laravel's storage/logs is writable by the
-// app user and serve runs as root, so a symlink there must not be followed out of
-// the app.
+// AppRoot is the folder OpenUnder treats as the app: the directory itself, or the
+// deploy base (the parent of current) when dir is a current symlink. Deployer,
+// Envoyer and Forge put storage in shared/ next to current, so the root has to be
+// the parent or those logs are refused.
+func AppRoot(dir string) string {
+	fi, err := os.Lstat(dir)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return dir
+	}
+	return filepath.Dir(dir)
+}
+
+// OpenUnder opens path as a regular file only if it stays under root after following
+// symlinks. os.OpenRoot does the check and the open as one step, so the app user
+// can't swap storage/logs for a symlink in between. current → releases/N and
+// storage → shared/storage are allowed when root is the deploy base.
 func OpenUnder(root, path string) (*os.File, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
-		rootAbs = resolved
-	}
 	pathAbs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	dir, err := filepath.EvalSymlinks(filepath.Dir(pathAbs))
-	if err != nil {
-		return nil, err
-	}
-	dir, err = filepath.Abs(dir)
-	if err != nil {
-		return nil, err
-	}
-	sep := string(os.PathSeparator)
-	prefix := strings.TrimSuffix(rootAbs, sep) + sep
-	if dir != rootAbs && !strings.HasPrefix(dir, prefix) {
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil || !filepath.IsLocal(rel) {
 		return nil, fmt.Errorf("refusing to follow a symlink")
 	}
-	fd, err := syscall.Open(pathAbs, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	r, err := os.OpenRoot(rootAbs)
 	if err != nil {
-		if err == syscall.ELOOP {
+		return nil, err
+	}
+	defer r.Close()
+	f, err := r.Open(rel)
+	if err != nil {
+		if escapesRoot(err) {
 			return nil, fmt.Errorf("refusing to follow a symlink")
 		}
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), pathAbs)
 	fi, err := f.Stat()
 	if err != nil {
 		f.Close()
@@ -57,4 +60,9 @@ func OpenUnder(root, path string) (*os.File, error) {
 		return nil, fmt.Errorf("not a regular file")
 	}
 	return f, nil
+}
+
+func escapesRoot(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "escapes") || strings.Contains(s, "symlink")
 }

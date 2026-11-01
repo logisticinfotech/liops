@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -249,5 +250,37 @@ func TestRouteIDsAreCapped(t *testing.T) {
 	defer m.Store.mu.Unlock()
 	if m.Store.routeIDs != nil {
 		t.Errorf("unused route ids should be dropped on prune, maps = %d", len(m.Store.routeIDs))
+	}
+}
+
+func TestStaleRouteIDsAreEvictedAtCap(t *testing.T) {
+	old, oldNew := maxRouteIDs, maxNewRouteIDsPerHour
+	maxRouteIDs, maxNewRouteIDsPerHour = 8, 100
+	t.Cleanup(func() { maxRouteIDs, maxNewRouteIDsPerHour = old, oldNew })
+
+	m, clock := newDBMonitor(t, &fakeMySQL{})
+	*clock = time.Date(2026, 11, 2, 10, 0, 10, 0, time.UTC)
+	for i := 0; i < 8; i++ {
+		m.AddRequest(Request{Host: "a.example.com", Method: "GET", Path: fmt.Sprintf("/t/old%d/x", i), Status: 200, MS: 10, UpstreamMS: -1})
+	}
+	*clock = clock.Add(time.Minute)
+	m.flushRequests(*clock)
+
+	*clock = clock.Add(8 * 24 * time.Hour)
+	for i := 0; i < 3; i++ {
+		m.AddRequest(Request{Host: "a.example.com", Method: "GET", Path: fmt.Sprintf("/t/new%d/x", i), Status: 200, MS: 10, UpstreamMS: -1})
+	}
+	*clock = clock.Add(time.Minute)
+	m.flushRequests(*clock)
+	m.Store.mu.Lock()
+	defer m.Store.mu.Unlock()
+	var fresh int
+	for k := range m.Store.routeIDs {
+		if strings.Contains(k.route, "/t/new") {
+			fresh++
+		}
+	}
+	if fresh < 3 {
+		t.Errorf("stale ids should be evicted so new routes get names, ids=%v", m.Store.routeIDs)
 	}
 }

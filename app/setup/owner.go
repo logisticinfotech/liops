@@ -68,6 +68,21 @@ func claimFolder(ctx context.Context, store storage.Store, name, engine, identit
 // folderInUse reports whether the server's folder already holds objects, ignoring a
 // leftover storage probe (liops-probe/) that would otherwise look like unclaimed backups.
 func folderInUse(ctx context.Context, store storage.Store) (bool, error) {
+	// Any stops at the first object, so a leftover pgBackRest repo (thousands of
+	// WAL files) isn't listed in full. Known prefixes cover everything liops writes.
+	for _, prefix := range []string{
+		storage.PgBackRestPrefix,
+		"xtrabackup/",
+		storage.DumpsPrefix,
+		storage.GlobalsPrefix,
+		OwnersPrefix,
+	} {
+		ok, err := store.Any(ctx, prefix)
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	// Leftover probes or a few unknown keys: stop at the first object that isn't a probe.
 	objs, err := store.List(ctx, "")
 	if err != nil {
 		return false, err

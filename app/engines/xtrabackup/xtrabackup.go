@@ -83,6 +83,8 @@ type Engine struct {
 	// WorkDir holds XtraBackup's small metadata files while a backup runs.
 	WorkDir string
 	Now     func() time.Time
+	// NewGen: the next backup starts a new binlog generation (RESET BINARY LOGS).
+	NewGen bool
 }
 
 func New(cfg *config.Config, run command.Runner, store storage.Store, workDir string) *Engine {
@@ -143,7 +145,9 @@ func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("list the backups: %w", err)
 	}
 	var base *Manifest
-	if typ == Diff {
+	if e.NewGen {
+		typ = Full
+	} else if typ == Diff {
 		if base = Last(list, Full); base == nil {
 			typ = Full
 		}
@@ -176,7 +180,7 @@ func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
 		_ = e.Store.Delete(context.WithoutCancel(ctx), m.Key(StreamFile))
 		return m, err
 	}
-	assignBinlogGen(list, &m)
+	assignBinlogGen(list, &m, e.NewGen)
 
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -222,11 +226,11 @@ func readMetadata(dir string, m *Manifest) error {
 }
 
 // assignBinlogGen sets m.BinlogGen from the backups already in storage: the same
-// generation as the newest one, or a new one when MySQL's binlog numbers went backwards
-// (RESET BINARY LOGS).
-func assignBinlogGen(list []Manifest, m *Manifest) {
+// generation as the newest one, or a new one when newGen is set (a sticky RESET
+// BINARY LOGS) or MySQL's binlog numbers went backwards.
+func assignBinlogGen(list []Manifest, m *Manifest, newGen bool) {
 	last := Last(list, "")
-	if last == nil {
+	if last == nil || newGen {
 		m.BinlogGen = m.Start.UTC().Format(labelTime)
 		return
 	}

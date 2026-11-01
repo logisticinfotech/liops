@@ -161,6 +161,7 @@
 
 {{define "fields-labels"}}
 <div class="hint">Optional: map database names to friendly labels, e.g. tenant subdomains. liops runs <span class="mono">SELECT</span> those two columns from the table; it never runs free SQL.</div>
+{{if .Dumps.Labels.SQL}}<div class="hint">An old label query is in the config and is ignored. Set the table and columns above.</div>{{end}}
 <label for="labels_database">Run it in database</label>
 <input type="text" id="labels_database" name="labels_database" value="{{.Dumps.Labels.Database}}">
 <label for="labels_table">Table</label>

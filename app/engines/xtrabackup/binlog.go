@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,13 +103,17 @@ type ShipResult struct {
 	// Gaps are binlogs a restore needs that are neither in storage nor on the server
 	// any more: point-in-time restores across them are impossible.
 	Gaps []string
+	// NewGen: RESET BINARY LOGS (or lost GTIDs). Nothing was shipped; the next full
+	// backup must start a new generation.
+	NewGen bool
 }
 
 // ShipBinlogs uploads every closed binlog a restore of the current chain can need.
-// A RESET BINARY LOGS (binlog numbers went backwards) is a gap: nothing is shipped
-// until a catch-up full starts a new generation, so the new chain's names never
-// collide with the old one in storage.
-func (e *Engine) ShipBinlogs(ctx context.Context, backups []Manifest) (ShipResult, error) {
+// lastSeen is the binlog name the previous run recorded; pendingNewGen is a sticky
+// reset that has not yet been followed by a catch-up full. A reset (numbers went
+// backwards against lastSeen or the newest backup, lost GTIDs, or a pending flag)
+// ships nothing until that full starts a new generation.
+func (e *Engine) ShipBinlogs(ctx context.Context, backups []Manifest, lastSeen string, pendingNewGen bool) (ShipResult, error) {
 	var res ShipResult
 	latest := Last(backups, "")
 	if latest == nil {
@@ -134,8 +139,9 @@ func (e *Engine) ShipBinlogs(ctx context.Context, backups []Manifest) (ShipResul
 	}
 	current := rows[len(rows)-1][0] // still being written: shipped once it is closed
 
-	if binlogBefore(current, latest.BinlogFile) {
-		res.Gaps = append(res.Gaps, latest.BinlogFile)
+	if reset, why := e.binlogReset(ctx, latest, current, lastSeen, pendingNewGen); reset {
+		res.NewGen = true
+		res.Gaps = append(res.Gaps, why)
 		return res, nil
 	}
 
@@ -192,6 +198,43 @@ func oldestInGen(backups []Manifest, gen string) Manifest {
 		}
 	}
 	return oldest
+}
+
+// gtidSetRe is a GTID set from XtraBackup's manifest: UUIDs, ranges, commas.
+var gtidSetRe = regexp.MustCompile(`^[0-9a-fA-F:,-]+$`)
+
+// binlogReset reports whether the live server is a new binlog chain.
+func (e *Engine) binlogReset(ctx context.Context, latest *Manifest, current, lastSeen string, pending bool) (bool, string) {
+	if pending {
+		return true, latest.BinlogFile
+	}
+	if lastSeen != "" && binlogBefore(current, lastSeen) {
+		return true, lastSeen
+	}
+	if binlogBefore(current, latest.BinlogFile) {
+		return true, latest.BinlogFile
+	}
+	if latest.GTIDs != "" {
+		ok, err := e.gtidsStillHeld(ctx, latest.GTIDs)
+		if err == nil && !ok {
+			return true, latest.BinlogFile
+		}
+	}
+	return false, ""
+}
+
+func (e *Engine) gtidsStillHeld(ctx context.Context, gtid string) (bool, error) {
+	if !gtidSetRe.MatchString(gtid) {
+		return true, nil
+	}
+	rows, err := e.Instance.Query(ctx, "", "SELECT GTID_SUBSET('"+gtid+"', @@GLOBAL.gtid_executed)")
+	if err != nil {
+		return false, err
+	}
+	if len(rows) != 1 || len(rows[0]) < 1 {
+		return false, fmt.Errorf("GTID_SUBSET: unexpected output %q", rows)
+	}
+	return rows[0][0] == "1", nil
 }
 
 // binlogBefore reports whether a is a lower binlog number than b.
