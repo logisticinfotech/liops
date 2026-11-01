@@ -10,15 +10,32 @@ import (
 )
 
 // AppRoot is the folder OpenUnder treats as the app: the directory itself, or the
-// deploy base (the parent of current) when dir is a current symlink. Deployer,
-// Envoyer and Forge put storage in shared/ next to current, so the root has to be
-// the parent or those logs are refused.
+// deploy base (the parent of current) when dir is a current symlink whose parent
+// holds releases/ or shared/. A symlink at /app would otherwise make the parent /,
+// which turns the protection off.
 func AppRoot(dir string) string {
 	fi, err := os.Lstat(dir)
 	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		return dir
 	}
-	return filepath.Dir(dir)
+	parent := filepath.Clean(filepath.Dir(dir))
+	if parent == string(os.PathSeparator) || parent == "." {
+		return dir
+	}
+	if deployBase(parent) {
+		return parent
+	}
+	return dir
+}
+
+func deployBase(dir string) bool {
+	for _, name := range []string{"releases", "shared"} {
+		st, err := os.Stat(filepath.Join(dir, name))
+		if err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 // OpenUnder opens path as a regular file only if it stays under root after following

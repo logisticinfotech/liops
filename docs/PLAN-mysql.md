@@ -330,6 +330,9 @@ finish the restore, filled in: stop, move `/var/lib/mysql` aside, `--copy-back`,
 The integration test (`--local`, i.e. `make vm-test-mysql`) inserts a row, notes the moment,
 drops the table, ships binlogs, runs `restore-files` and then the printed commands as
 printed: the table comes back with the same checksum as at the moment. **It passed.**
+A `RESET BINARY LOGS AND GTIDS` in the middle (Docker and VM) takes a catch-up full, starts
+a new binlog generation, and ships the row written after the reset; the VM restore that
+follows is then from that new generation.
 Found along the way: a restored server gets a new `server_uuid` (the backup has no
 `auto.cnf`), and XtraBackup copies the open binlog, so the restored server's binlog numbers
 carry on from the backup's: it must use a new backup name, and setup refuses the old one.

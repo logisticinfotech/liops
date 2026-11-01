@@ -83,8 +83,6 @@ type Engine struct {
 	// WorkDir holds XtraBackup's small metadata files while a backup runs.
 	WorkDir string
 	Now     func() time.Time
-	// NewGen: the next backup starts a new binlog generation (RESET BINARY LOGS).
-	NewGen bool
 }
 
 func New(cfg *config.Config, run command.Runner, store storage.Store, workDir string) *Engine {
@@ -137,15 +135,17 @@ func Last(list []Manifest, typ string) *Manifest {
 
 // Backup takes a full or differential backup and streams it to storage. A diff is
 // taken against the newest full backup; with no full backup yet, it is taken as a full
-// one (the returned manifest says which).
-func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
+// one (the returned manifest says which). newGen is a pending RESET BINARY LOGS: the
+// backup is forced to a full and starts a new binlog generation. The caller reads that
+// flag from state so the binlog job and the backup job don't share a field on Engine.
+func (e *Engine) Backup(ctx context.Context, typ string, newGen bool) (Manifest, error) {
 	start := e.Now().UTC()
 	list, err := e.Backups(ctx)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("list the backups: %w", err)
 	}
 	var base *Manifest
-	if e.NewGen {
+	if newGen {
 		typ = Full
 	} else if typ == Diff {
 		if base = Last(list, Full); base == nil {
@@ -180,7 +180,7 @@ func (e *Engine) Backup(ctx context.Context, typ string) (Manifest, error) {
 		_ = e.Store.Delete(context.WithoutCancel(ctx), m.Key(StreamFile))
 		return m, err
 	}
-	assignBinlogGen(list, &m, e.NewGen)
+	assignBinlogGen(list, &m, newGen)
 
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

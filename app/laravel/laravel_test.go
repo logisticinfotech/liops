@@ -165,6 +165,36 @@ func TestErrorsFollowsDeployerSharedStorage(t *testing.T) {
 	}
 }
 
+func TestAppRootOnlyWidensADeployBase(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	link := filepath.Join(root, "app")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := AppRoot(link); got != link {
+		t.Errorf("a symlink whose parent has no releases/ or shared/ must stay the app folder, got %q", got)
+	}
+	if got := AppRoot(real); got != real {
+		t.Errorf("a real folder is its own root, got %q", got)
+	}
+
+	deploy := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deploy, "releases", "1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(deploy, "current")
+	if err := os.Symlink(filepath.Join("releases", "1"), current); err != nil {
+		t.Fatal(err)
+	}
+	if got := AppRoot(current); got != deploy {
+		t.Errorf("AppRoot(current) = %q, want the deploy base %q", got, deploy)
+	}
+}
+
 func TestErrorsRefusesSymlinkedLogsDir(t *testing.T) {
 	a := newApp(t, "")
 	outside := t.TempDir()

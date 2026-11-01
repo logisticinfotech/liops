@@ -102,8 +102,8 @@ func TestApplyRetention(t *testing.T) {
 	f := &fakeXtraBackup{}
 	e, store := newEngine(t, f)
 	ctx := context.Background()
-	full, _ := e.Backup(ctx, Full)
-	diff, _ := e.Backup(ctx, Diff)
+	full, _ := e.Backup(ctx, Full, false)
+	diff, _ := e.Backup(ctx, Diff, false)
 	store.Add(BinlogPrefix+"binlog.000001.gz", []byte("x"), now)
 	store.Add(Prefix+"2026-10-01T000000Z-full/"+StreamFile, []byte("cut short"), now)
 

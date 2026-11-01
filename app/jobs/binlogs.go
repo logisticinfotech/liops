@@ -109,9 +109,6 @@ func (r *Runner) clearCatchUp() {
 	r.setMeta(metaBinlogCatchUp, "")
 	r.setMeta(metaBinlogCatchUpTried, "")
 	r.setMeta(metaBinlogNewGen, "")
-	if r.XtraBackup != nil {
-		r.XtraBackup.NewGen = false
-	}
 }
 
 // skipCatchUp reports whether a full backup has already finished since the gap.
@@ -172,7 +169,6 @@ func (r *Runner) shipBinlogs(ctx context.Context) (xtrabackup.ShipResult, error)
 	}
 	if res.NewGen {
 		r.setMeta(metaBinlogNewGen, "1")
-		r.XtraBackup.NewGen = true
 	} else {
 		r.setMeta(metaBinlogPosition, status.Position())
 	}

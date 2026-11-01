@@ -76,7 +76,7 @@ func TestFullThenDiff(t *testing.T) {
 	e, store := newEngine(t, f)
 	ctx := context.Background()
 
-	full, err := e.Backup(ctx, Full)
+	full, err := e.Backup(ctx, Full, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestFullThenDiff(t *testing.T) {
 		}
 	}
 
-	diff, err := e.Backup(ctx, Diff)
+	diff, err := e.Backup(ctx, Diff, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestFullThenDiff(t *testing.T) {
 
 func TestDiffWithoutAFullIsAFull(t *testing.T) {
 	e, _ := newEngine(t, &fakeXtraBackup{})
-	m, err := e.Backup(context.Background(), Diff)
+	m, err := e.Backup(context.Background(), Diff, false)
 	if err != nil || m.Type != Full || m.Base != "" || !strings.HasSuffix(m.Label, "-full") {
 		t.Errorf("first diff = %+v, %v", m, err)
 	}
@@ -132,7 +132,7 @@ func TestFailedBackupLeavesNothing(t *testing.T) {
 		"no binlog position": {noInfo: true},
 	} {
 		e, store := newEngine(t, f)
-		if _, err := e.Backup(context.Background(), Full); err == nil {
+		if _, err := e.Backup(context.Background(), Full, false); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
 		if objs, _ := store.List(context.Background(), ""); len(objs) != 0 {
@@ -141,10 +141,29 @@ func TestFailedBackupLeavesNothing(t *testing.T) {
 	}
 }
 
+func TestBackupNewGenForcesFullAndNewGeneration(t *testing.T) {
+	e, _ := newEngine(t, &fakeXtraBackup{})
+	ctx := context.Background()
+	first, err := e.Backup(ctx, Full, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.Backup(ctx, Diff, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Type != Full || second.Base != "" {
+		t.Errorf("a pending reset must take a full, not a diff: %+v", second)
+	}
+	if second.BinlogGen == "" || second.BinlogGen == first.BinlogGen {
+		t.Errorf("the flag must start a new generation, first %q second %q", first.BinlogGen, second.BinlogGen)
+	}
+}
+
 func TestBackupsIgnoresIncompleteFolders(t *testing.T) {
 	e, store := newEngine(t, &fakeXtraBackup{})
 	store.Add(Prefix+"2026-10-24T013000Z-full/"+StreamFile, []byte("cut short"), time.Now())
-	m, _ := e.Backup(context.Background(), Diff)
+	m, _ := e.Backup(context.Background(), Diff, false)
 	if m.Type != Full {
 		t.Errorf("a folder without a manifest isn't a backup to take a diff against: %+v", m)
 	}

@@ -116,9 +116,7 @@ func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *stat
 		return err
 	}
 
-	if r.meta(metaBinlogNewGen) != "" {
-		r.XtraBackup.NewGen = true
-	}
+	newGen := r.meta(metaBinlogNewGen) != ""
 
 	inst := r.XtraBackup.Instance
 	version, err := inst.Version(ctx)
@@ -129,16 +127,15 @@ func (r *Runner) mysqlBackup(ctx context.Context, typ, trigger string, run *stat
 		return fail(err)
 	}
 
-	m, err := r.XtraBackup.Backup(ctx, typ)
+	m, err := r.XtraBackup.Backup(ctx, typ, newGen)
 	if err != nil {
 		return fail(err)
 	}
 
-	if r.XtraBackup.NewGen {
+	if newGen {
 		r.setMeta(metaBinlogNewGen, "")
 		r.setMeta(metaBinlogCatchUp, "")
 		r.setMeta(metaBinlogCatchUpTried, "")
-		r.XtraBackup.NewGen = false
 		if status, err := r.XtraBackup.BinlogStatus(ctx); err == nil {
 			r.setMeta(metaBinlogPosition, status.Position())
 		}

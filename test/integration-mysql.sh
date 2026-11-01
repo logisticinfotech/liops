@@ -4,7 +4,8 @@
 # End-to-end test of MySQL support (docs/PLAN-mysql.md, M1):
 #   setup (root through the socket) → dumps → report → restore every database from its
 #   dump and compare checksums → restore users and grants → a dropped database is noticed
-#   → the UI → the emails → setup again when root needs a password.
+#   → the UI → the emails → RESET BINARY LOGS (catch-up full, new generation) →
+#   point-in-time restore (--local) → setup again when root needs a password.
 #
 #   ./test/integration-mysql.sh            in the Docker test environment (CI). Builds liops
 #                                          for the Docker host and copies it into the container.
@@ -237,7 +238,25 @@ echo "$subjects"
 grep -q "backups healthy" <<<"$subjects" || fail "no healthy daily summary email"
 grep -q "database no longer found: shop-2" <<<"$subjects" || fail "no deleted-database email"
 
-step "Point-in-time restore to just before a DROP TABLE (liops restore-files, then its printed commands)"
+step "RESET BINARY LOGS starts a new generation; a catch-up full, then shipping"
+sql -e "RESET BINARY LOGS AND GTIDS"
+my liops run binlogs
+fulls=$(s3list xtrabackup/base/ | grep -c -- '-full/backup.json$' || true)
+[ "$fulls" -ge 2 ] || fail "a reset should take a catch-up full, got $fulls complete fulls"
+sql -e "INSERT INTO app.orders (note) VALUES ('after reset')"
+my liops run binlogs
+gens=$(s3list xtrabackup/binlog/ | sed -n 's|.*/xtrabackup/binlog/\([^/]*\)/.*|\1|p' | sort -u)
+echo "$gens"
+[ "$(wc -l <<<"$gens")" -ge 2 ] || fail "a reset should start a new binlog generation, got: $gens"
+found=no
+for key in $(s3list xtrabackup/binlog/); do
+    if my sh -c "curl -fsS --user liops-test:liops-test-secret --aws-sigv4 aws:amz:us-east-1:s3 'https://$s3/liops-test/$key' \
+        | gunzip | mysqlbinlog --base64-output=decode-rows -v - | grep -q 'after reset'"; then found=yes; fi
+done
+[ "$found" = yes ] || fail "the change after the reset isn't in any shipped binlog"
+echo "reset starts a new generation OK"
+
+step "Point-in-time restore after the reset, to just before a DROP TABLE (liops restore-files, then its printed commands)"
 if [ "$mode" = local ]; then
     sql -e "INSERT INTO app.orders (note) VALUES ('the last row before the moment')"
     want=$(sql -e "CHECKSUM TABLE app.orders" | awk '{print $2}')
