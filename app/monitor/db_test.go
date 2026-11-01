@@ -264,3 +264,10 @@ func TestTwoServersInOneSnapshot(t *testing.T) {
 		t.Errorf("both servers' queries should be kept: %+v %v", top, err)
 	}
 }
+
+func TestUntilNextMark(t *testing.T) {
+	at := time.Date(2026, 11, 2, 10, 3, 20, 0, time.UTC)
+	if d := untilNextMark(at); d != 100*time.Second {
+		t.Errorf("untilNextMark = %v", d)
+	}
+}

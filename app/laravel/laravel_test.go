@@ -131,3 +131,17 @@ func TestQueueKey(t *testing.T) {
 		}
 	}
 }
+
+func TestFindAppsApache(t *testing.T) {
+	a := newApp(t, "")
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sites-enabled"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sites-enabled", "shop.conf"), []byte("<VirtualHost *:80>\n\tServerName shop.example.com\n\tServerAlias *.shop.example.com\n\tDocumentRoot \""+a.Dir+"/public\"\n</VirtualHost>\n<VirtualHost *:80>\n\tServerName static.example.com\n\tDocumentRoot /var/www/html\n</VirtualHost>\n"), 0o644)
+	old := ApacheDir
+	ApacheDir = dir
+	t.Cleanup(func() { ApacheDir = old })
+	apps := FindApps(t.TempDir(), filepath.Join(dir, "none"))
+	if len(apps) != 1 || apps[0].Dir != a.Dir || strings.Join(apps[0].Sites, ",") != "*.shop.example.com,shop.example.com" {
+		t.Errorf("apps = %+v", apps)
+	}
+}

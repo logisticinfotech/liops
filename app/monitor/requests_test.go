@@ -42,6 +42,13 @@ func TestParseLogs(t *testing.T) {
 	if _, ok := parseNginx([]byte(`203.0.113.9 - - [01/Nov/2026] "GET / HTTP/1.1" 200`)); ok {
 		t.Error("the combined format isn't liops's")
 	}
+	r, ok = parseApache([]byte("1793500000.250\tshop.example.com\t203.0.113.9\tGET\t/orders/7?x=1\t200\t5120\t482000\tMozilla/5.0 (X11; Linux) \\x22quoted\\x22"))
+	if !ok || r.Status != 200 || r.MS != 482 || r.Path != "/orders/7?x=1" || r.Host != "shop.example.com" || r.UpstreamMS != -1 || r.At.Unix() != 1793500000 {
+		t.Errorf("apache: %+v %v", r, ok)
+	}
+	if _, ok := parseApache([]byte(`203.0.113.9 - - [01/Nov/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 12`)); ok {
+		t.Error("the combined format isn't liops's")
+	}
 	r, ok = parseCaddy([]byte(`{"level":"info","ts":1793500000.5,"logger":"http.log.access.log0","msg":"handled request","request":{"remote_ip":"10.0.0.1","client_ip":"203.0.113.7","proto":"HTTP/2.0","method":"POST","host":"api.example.com","uri":"/v1/push","headers":{"User-Agent":["okhttp/4.12"]}},"bytes_read":12,"duration":1.25,"size":2,"status":201}`))
 	if !ok || r.IP != "203.0.113.7" || r.MS != 1250 || r.Host != "api.example.com" || ClientClass(r.UA) != "script or app" {
 		t.Errorf("caddy: %+v %v", r, ok)

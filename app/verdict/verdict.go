@@ -212,8 +212,8 @@ func Judge(e Evidence) []Finding {
 		if d.LockWaitMax >= 3 || d.Deadlocks > 0 {
 			add(Finding{Level: Warning, Area: "Database", weight: 60,
 				Says:    "Requests and jobs wait for each other's locks in " + d.Title,
-				Because: fmt.Sprintf("Up to %.0f statements waited for a lock at once; %.0f deadlocks.", d.LockWaitMax, d.Deadlocks),
-				Do:      "Keep transactions short (no outside calls inside them), update rows in the same order everywhere, and index the columns the locked updates filter on.", Link: "/monitoring/database"})
+				Because: lockBecause(d),
+				Do:      "Keep transactions short (no outside calls inside them), update rows in the same order everywhere, and index the columns the locked updates filter on. For MySQL the Database page shows the latest deadlock's two statements.", Link: "/monitoring/database"})
 		}
 		if d.HasCacheHit && d.CacheHit < 95 && e.MemTotal > 0 && e.MemAvailMin > 0.3*e.MemTotal {
 			add(Finding{Level: Warning, Area: "Database", weight: 55,
@@ -383,4 +383,15 @@ func nPlusOneBecause(q Query) string {
 		return fmt.Sprintf("This query runs about %.0f times per request to %s (its calls rise and fall with that route's requests), in %s: %s", q.PerRequest, q.Route, q.DB, short(q.Text, 120))
 	}
 	return fmt.Sprintf("This query ran %.0f times per web request on average, in %s: %s", q.PerRequest, q.DB, short(q.Text, 120))
+}
+
+func lockBecause(d Database) string {
+	var parts []string
+	if d.LockWaitMax >= 1 {
+		parts = append(parts, fmt.Sprintf("up to %.0f statements waited for a lock at once", d.LockWaitMax))
+	}
+	if d.Deadlocks > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f %s: two transactions each held a row the other needed, and one was rolled back", d.Deadlocks, plural(int(d.Deadlocks), "deadlock", "deadlocks")))
+	}
+	return capitalize(strings.Join(parts, "; ")) + "."
 }

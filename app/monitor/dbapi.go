@@ -70,7 +70,9 @@ func (m *Monitor) dbLoop(ctx context.Context) {
 	tables()
 	live := time.NewTicker(Interval)
 	defer live.Stop()
-	stmts := time.NewTicker(QueryInterval)
+	// Statement snapshots on the clock's 5-minute marks, so each covers the same 5 minutes
+	// as the request records it's compared with (N+1 by route).
+	stmts := time.NewTimer(untilNextMark(m.Now()))
 	defer stmts.Stop()
 	hourly := time.NewTicker(TableInterval)
 	defer hourly.Stop()
@@ -81,6 +83,7 @@ func (m *Monitor) dbLoop(ctx context.Context) {
 		case <-live.C:
 			m.liveDBs(ctx)
 		case <-stmts.C:
+			stmts.Reset(untilNextMark(m.Now()))
 			rediscover()
 			queries()
 		case <-hourly.C:
@@ -298,4 +301,10 @@ func (m *Monitor) dbHandlers(mux *http.ServeMux, writeJSON func(http.ResponseWri
 			writeJSON(w, t)
 		}
 	})
+}
+
+// untilNextMark is the time to the next 5-minute mark of the clock (12:00, 12:05, …).
+func untilNextMark(now time.Time) time.Duration {
+	next := now.Truncate(QueryInterval).Add(QueryInterval)
+	return next.Sub(now)
 }

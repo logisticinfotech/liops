@@ -19,6 +19,14 @@ const NginxLogPath = "/var/log/nginx/liops-access.log"
 // user agent can break a line, with the request's host and its times.
 const NginxLogFormat = `log_format liops escape=json '{"t":$msec,"host":"$host","ip":"$remote_addr","m":"$request_method","u":"$request_uri","s":$status,"b":$body_bytes_sent,"rt":$request_time,"ut":"$upstream_response_time","ua":"$http_user_agent"}';`
 
+// ApacheLogPath is the access log liops adds to Apache, in ApacheLogFormat.
+const ApacheLogPath = "/var/log/apache2/liops-access.log"
+
+// ApacheLogFormat is the LogFormat liops adds to Apache: tab-separated (Apache escapes
+// tabs and quotes inside fields as \xhh, so a field can't break a line), with the time in
+// milliseconds, the Host header, and the request time in microseconds (%D).
+const ApacheLogFormat = `LogFormat "%{%s}t.%{msec_frac}t\t%{Host}i\t%a\t%m\t%U%q\t%>s\t%B\t%D\t%{User-Agent}i" liops`
+
 // Request is one line of an access log.
 type Request struct {
 	At         time.Time
@@ -58,6 +66,22 @@ func parseNginx(line []byte) (Request, bool) {
 		}
 	}
 	return r, true
+}
+
+// parseApache reads a line in ApacheLogFormat. Apache has no separate upstream time.
+func parseApache(line []byte) (Request, bool) {
+	f := strings.Split(string(line), "\t")
+	if len(f) != 9 {
+		return Request{}, false
+	}
+	t, err1 := strconv.ParseFloat(f[0], 64)
+	status, err2 := strconv.Atoi(f[5])
+	us, err3 := strconv.ParseFloat(f[7], 64)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return Request{}, false
+	}
+	b, _ := strconv.ParseInt(f[6], 10, 64)
+	return Request{At: unixFloat(t), Host: f[1], IP: f[2], Method: f[3], Path: f[4], Status: status, Bytes: b, MS: us / 1000, UpstreamMS: -1, UA: f[8]}, true
 }
 
 // parseCaddy reads a Caddy JSON access log line ("handled request").

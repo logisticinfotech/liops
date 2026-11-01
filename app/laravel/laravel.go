@@ -29,6 +29,9 @@ var (
 	caddySiteRE = regexp.MustCompile(`(?m)^([^\s#{(][^{]*?)\s*\{\s*$`)
 )
 
+// ApacheDir is where Apache's config is (tests point it elsewhere).
+var ApacheDir = "/etc/apache2"
+
 // FindApps lists the Laravel apps the web servers serve: each site root ending in
 // /public whose parent holds artisan.
 func FindApps(nginxDir, caddyfile string) []App {
@@ -65,6 +68,36 @@ func FindApps(nginxDir, caddyfile string) []App {
 			}
 			for _, m := range nginxRootRE.FindAllStringSubmatch(block, -1) {
 				add(m[2], names)
+			}
+		}
+	}
+	// Apache: each <VirtualHost>'s DocumentRoot, with its ServerName and ServerAliases.
+	apacheFiles, _ := filepath.Glob(filepath.Join(ApacheDir, "sites-enabled", "*.conf"))
+	for _, f := range apacheFiles {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var names []string
+		var root string
+		for _, line := range strings.Split(string(data), "\n") {
+			t := strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(strings.ToLower(t), "<virtualhost"):
+				names, root = nil, ""
+			case strings.HasPrefix(strings.ToLower(t), "</virtualhost"):
+				if root != "" {
+					add(root, names)
+				}
+			default:
+				if f := strings.Fields(t); len(f) >= 2 {
+					switch strings.ToLower(f[0]) {
+					case "servername", "serveralias":
+						names = append(names, f[1:]...)
+					case "documentroot":
+						root = strings.Trim(f[1], `"`)
+					}
+				}
 			}
 		}
 	}

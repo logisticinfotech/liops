@@ -22,7 +22,7 @@ import (
 // services' journals.
 var logFilePatterns = []string{
 	"/var/log/syslog", "/var/log/kern.log", "/var/log/auth.log",
-	"/var/log/nginx/*.log", "/var/log/caddy/*.log", "/var/log/php*-fpm*.log", "/var/log/php*.slow.log",
+	"/var/log/nginx/*.log", "/var/log/apache2/*.log", "/var/log/caddy/*.log", "/var/log/php*-fpm*.log", "/var/log/php*.slow.log",
 	"/var/log/mysql/error.log", "/var/log/postgresql/*.log", "/var/log/redis/*.log",
 }
 

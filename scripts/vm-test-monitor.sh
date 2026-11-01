@@ -50,13 +50,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "Create the VM (Ubuntu $UBUNTU) with nginx, PHP-FPM, MySQL, PostgreSQL and Redis"
+step "Create the VM (Ubuntu $UBUNTU) with nginx, Apache, PHP-FPM, MySQL, PostgreSQL and Redis"
 multipass launch "$UBUNTU" --name "$VM" --cpus 2 --memory 4G --disk 16G >/dev/null
 vm sudo bash -s <<-'EOF'
 	set -e
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
 	apt-get install -y -qq nginx php-fpm php-mysql mysql-server postgresql redis-server curl >/dev/null
+	# Apache next to nginx, on port 8081: kept from starting until it's moved there.
+	printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
+	apt-get install -y -qq apache2 >/dev/null
+	rm /usr/sbin/policy-rc.d
+	sed -i 's/^Listen 80$/Listen 8081/' /etc/apache2/ports.conf
+	a2dissite -q 000-default
 	echo "PHP $(ls /etc/php), $(mysqld --version | cut -d' ' -f2-4), PostgreSQL $(ls /etc/postgresql), $(redis-server --version | cut -d' ' -f3)"
 EOF
 arch=$(vm dpkg --print-architecture)
@@ -107,6 +113,19 @@ vm sudo bash -s <<-'EOF'
 	N
 	ln -sf /etc/nginx/sites-available/shop /etc/nginx/sites-enabled/shop
 	rm -f /etc/nginx/sites-enabled/default
+	# The same app through Apache, with a log of its own.
+	cat > /etc/apache2/sites-available/shop.conf <<A
+	<VirtualHost *:8081>
+	    ServerName apache.example.com
+	    DocumentRoot /srv/shop/public
+	    CustomLog \${APACHE_LOG_DIR}/shop.access.log combined
+	    <Directory /srv/shop/public>
+	        Require all granted
+	    </Directory>
+	</VirtualHost>
+	A
+	a2enmod -q proxy_fcgi setenvif >/dev/null; a2enconf -q php$V-fpm >/dev/null; a2ensite -q shop >/dev/null
+	systemctl restart apache2
 	# A pool too small for its slow requests.
 	sed -i 's/^pm = .*/pm = static/; s/^pm.max_children = .*/pm.max_children = 2/' /etc/php/$V/fpm/pool.d/www.conf
 	systemctl restart php$V-fpm nginx
@@ -127,7 +146,9 @@ vm sudo bash -s <<-'EOF'
 	set -e
 	systemctl restart postgresql   # loads pg_stat_statements (the test's restart; liops never does it by itself)
 	systemctl restart liops-monitor liops
-	grep -q 'liops-access.log liops;' /etc/nginx/sites-available/shop || { echo "FAIL: the site has no liops access log" >&2; exit 1; }
+	grep -q 'liops-access.log liops;' /etc/nginx/sites-available/shop || { echo "FAIL: the nginx site has no liops access log" >&2; exit 1; }
+	grep -q 'liops-access.log liops$' /etc/apache2/sites-available/shop.conf || { echo "FAIL: the Apache site has no liops access log" >&2; exit 1; }
+	test -L /etc/apache2/conf-enabled/liops-monitor.conf || { echo "FAIL: liops's Apache conf isn't enabled" >&2; exit 1; }
 EOF
 
 step "Load for 17 minutes: slow requests, an N+1 route, table scans, a chatty log, evictions"
@@ -140,8 +161,11 @@ vm sudo bash -s <<-'EOF'
 	orders() { while [ $SECONDS -lt $end ]; do if [ $(( $(date +%s) / 300 % 2 )) = 0 ]; then curl -s -o /dev/null -H "Host: shop.example.com" http://127.0.0.1/orders/$RANDOM; fi; sleep 0.3; done; }
 	scans() { while [ $SECONDS -lt $end ]; do mysql tenant_a -e "SELECT * FROM customers WHERE LOWER(name) LIKE '%acme12%' OR LOWER(email) LIKE '%acme12%'" >/dev/null; sleep 1; done; }
 	chatty() { while [ $SECONDS -lt $end ]; do head -c 20000 /dev/urandom | base64 >> /srv/shop/storage/logs/laravel.log; sleep 1; done; }
+	web2() { while [ $SECONDS -lt $end ]; do curl -s -o /dev/null -H "Host: apache.example.com" http://127.0.0.1:8081/; sleep 1; done; }
+	# A deadlock: two transactions updating the same two rows in opposite orders.
+	deadlock() { sleep 120; mysql tenant_a -e "BEGIN; UPDATE customers SET name = CONCAT(name, '') WHERE id = 1; SELECT SLEEP(2); UPDATE customers SET name = CONCAT(name, '') WHERE id = 2; COMMIT;" 2>/dev/null & mysql tenant_a -e "BEGIN; UPDATE customers SET name = CONCAT(name, '') WHERE id = 2; SELECT SLEEP(2); UPDATE customers SET name = CONCAT(name, '') WHERE id = 1; COMMIT;" 2>/dev/null; wait; }
 	evict() { while [ $SECONDS -lt $end ]; do for i in $(seq 1 200); do echo "SET cache:$RANDOM$i $(head -c 2000 /dev/zero | tr '\0' x)"; done | redis-cli >/dev/null; sleep 2; done; }
-	slow & slow & slow & orders & scans & chatty & evict & wait
+	slow & slow & slow & orders & scans & chatty & evict & web2 & deadlock & wait
 	W
 	chmod +x /root/load.sh
 	setsid nohup /root/load.sh >/dev/null 2>&1 < /dev/null &
@@ -162,7 +186,9 @@ vm sudo bash -s <<-'EOF'
 	get /v1/latest | grep -q '"fpm.saturated:' || fail "no PHP-FPM numbers (root's collector)"
 	get /v1/latest | grep -q '"redis.queue:shop_database_queues:default":1' || fail "the Redis queue wasn't counted"
 	get /v1/latest | grep -q '"opcache.' || fail "no OPcache numbers"
-	echo "The monitor sees the requests, both databases' statements, PHP-FPM, OPcache and the Redis queue."
+	get '/v1/requests?range=1h' | grep -q 'apache.example.com' || fail "Apache's requests weren't counted"
+	get '/v1/db/deadlock?server=mysql' | grep -q 'tenant_a.customers' || fail "no deadlock report: $(get '/v1/db/deadlock?server=mysql' 2>&1 | head -c 300)"
+	echo "The monitor sees nginx's and Apache's requests, both databases' statements, the deadlock, PHP-FPM, OPcache and the Redis queue."
 EOF
 
 step "liops verdict"

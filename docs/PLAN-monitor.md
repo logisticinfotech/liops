@@ -143,7 +143,10 @@ The front web server's access log, tailed. Each request gives method, **route**,
   - **nginx**: needs `$request_time` and `$upstream_response_time` in the log format.
     Setup proposes a `log_format liops …` in `conf.d` and the one-line `access_log` change per
     site, shows them, and applies them after approval (`nginx -t`, then reload).
-  - **Apache**: not used on these servers (§9); its parser (`%D`) is left for later.
+  - **Apache** (Debian/Ubuntu `apache2`): a tab-separated `LogFormat liops` (Apache escapes
+    special characters as `\xhh`, so a field can't hold a tab) with `%D`, in
+    `conf-available/liops-monitor.conf`, enabled, plus one `CustomLog` per virtual host that has
+    its own; checked with `apache2ctl configtest`, then reloaded. No upstream time.
   - **Caddy**: its JSON access logs already include the duration; the site needs `log`.
 - **Timeouts and slow upstreams** show up as both: a 502/504 count and the upstream time.
 - **Per host**: `$host` is in the log format, so every number above is also available per
@@ -536,7 +539,10 @@ slow-log stack traces next to the slowest requests; `liops monitor-setup [--appl
 `liops verdict` for headless servers; and `make vm-test-monitor`
 (`scripts/vm-test-monitor.sh`), which builds a server like the real ones, sets monitoring up,
 loads it with known problems and checks that the verdict names each. Operator's guide:
-[monitoring.md](monitoring.md). Next: a week on a real server.
+[monitoring.md](monitoring.md). Since: Apache (a tab-separated `LogFormat` with `%D`, set up
+like nginx's and checked with `apache2ctl configtest`) and MySQL's latest deadlock report
+(`SHOW ENGINE INNODB STATUS`, read live: its statements hold values), both in the VM test.
+Next: a week on a real server.
 
 Testing follows the backups: unit tests with fakes for every parser and rule, and a
 `make vm-test-monitor` that builds a VM like the real servers (nginx and Caddy, PHP 8.2–8.5,
@@ -547,7 +553,7 @@ monitor reports.
 
 Answered (November 2026):
 
-- **Stacks**: web servers are **nginx and Caddy** (no Apache: its parser is left for later);
+- **Stacks**: web servers are **nginx and Caddy** (Apache is supported too, added after MO4);
   PHP **8.2, 8.3, 8.4 and 8.5**, sometimes several on one server (one FPM service and pool
   directory each: `php8.x-fpm`, `/etc/php/8.x/fpm/pool.d`); databases **PostgreSQL and MySQL**.
 - **Log format changes** on live sites are fine, with approval and a config check before reload.

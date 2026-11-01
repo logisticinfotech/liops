@@ -106,10 +106,7 @@ func (d DBServer) Query(ctx context.Context, db, sql string) ([][]string, error)
 	var out []byte
 	var err error
 	if d.Engine == EngineMySQL {
-		args := []string{"--no-defaults", "--socket=" + d.Socket, "--batch", "--skip-column-names", "--raw"}
-		if d.User != "" {
-			args = append(args, "--user="+d.User)
-		}
+		args := mysqlArgs(d)
 		if db != "" {
 			args = append(args, "--database="+db)
 		}
@@ -149,4 +146,14 @@ func unhex(s string) string {
 func atof(s string) float64 {
 	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return f
+}
+
+// mysqlArgs are the mysql client's arguments for this server: its socket and the
+// monitor's own login, no option files.
+func mysqlArgs(d DBServer) []string {
+	args := []string{"--no-defaults", "--socket=" + d.Socket, "--batch", "--skip-column-names", "--raw"}
+	if d.User != "" {
+		args = append(args, "--user="+d.User)
+	}
+	return args
 }

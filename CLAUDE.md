@@ -128,7 +128,7 @@ touches the live server.
   monitor can't: PHP-FPM status/OPcache over FastCGI (`app/php`, pushed every 15 s with a
   short lifetime) and Laravel apps (`app/laravel`: named `.env` keys only, findings out, never
   values; errors grouped live from `storage/logs`). Config changes to nginx, Caddy, PHP-FPM and
-  Redis are planned in `app/setup` (`weblogs.go`, `phpfpm.go`, `redis.go`), shown in Settings,
+  Redis are planned in `app/setup` (`weblogs.go`: nginx, Apache, Caddy; `phpfpm.go`, `redis.go`), shown in Settings,
   and applied only on a button: back up, check (`nginx -t`, `caddy validate`, `php-fpmX.Y -t`),
   put back on failure, reload (never restart). Deploys go into the audit log as chart markers.
 - **Verdict, logs, alerts** (MO3): `app/verdict` is pure rules over an `Evidence` struct

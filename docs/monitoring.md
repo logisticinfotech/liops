@@ -27,7 +27,7 @@ Monitoring is off until you turn it on, and a server that only wants backups is 
 | Panel | What it changes | Disruption |
 |---|---|---|
 | Databases | PostgreSQL: the role `liops-monitor` in `pg_monitor` (peer authentication, no password), the `pg_stat_statements` extension, and `shared_preload_libraries` (keeping what's there) in `conf.d/20-liops-monitor.conf`. MySQL: `'liops-monitor'@'localhost'` with `auth_socket` (PROCESS, REFERENCES, `performance_schema`, `sys`). Neither can read the apps' rows. | PostgreSQL needs **one restart** to load `pg_stat_statements`: a button, or the command shown, at a quiet time |
-| Web servers | nginx: a JSON `log_format` and `access_log /var/log/nginx/liops-access.log` in `conf.d/liops-monitor.conf`, and one extra `access_log` line in each site that has its own. Caddy: `log` in each site without one. | `nginx -t` / `caddy validate`, then a reload; files backed up, put back if the check fails |
+| Web servers | nginx: a JSON `log_format` and `access_log /var/log/nginx/liops-access.log` in `conf.d/liops-monitor.conf`, and one extra `access_log` line in each site that has its own. Apache: a `LogFormat` and `CustomLog ${APACHE_LOG_DIR}/liops-access.log` in `conf-available/liops-monitor.conf` (enabled), and one extra `CustomLog` in each `<VirtualHost>` that has its own. Caddy: `log` in each site without one. | `nginx -t` / `apache2ctl configtest` / `caddy validate`, then a reload; files backed up, put back if the check fails |
 | PHP-FPM | `pm.status_path` and a 3 s slow log on pools without them; a read-only OPcache script in `/usr/local/lib/liops`. | `php-fpm8.x -t`, then a reload |
 | Redis | An ACL user `liops-monitor` allowed only `INFO`, `SLOWLOG GET`, `PING`, and `LLEN`/`ZCARD` on queue keys. | none (`CONFIG REWRITE` saves it) |
 
@@ -41,7 +41,8 @@ the command). Changed files are backed up under `/var/lib/liops/backups`.
   finding with its numbers and what to do. `sudo liops verdict` prints it in the terminal,
   and the daily summary email carries its headline.
 - **Database**: the queries that scan whole tables (rows read per row returned), top queries,
-  N+1 (with the route that runs them), locks, tables, unused and duplicate indexes. A query's
+  N+1 (with the route that runs them), locks and MySQL's latest deadlock (its two
+  statements), tables, unused and duplicate indexes. A query's
   page shows its tables' indexes, a suggested index (SQL and a Laravel migration), and for
   MySQL one real statement.
 - **Requests**, **PHP**, **Apps**, **Redis**, **Logs**, **Resources**: the details.
@@ -60,7 +61,7 @@ memory, a burst of 5xx errors happens, or PostgreSQL's `pg_wal` piles up.
 
 Stored: numbers, query shapes (with `?`/`$1` instead of values), routes (never full URLs),
 and the top 20 client addresses per hour for 7 days. Read live for a page and never stored,
-logged or emailed: running statements, MySQL's sample statement, Redis's slow log, PHP's slow
+logged or emailed: running statements, MySQL's sample statement and deadlock report, Redis's slow log, PHP's slow
 log, app errors and log lines. From `.env` only the named settings the checks need are read,
 and only the findings leave.
 

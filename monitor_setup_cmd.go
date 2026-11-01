@@ -103,6 +103,11 @@ func runMonitorSetup(args []string, out io.Writer) error {
 		planned("nginx", err)
 		plans = append(plans, pl)
 	}
+	if _, err := os.Stat(setup.ApacheDir); err == nil {
+		pl, err := setup.PlanApacheLogs(setup.ApacheDir)
+		planned("Apache", err)
+		plans = append(plans, pl)
+	}
 	if _, err := os.Stat(setup.Caddyfile); err == nil {
 		pl, err := setup.PlanCaddyLogs(setup.Caddyfile)
 		planned("Caddy", err)
@@ -115,7 +120,7 @@ func runMonitorSetup(args []string, out io.Writer) error {
 		}
 	}
 	if len(plans) == 0 {
-		fmt.Fprintln(out, "  no nginx or Caddy config found")
+		fmt.Fprintln(out, "  no nginx, Apache or Caddy config found")
 	}
 
 	fmt.Fprintln(out, "PHP-FPM (status pages, slow log, OPcache script):")

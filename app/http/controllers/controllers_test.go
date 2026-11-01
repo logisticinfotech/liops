@@ -172,6 +172,7 @@ func newHarness(t *testing.T, cfg *config.Config, setupDone bool) *harness {
 		t.Fatal(err)
 	}
 	h.ui.Cmd = fake
+	h.ui.ApacheDir = filepath.Join(dir, "no-apache") // CI runners have an /etc/apache2 of their own
 	h.srv = httptest.NewServer(h.ui.Handler())
 	t.Cleanup(h.srv.Close)
 	jar, _ := cookiejar.New(nil)
@@ -588,6 +589,10 @@ func fakeMonitor(t *testing.T) *monitor.Client {
 			{At: now.Unix() - 300, QueryCounters: monitor.QueryCounters{Calls: 20, TimeMS: 53000, RowsExamined: 33e6, RowsSent: 20}},
 		}})
 	})
+	mux.HandleFunc("GET /v1/db/deadlock", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(monitor.Deadlock{At: now, Tables: []string{"tenant_a.customers"}, RolledBack: "(2)",
+			Statements: []string{"UPDATE customers SET name = 'Someone' WHERE id = 2", "UPDATE customers SET name = 'Other' WHERE id = 1"}, Text: "LATEST DETECTED DEADLOCK"})
+	})
 	mux.HandleFunc("GET /v1/db/sample", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(monitor.QuerySample{Text: "SELECT * FROM customers WHERE LOWER(name) LIKE '%example-term%'", Seen: now, MS: 2650})
 	})
@@ -767,7 +772,7 @@ func TestDatabasePages(t *testing.T) {
 	}
 	for _, want := range []string{`href="/monitoring/database">Database`, "These queries scan whole tables", "LOWER(name) in a filter",
 		"DATE(created_at) in a filter", "1.65M rows", "1.8 min", "waits for 41", "Open transactions", "tenant_a.readings",
-		"&#43;29 MB", "New in this range", "Never used", "old_idx", "Duplicates", "Tables without a primary key", "128 MB is Ubuntu&#39;s default", "About 13% of the data fits"} {
+		"&#43;29 MB", "New in this range", "Never used", "Latest deadlock", "rolled back transaction (2)", "Transaction (2):", "old_idx", "Duplicates", "Tables without a primary key", "128 MB is Ubuntu&#39;s default", "About 13% of the data fits"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the Database page should contain %q", want)
 		}

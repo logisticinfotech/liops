@@ -196,6 +196,16 @@ func (s *Server) evidence(ctx context.Context) (verdict.Evidence, error) {
 			}
 			d := verdict.Database{Title: sv.Title}
 			top, _ := s.Monitor.Queries(ctx, "24h", sv.Label, "", 500)
+			// N+1 candidates: the most-called shapes (an N+1 route can be a small share of
+			// the traffic, so its query's average over all requests can be low).
+			candidates := map[string]bool{}
+			byCalls := append([]monitor.QueryTotal(nil), top...)
+			sort.Slice(byCalls, func(i, j int) bool { return byCalls[i].Calls > byCalls[j].Calls })
+			for _, q := range byCalls[:min(20, len(byCalls))] {
+				if q.Calls >= 1000 && q.Calls >= e.Requests.Count {
+					candidates[q.ID+q.DB] = true
+				}
+			}
 			for _, q := range top {
 				d.TotalMS += q.TimeMS
 				eff := monitor.QueryEfficiency(sv.Engine, q.QueryCounters)
@@ -208,7 +218,7 @@ func (s *Server) evidence(ctx context.Context) (verdict.Evidence, error) {
 					// move with it, for the real per-request count.
 					per := q.Calls / e.Requests.Count
 					n := verdict.Query{DB: q.DB, Text: q.Text, MS: q.TimeMS, PerRequest: per}
-					if per >= 5 {
+					if candidates[q.ID+q.DB] {
 						if routes, err := s.Monitor.QueryRoutes(ctx, sv.Label, q.DB, q.ID); err == nil && len(routes) > 0 && routes[0].PerRequest >= 20 {
 							n.PerRequest, n.Route = routes[0].PerRequest, routes[0].Host+" "+routes[0].Route
 						}

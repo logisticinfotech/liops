@@ -17,9 +17,13 @@ import (
 
 // Log formats.
 const (
-	FormatNginx = "nginx" // NginxLogFormat
-	FormatCaddy = "caddy" // Caddy's JSON access log
+	FormatNginx  = "nginx"  // NginxLogFormat
+	FormatCaddy  = "caddy"  // Caddy's JSON access log
+	FormatApache = "apache" // ApacheLogFormat
 )
+
+// ApacheLog is the Apache log the monitor reads (ApacheLogPath; tests point it elsewhere).
+var ApacheLog = ApacheLogPath
 
 // DefaultCaddyfile is where Ubuntu's Caddy package keeps its config.
 const DefaultCaddyfile = "/etc/caddy/Caddyfile"
@@ -47,6 +51,9 @@ func FindLogSources(nginxLog, caddyfile string) []LogSource {
 	var out []LogSource
 	if _, err := os.Stat(nginxLog); err == nil {
 		out = append(out, LogSource{Format: FormatNginx, Path: nginxLog})
+	}
+	if _, err := os.Stat(ApacheLog); err == nil {
+		out = append(out, LogSource{Format: FormatApache, Path: ApacheLog})
 	}
 	if data, err := os.ReadFile(caddyfile); err == nil {
 		for _, m := range caddyOutputRE.FindAllStringSubmatch(string(data), -1) {
@@ -154,8 +161,11 @@ func (t *fileTail) close() {
 
 // parseLine reads a line in a source's format.
 func parseLine(format string, line []byte) (Request, bool) {
-	if format == FormatNginx {
+	switch format {
+	case FormatNginx:
 		return parseNginx(line)
+	case FormatApache:
+		return parseApache(line)
 	}
 	return parseCaddy(line)
 }

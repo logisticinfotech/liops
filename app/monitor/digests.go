@@ -188,7 +188,13 @@ func (m *Monitor) snapshotQueries(ctx context.Context, d DBServer) error {
 			}
 		}
 	}
-	return m.Store.AddQueries(m.Now(), rows)
+	// The snapshot covers the 5 minutes before the mark it's taken at: record it in those
+	// 5 minutes (a second before the mark), like the request records.
+	at := m.Now()
+	if mark := at.Truncate(QueryInterval); at.Sub(mark) < time.Minute {
+		at = mark.Add(-time.Second)
+	}
+	return m.Store.AddQueries(at, rows)
 }
 
 func topByTime(rows []QueryTotal, n int) []QueryTotal {

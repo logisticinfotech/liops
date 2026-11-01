@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,11 +16,16 @@ import (
 	"github.com/logisticinfotech/liops/app/monitor"
 )
 
-// Where Ubuntu's nginx and Caddy keep their configs.
+// Where Ubuntu's nginx, Apache and Caddy keep their configs.
 const (
 	NginxDir  = "/etc/nginx"
+	ApacheDir = "/etc/apache2"
 	Caddyfile = monitor.DefaultCaddyfile
 )
+
+// apacheConfName is the file liops adds to Apache's conf-available (and links from
+// conf-enabled, as a2enconf does).
+const apacheConfName = "liops-monitor.conf"
 
 // nginxConfName is the file liops adds to nginx's conf.d (included inside http {}).
 const nginxConfName = "liops-monitor.conf"
@@ -41,6 +47,7 @@ type WebLogFile struct {
 	Path   string
 	Sites  []string // the server names it touches; empty for a new file
 	Adds   []string // the lines it adds
+	Link   string   // a symlink to Path to create too (Apache's conf-enabled)
 	before []byte
 	after  []byte
 }
@@ -322,6 +329,9 @@ func ApplyWebLogs(ctx context.Context, run command.Runner, plan WebLogPlan, back
 	}
 	restore := func() {
 		for _, f := range plan.Files {
+			if f.Link != "" {
+				os.Remove(f.Link)
+			}
 			if f.before == nil {
 				os.Remove(f.Path)
 			} else {
@@ -339,12 +349,22 @@ func ApplyWebLogs(ctx context.Context, run command.Runner, plan WebLogPlan, back
 			restore()
 			return err
 		}
+		if f.Link != "" {
+			// As a2enconf does: conf-enabled/x.conf -> ../conf-available/x.conf.
+			if err := os.Symlink(filepath.Join("..", filepath.Base(filepath.Dir(f.Path)), filepath.Base(f.Path)), f.Link); err != nil && !os.IsExist(err) {
+				restore()
+				return err
+			}
+		}
 	}
 	check := command.Cmd{Name: "nginx", Args: []string{"-t"}}
 	unit := "nginx"
-	if plan.Server == "Caddy" {
+	switch plan.Server {
+	case "Caddy":
 		check = command.Cmd{Name: "caddy", Args: []string{"validate", "--config", plan.Files[0].Path, "--adapter", "caddyfile"}}
 		unit = "caddy"
+	case "Apache":
+		check, unit = command.Cmd{Name: "apache2ctl", Args: []string{"configtest"}}, "apache2"
 	}
 	if out, err := run.Run(ctx, check); err != nil {
 		restore()
@@ -362,4 +382,109 @@ func fileMode(path string) os.FileMode {
 		return fi.Mode().Perm()
 	}
 	return 0o644
+}
+
+// apacheConf is liops's Apache conf: the format, and a log for the virtual hosts that
+// don't name their own.
+func apacheConf() string {
+	return "# Written by liops: the access log monitoring reads (each request's host, route, status and times).\n" +
+		monitor.ApacheLogFormat + "\nCustomLog ${APACHE_LOG_DIR}/liops-access.log liops\n"
+}
+
+var (
+	vhostOpenRE  = regexp.MustCompile(`(?i)^\s*<VirtualHost\b`)
+	vhostCloseRE = regexp.MustCompile(`(?i)^\s*</VirtualHost>`)
+	customLogRE  = regexp.MustCompile(`(?i)^\s*CustomLog\s+(\S+)`)
+	serverNameRE = regexp.MustCompile(`(?i)^\s*Server(?:Name|Alias)\s+(.+)$`)
+)
+
+// PlanApacheLogs works out the Apache changes: liops's conf (enabled), and in each
+// virtual host with its own CustomLog (which replaces the server's) one more CustomLog.
+func PlanApacheLogs(dir string) (WebLogPlan, error) {
+	plan := WebLogPlan{Server: "Apache"}
+	confPath := filepath.Join(dir, "conf-available", apacheConfName)
+	link := filepath.Join(dir, "conf-enabled", apacheConfName)
+	old, _ := os.ReadFile(confPath)
+	_, linkErr := os.Lstat(link)
+	if string(old) != apacheConf() || linkErr != nil {
+		f := WebLogFile{Path: confPath, Adds: strings.Split(strings.TrimSpace(apacheConf()), "\n"), before: old, after: []byte(apacheConf())}
+		if linkErr != nil {
+			f.Link = link
+		}
+		if old == nil {
+			f.before = nil
+		}
+		plan.Files = append(plan.Files, f)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "sites-enabled", "*.conf"))
+	sort.Strings(files)
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return plan, err
+		}
+		after, sites, adds := planApacheFile(string(data))
+		if len(adds) > 0 {
+			plan.Files = append(plan.Files, WebLogFile{Path: path, Sites: sites, Adds: adds, before: data, after: []byte(after)})
+		}
+	}
+	plan.Done = len(plan.Files) == 0
+	return plan, nil
+}
+
+// planApacheFile adds liops's CustomLog after the last CustomLog of each virtual host that
+// has its own. Apache allows no comment after a directive, so the mark goes above it.
+func planApacheFile(data string) (after string, sites, adds []string) {
+	lines := strings.SplitAfter(data, "\n")
+	type vhost struct {
+		lastLog int
+		names   []string
+		ours    bool
+	}
+	var cur *vhost
+	insertAfter := map[int]string{}
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case vhostOpenRE.MatchString(l):
+			cur = &vhost{lastLog: -1}
+		case cur != nil && vhostCloseRE.MatchString(l):
+			if cur.lastLog >= 0 && !cur.ours {
+				indent := lines[cur.lastLog][:len(lines[cur.lastLog])-len(strings.TrimLeft(lines[cur.lastLog], " \t"))]
+				insertAfter[cur.lastLog] = indent + webLogMark + "\n" + indent + "CustomLog ${APACHE_LOG_DIR}/liops-access.log liops\n"
+				name := strings.Join(cur.names, " ")
+				if name == "" {
+					name = "(no ServerName)"
+				}
+				sites = append(sites, name)
+				adds = append(adds, "CustomLog ${APACHE_LOG_DIR}/liops-access.log liops")
+			}
+			cur = nil
+		case cur != nil && !strings.HasPrefix(t, "#"):
+			if m := customLogRE.FindStringSubmatch(l); m != nil {
+				if strings.Contains(m[1], "liops-access.log") {
+					cur.ours = true
+				} else {
+					cur.lastLog = i
+				}
+			}
+			if m := serverNameRE.FindStringSubmatch(t); m != nil {
+				cur.names = append(cur.names, strings.Fields(m[1])...)
+			}
+		}
+	}
+	if len(insertAfter) == 0 {
+		return data, nil, nil
+	}
+	var b strings.Builder
+	for i, l := range lines {
+		b.WriteString(l)
+		if add, ok := insertAfter[i]; ok {
+			if !strings.HasSuffix(l, "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString(add)
+		}
+	}
+	return b.String(), sites, adds
 }

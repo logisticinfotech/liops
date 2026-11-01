@@ -199,6 +199,14 @@ func (s *Server) webLogPlans() ([]setup.WebLogPlan, string) {
 			plans = append(plans, p)
 		}
 	}
+	if _, err := os.Stat(s.ApacheDir); err == nil {
+		p, err := setup.PlanApacheLogs(s.ApacheDir)
+		if err != nil {
+			problems = append(problems, "Apache: "+err.Error())
+		} else {
+			plans = append(plans, p)
+		}
+	}
 	if _, err := os.Stat(s.Caddyfile); err == nil {
 		p, err := setup.PlanCaddyLogs(s.Caddyfile)
 		if err != nil {

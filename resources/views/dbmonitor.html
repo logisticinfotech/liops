@@ -52,6 +52,13 @@
 <p class="muted">Read live when this page opened; statements include their real values and aren't stored.</p>
 {{end}}
 
+{{with .Deadlock}}<h2>Latest deadlock</h2>
+<p>{{when .At}}, on {{range $i, $t := .Tables}}{{if $i}}, {{end}}<span class="mono">{{$t}}</span>{{end}}. Two transactions each held a row the other needed; MySQL rolled back transaction {{.RolledBack}}, whose request or job got an error (or retried).</p>
+{{range $i, $s := .Statements}}<p class="muted">Transaction ({{add $i 1}}):</p><pre>{{$s}}</pre>{{end}}
+<details><summary class="muted">The whole report</summary><pre>{{.Text}}</pre></details>
+<p class="muted">MySQL keeps only the latest deadlock (since it started); its statements hold real values, so it's read live for this page and never stored. The usual fix: update rows in the same order everywhere (e.g. by id), keep transactions short, and index the columns the updates filter on.</p>
+{{end}}
+
 <h2>Tables</h2>
 {{with .TablesError}}<p class="muted">{{.}}</p>{{end}}
 {{if .Tables}}

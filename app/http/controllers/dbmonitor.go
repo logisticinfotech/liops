@@ -36,6 +36,7 @@ type dbMonData struct {
 	Charts        []chartBox
 	Activity      *monitor.Activity
 	ActivityError string
+	Deadlock      *monitor.Deadlock // MySQL's latest, read live
 
 	Tables      *monitor.DBTables
 	TablesError string
@@ -222,6 +223,11 @@ func (s *Server) dbMonitor(w http.ResponseWriter, r *http.Request) {
 		d.ActivityError = err.Error()
 	}
 
+	if sv.Engine == monitor.EngineMySQL {
+		if dl, err := s.Monitor.Deadlock(ctx, sv.Label); err == nil {
+			d.Deadlock = &dl
+		}
+	}
 	if t, err := s.Monitor.Tables(ctx, sv.Label); err == nil {
 		d.Tables = &t
 		s.tableFindings(&d, t, sv.Engine)

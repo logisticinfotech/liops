@@ -199,6 +199,7 @@ func (m *Monitor) Handler() http.Handler {
 	m.logHandlers(mux, writeJSON)
 	m.nplusoneHandler(mux, writeJSON)
 	m.redisQueueHandler(mux)
+	m.deadlockHandler(mux, writeJSON)
 	mux.HandleFunc("GET /v1/redis", func(w http.ResponseWriter, r *http.Request) {
 		var res RedisResponse
 		m.mu.Lock()

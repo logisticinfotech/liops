@@ -39,8 +39,8 @@ type Server struct {
 	Monitor *monitor.Client
 	// Where the web servers' configs are, and where changed ones are backed up; tests
 	// point them elsewhere.
-	NginxDir, Caddyfile, WebBackupDir, PHPEtc string
-	MySQLTuningConf                           string // setup.MySQLTuningConf; tests point it elsewhere
+	NginxDir, ApacheDir, Caddyfile, WebBackupDir, PHPEtc string
+	MySQLTuningConf                                      string // setup.MySQLTuningConf; tests point it elsewhere
 
 	pages map[string]*template.Template
 	setup *wizard
@@ -54,7 +54,7 @@ func New(svc *service.Service) (*Server, error) {
 		Now:      time.Now,
 		Cmd:      command.Exec{},
 		Monitor:  monitor.NewClient(monitor.DefaultSocket),
-		NginxDir: setup.NginxDir, Caddyfile: setup.Caddyfile, WebBackupDir: "/var/lib/liops/backups", PHPEtc: php.DefaultEtc,
+		NginxDir: setup.NginxDir, ApacheDir: setup.ApacheDir, Caddyfile: setup.Caddyfile, WebBackupDir: "/var/lib/liops/backups", PHPEtc: php.DefaultEtc,
 		pages: map[string]*template.Template{},
 		setup: newWizard(),
 	}
@@ -105,6 +105,7 @@ func (s *Server) funcs() template.FuncMap {
 		"perDay": formatPerDay,
 		"ms":     notify.MS,
 		"count":  notify.Count,
+		"add":    func(a, b int) int { return a + b },
 		"perCallOf": func(n, calls float64) float64 {
 			if calls <= 0 {
 				return 0
