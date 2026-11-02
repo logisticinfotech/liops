@@ -69,16 +69,19 @@ func runRestoreFiles(args []string, out io.Writer) error {
 		return err
 	}
 
-	// mysqlbinlog --stop-datetime is the OS timezone of this machine, not server.timezone.
-	loc := time.Local
+	zone, err := cfg.Location()
+	if err != nil {
+		return err
+	}
+	clock := time.Local
 	moment := "the newest change shipped"
 	if !target.IsZero() {
-		moment = target.In(loc).Format("2 Jan 2006 15:04:05 MST")
+		moment = target.In(zone).Format(xtrabackup.RestoreTimeFmt)
 	}
 	fmt.Fprintf(out, "Restoring MySQL to %s, from:\n", moment)
-	fmt.Fprintf(out, "  full backup %s (finished %s)\n", plan.Full.Label, plan.Full.Stop.In(loc).Format("2 Jan 15:04"))
+	fmt.Fprintf(out, "  full backup %s (finished %s)\n", plan.Full.Label, plan.Full.Stop.In(zone).Format(xtrabackup.RestoreTimeFmt))
 	if plan.Diff != nil {
-		fmt.Fprintf(out, "  diff %s (finished %s)\n", plan.Diff.Label, plan.Diff.Stop.In(loc).Format("2 Jan 15:04"))
+		fmt.Fprintf(out, "  diff %s (finished %s)\n", plan.Diff.Label, plan.Diff.Stop.In(zone).Format(xtrabackup.RestoreTimeFmt))
 	}
 	if n := len(plan.Binlogs); n > 0 {
 		fmt.Fprintf(out, "  %d binlog(s), %s to %s\n", n, plan.Binlogs[0].Name, plan.Binlogs[n-1].Name)
@@ -88,7 +91,8 @@ func runRestoreFiles(args []string, out io.Writer) error {
 	if st, err := state.Open(p.state); err == nil {
 		if v, _ := st.GetMeta(jobs.MetaBinlogShippedAt); v != "" {
 			if shipped, err := time.Parse(time.RFC3339, v); err == nil && (target.IsZero() || target.After(shipped)) {
-				fmt.Fprintf(out, "Binlogs were last shipped %s: changes after that can't be restored from storage.\n", notify.When(shipped, time.Now().In(loc)))
+				now := time.Now().In(zone)
+				fmt.Fprintf(out, "Binlogs were last shipped %s %s: changes after that can't be restored from storage.\n", notify.When(shipped, now), now.Format("MST"))
 			}
 		}
 	}
@@ -99,7 +103,7 @@ func runRestoreFiles(args []string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "\nThe files are ready in %s. liops hasn't changed MySQL. To finish the restore, which\n"+
 		"replaces this server's data with it (see docs/restore-mysql.md):\n\n", *dir)
-	fmt.Fprint(out, xtrabackup.RestoreCommands(plan, *dir, cfg.MySQL.DataDir, loc))
+	fmt.Fprint(out, xtrabackup.RestoreCommands(plan, *dir, cfg.MySQL.DataDir, zone, clock))
 	return nil
 }
 

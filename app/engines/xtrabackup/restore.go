@@ -202,10 +202,20 @@ func (e *Engine) fetchBinlog(ctx context.Context, b Binlog, path string) error {
 	return f.Close()
 }
 
+// RestoreTimeFmt is how a person reads a restore moment: wall time and the zone name.
+const RestoreTimeFmt = "2 Jan 2006 15:04:05 MST"
+
 // RestoreCommands returns the commands that finish a restore from dir, for a person to
-// run: they replace MySQL's data and replay the binlogs. loc is the timezone mysqlbinlog
-// reads --stop-datetime in: the server's own.
-func RestoreCommands(plan RestorePlan, dir, dataDir string, loc *time.Location) string {
+// run: they replace MySQL's data and replay the binlogs. zone is server.timezone (the
+// times in the comments). clock is this machine's timezone: mysqlbinlog reads
+// --stop-datetime in that clock. When the two differ, a comment says so.
+func RestoreCommands(plan RestorePlan, dir, dataDir string, zone, clock *time.Location) string {
+	if zone == nil {
+		zone = time.UTC
+	}
+	if clock == nil {
+		clock = time.Local
+	}
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 	aside := dataDir + ".before-restore"
@@ -213,7 +223,7 @@ func RestoreCommands(plan RestorePlan, dir, dataDir string, loc *time.Location) 
 	w("sudo systemctl stop liops mysql")
 	w("sudo mv %s %s", shellQuote(dataDir), shellQuote(aside))
 	w("")
-	w("# 2. Put the backup in its place, and start MySQL. It is now as of %s.", plan.Start().Stop.In(loc).Format("2 Jan 2006 15:04:05 MST"))
+	w("# 2. Put the backup in its place, and start MySQL. It is now as of %s.", plan.Start().Stop.In(zone).Format(RestoreTimeFmt))
 	w("sudo xtrabackup --copy-back --target-dir=%s --datadir=%s", shellQuote(filepath.Join(dir, "full")), shellQuote(dataDir))
 	w("sudo chown -R mysql:mysql %s", shellQuote(dataDir))
 	w("sudo systemctl start mysql")
@@ -222,14 +232,17 @@ func RestoreCommands(plan RestorePlan, dir, dataDir string, loc *time.Location) 
 		until := "the newest change shipped"
 		stop := ""
 		if !plan.Target.IsZero() {
-			until = plan.Target.In(loc).Format("2 Jan 2006 15:04:05 MST")
-			stop = " --stop-datetime=" + shellQuote(plan.Target.In(loc).Format("2006-01-02 15:04:05"))
+			until = plan.Target.In(zone).Format(RestoreTimeFmt)
+			stop = " --stop-datetime=" + shellQuote(plan.Target.In(clock).Format("2006-01-02 15:04:05"))
 		}
 		files := make([]string, len(plan.Binlogs))
 		for i, n := range plan.Binlogs {
 			files[i] = shellQuote(filepath.Join(dir, "binlogs", n.Name))
 		}
 		w("# 3. Replay the changes made after the backup, up to %s.", until)
+		if !plan.Target.IsZero() && restoreClockDiffers(plan.Target, zone, clock) {
+			w("#    --stop-datetime is in the server's clock (%s).", plan.Target.In(clock).Format("MST"))
+		}
 		w("#    To skip one bad statement instead (e.g. a DROP TABLE), add --exclude-gtids='<its GTID>'.")
 		w("sudo mysqlbinlog --start-position=%d%s %s | sudo mysql", plan.Start().BinlogPos, stop, strings.Join(files, " "))
 	}
@@ -240,6 +253,10 @@ func RestoreCommands(plan RestorePlan, dir, dataDir string, loc *time.Location) 
 	w("sudo liops setup && sudo liops run full && sudo systemctl start liops")
 	w("#    When you're sure: sudo rm -rf %s %s", shellQuote(aside), shellQuote(dir))
 	return b.String()
+}
+
+func restoreClockDiffers(at time.Time, zone, clock *time.Location) bool {
+	return at.In(zone).Format("2006-01-02 15:04:05") != at.In(clock).Format("2006-01-02 15:04:05")
 }
 
 // shellQuote quotes s for a shell, when it needs quoting.

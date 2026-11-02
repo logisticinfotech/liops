@@ -181,13 +181,40 @@ func TestRestoreCommands(t *testing.T) {
 		Diff:    &diff,
 		Binlogs: []Binlog{{Name: "binlog.000003"}, {Name: "binlog.000004"}},
 	}
-	out := RestoreCommands(plan, "/restore/new", "/var/lib/mysql", ist)
+	out := RestoreCommands(plan, "/restore/new", "/var/lib/mysql", ist, ist)
 	for _, want := range []string{
 		"sudo mv /var/lib/mysql /var/lib/mysql.before-restore",
 		"sudo xtrabackup --copy-back --target-dir=/restore/new/full --datadir=/var/lib/mysql",
 		"It is now as of 22 Oct 2026 01:30:00 IST",
 		"sudo mysqlbinlog --start-position=198 --stop-datetime='2026-10-22 14:34:30' /restore/new/binlogs/binlog.000003 /restore/new/binlogs/binlog.000004 | sudo mysql",
 		"new backup name",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("commands are missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "server's clock") {
+		t.Errorf("no clock comment when server.timezone is the server's clock:\n%s", out)
+	}
+}
+
+func TestRestoreCommandsKolkataDisplayUTCClock(t *testing.T) {
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := Manifest{Type: Diff, Stop: time.Date(2026, 10, 21, 20, 0, 0, 0, time.UTC), BinlogFile: "binlog.000003", BinlogPos: 198}
+	plan := RestorePlan{
+		Target:  time.Date(2026, 10, 22, 9, 4, 30, 0, time.UTC),
+		Diff:    &diff,
+		Binlogs: []Binlog{{Name: "binlog.000003"}, {Name: "binlog.000004"}},
+	}
+	out := RestoreCommands(plan, "/restore/new", "/var/lib/mysql", kolkata, time.UTC)
+	for _, want := range []string{
+		"It is now as of 22 Oct 2026 01:30:00 IST",
+		"up to 22 Oct 2026 14:34:30 IST",
+		"--stop-datetime is in the server's clock (UTC)",
+		"sudo mysqlbinlog --start-position=198 --stop-datetime='2026-10-22 09:04:30'",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("commands are missing %q:\n%s", want, out)
