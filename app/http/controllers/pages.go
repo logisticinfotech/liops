@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -368,7 +369,16 @@ func (s *Server) database(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "database", page{Title: d.Row.Name, Nav: "databases", Data: d})
 }
 
-// download sends the browser to a short-lived link for one dump. Every download is audited.
+type downloadData struct {
+	URL     string
+	Name    string
+	Size    int64
+	Minutes int // how long the link works (downloadTTL)
+}
+
+// download shows a page with a short-lived link for one dump. The browser then
+// follows that link (plain navigation), so the CSP's form-action 'self' doesn't
+// block storage on another origin. Every download is audited.
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	key := r.PostFormValue("key")
 	if !dumpKeyOK(key) {
@@ -377,7 +387,17 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	}
 	store := s.Svc.Runner().Store
 	objs, err := store.List(r.Context(), key)
-	if err != nil || !slices.ContainsFunc(objs, func(o storage.Object) bool { return o.Key == key }) {
+	var obj storage.Object
+	found := false
+	if err == nil {
+		for _, o := range objs {
+			if o.Key == key {
+				obj, found = o, true
+				break
+			}
+		}
+	}
+	if !found {
 		s.audit(r, "download", key+" (not found)", false)
 		s.flash(w, r, "/databases", "That dump doesn't exist any more.")
 		return
@@ -389,7 +409,8 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "download", key, true)
-	http.Redirect(w, r, url, http.StatusSeeOther)
+	d := downloadData{URL: url, Name: path.Base(key), Size: obj.Size, Minutes: int(downloadTTL / time.Minute)}
+	s.render(w, r, "download", page{Title: "Download", Nav: "databases", RefreshURL: url, Data: d})
 }
 
 // dumpKeyOK reports whether key is a dump or globals object this server owns. ".." and

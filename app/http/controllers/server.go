@@ -197,19 +197,20 @@ func (s *Server) requireSetup(h http.HandlerFunc) http.HandlerFunc {
 
 // page is what every template gets.
 type page struct {
-	Title   string
-	Nav     string // active nav item
-	CSRF    string
-	Flash   string
-	Error   string
-	Server  string
-	Version string
-	Wizard  bool   // hide the nav
-	Refresh int    // seconds; reload the page while something runs
-	MySQL   bool   // a MySQL server: MySQL restore commands, binlogs instead of WAL
-	Health  string // overall backup health for the top bar (HealthOK, …); empty in the wizard
-	Monitor bool   // monitoring is turned on: the sidebar shows its pages
-	Data    any
+	Title      string
+	Nav        string // active nav item
+	CSRF       string
+	Flash      string
+	Error      string
+	Server     string
+	Version    string
+	Wizard     bool   // hide the nav
+	Refresh    int    // seconds; reload the page while something runs
+	RefreshURL string // if set, a 0-second meta refresh to this URL (dump download)
+	MySQL      bool   // a MySQL server: MySQL restore commands, binlogs instead of WAL
+	Health     string // overall backup health for the top bar (HealthOK, …); empty in the wizard
+	Monitor    bool   // monitoring is turned on: the sidebar shows its pages
+	Data       any
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p page) {

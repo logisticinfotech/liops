@@ -1,0 +1,8 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{define "content"}}{{with .Data}}
+<h1>Your download is starting</h1>
+<p>{{.Name}} · {{bytes .Size}}</p>
+<p><a href="{{.URL}}">Download {{.Name}}</a></p>
+<p class="muted">The link works for {{.Minutes}} minutes.</p>
+<p><a href="/databases">Back to Databases</a></p>
+{{end}}{{end}}

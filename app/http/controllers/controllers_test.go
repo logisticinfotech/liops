@@ -199,6 +199,12 @@ var csrfRE = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
 // post submits a form from page `from` (to pick up its CSRF token).
 func (h *harness) post(from, path string, form url.Values) (int, string, string) {
 	h.t.Helper()
+	code, loc, body, _ := h.postResp(from, path, form)
+	return code, loc, body
+}
+
+func (h *harness) postResp(from, path string, form url.Values) (int, string, string, http.Header) {
+	h.t.Helper()
 	_, _, body := h.get(from)
 	m := csrfRE.FindStringSubmatch(body)
 	if m == nil {
@@ -214,7 +220,7 @@ func (h *harness) post(from, path string, form url.Values) (int, string, string)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, resp.Header.Get("Location"), string(b)
+	return resp.StatusCode, resp.Header.Get("Location"), string(b), resp.Header
 }
 
 func TestDashboardAndDownload(t *testing.T) {
@@ -233,9 +239,28 @@ func TestDashboardAndDownload(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no download button:\n%s", body)
 	}
-	code, loc, _ := h.post("/databases", "/download", url.Values{"key": {m[1]}})
-	if code != 303 || !strings.HasPrefix(loc, "https://storage.example.com/dumps/app/") {
-		t.Fatalf("download: %d %q", code, loc)
+	code, loc, body, hdr := h.postResp("/databases", "/download", url.Values{"key": {m[1]}})
+	if code != 200 {
+		t.Fatalf("download: want 200 (not a redirect), got %d %q", code, loc)
+	}
+	wantURL := "https://storage.example.com/" + m[1] + "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=600"
+	href := `href="` + strings.ReplaceAll(wantURL, "&", "&amp;") + `"`
+	if !strings.Contains(body, href) {
+		t.Errorf("download page should contain an unmangled href to the presigned URL:\n%s", body)
+	}
+	if strings.Contains(body, "#ZgotmplZ") {
+		t.Error("html/template mangled the presigned URL")
+	}
+	// The meta refresh is what starts the download by itself.
+	meta := `<meta http-equiv="refresh" content="0;url=` + strings.ReplaceAll(wantURL, "&", "&amp;") + `">`
+	if !strings.Contains(body, meta) {
+		t.Errorf("download page should start the download with a meta refresh to the presigned URL (& as &amp;):\n%s", body)
+	}
+	if !strings.Contains(body, "Your download is starting") || !strings.Contains(body, "The link works for 10 minutes") {
+		t.Errorf("download page copy:\n%s", body)
+	}
+	if csp := hdr.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self'") {
+		t.Errorf("CSP = %q", csp)
 	}
 	if _, _, body := h.get("/databases/app"); !strings.Contains(body, "sudo liops dumps url &#39;"+m[1]+"&#39;") ||
 		!strings.Contains(body, "createdb &#39;app_restored&#39;") || strings.Contains(body, `action="/restore`) {
@@ -246,6 +271,13 @@ func TestDashboardAndDownload(t *testing.T) {
 	}
 	if code, _, _ := h.post("/databases", "/download", url.Values{"key": {"dumps/../pgbackrest/x"}}); code != 400 {
 		t.Errorf("a key with .. must be refused, got %d", code)
+	}
+	code, loc, _ = h.post("/databases", "/download", url.Values{"key": {"dumps/app/gone.dump"}})
+	if code != 303 || loc != "/databases" {
+		t.Errorf("a missing dump should redirect back, got %d %q", code, loc)
+	}
+	if _, _, body := h.get("/databases"); !strings.Contains(body, "doesn&#39;t exist any more") {
+		t.Errorf("a missing dump should flash that it doesn't exist any more:\n%s", body)
 	}
 	entries, _ := h.st.AuditLog(0, 20)
 	found := false

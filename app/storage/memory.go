@@ -109,7 +109,7 @@ func (m *Memory) Delete(ctx context.Context, key string) error {
 }
 
 func (m *Memory) DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	return "https://storage.example.com/" + key, nil
+	return "https://storage.example.com/" + key + "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=600", nil
 }
 
 func (m *Memory) Probe(ctx context.Context) error { return ProbeStore(ctx, m) }
