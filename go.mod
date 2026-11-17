@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/wneessen/go-mail v0.8.1
+	github.com/wneessen/go-mail v0.8.2
 	go.etcd.io/bbolt v1.5.0
 	gopkg.in/yaml.v3 v3.0.1
 )
